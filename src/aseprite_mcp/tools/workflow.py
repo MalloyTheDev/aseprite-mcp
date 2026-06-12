@@ -33,6 +33,7 @@ from . import (
 )
 from .common import resolve_path
 from .manifest import export_entry, file_entry, sprite_summary, workflow_manifest
+from .models import Rect
 
 
 def _aseprite_name(name: str) -> str:
@@ -361,20 +362,20 @@ def _grid_sheet(filename: str, cell: int, names: list[str], columns: int | None,
     palette.set_palette(filename, ramp)
     inset = max(1, cell // 6)
     for i, nm in enumerate(names):
-        r, c = divmod(i, cols)
-        x0, y0 = c * cell, r * cell
+        row, col = divmod(i, cols)
+        cell_rect = Rect.of(col * cell, row * cell, cell, cell)
         color = ramp[i % len(ramp)]
         if shape == "circle":
             drawing.draw_ellipse(
-                filename, x0 + cell // 2, y0 + cell // 2,
+                filename, cell_rect.x + cell // 2, cell_rect.y + cell // 2,
                 cell // 2 - inset, cell // 2 - inset, color, filled=True
             )
         else:
             drawing.draw_rectangle(
-                filename, x0 + inset, y0 + inset, cell - 2 * inset, cell - 2 * inset,
-                color, filled=True
+                filename, cell_rect.x + inset, cell_rect.y + inset,
+                cell - 2 * inset, cell - 2 * inset, color, filled=True
             )
-        slices.add_slice(filename, nm, x0, y0, cell, cell)
+        slices.add_slice(filename, nm, cell_rect.x, cell_rect.y, cell_rect.width, cell_rect.height)
     return inspect.get_sprite_info(filename)
 
 
