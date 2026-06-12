@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-12
+
 ### Added
 - **High-level workflow tools** that scaffold whole assets in one call and return a
   structured manifest (files, paths, frames, tags, dimensions, suggested next actions):
@@ -71,5 +73,6 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.3.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.1.0
