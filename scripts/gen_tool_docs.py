@@ -36,6 +36,7 @@ GROUPS = [
     ("export", "Export & import"),
     ("reference", "Reference / rotoscope"),
     ("workflow", "Workflows (high-level scaffolding)"),
+    ("batch", "Batch operations"),
     ("gui", "GUI companion mode"),
     ("health", "Health & self-test"),
 ]

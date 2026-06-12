@@ -21,7 +21,8 @@ from aseprite_mcp import config as ase_config
 
 # Test files that are pure-Python (no Aseprite) and must always run, including on CI.
 PURE_PYTHON_TESTS = (
-    "test_unit", "test_manifest", "test_validation", "test_errors", "test_models", "test_imports",
+    "test_unit", "test_manifest", "test_validation", "test_errors", "test_models",
+    "test_imports", "test_oplib",
 )
 
 

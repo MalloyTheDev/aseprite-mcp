@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **107 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **108 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -24,6 +24,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Export & import](#export--import) (10)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (8)
+- [Batch operations](#batch-operations) (1)
 - [GUI companion mode](#gui-companion-mode) (2)
 - [Health & self-test](#health--self-test) (1)
 
@@ -1668,6 +1669,33 @@ Check whether a sprite is game-ready against the criteria you specify.
 | `max_palette_size` | integer | null | no | None |
 | `expected_exports` | array | null | no | None |
 | `spritesheet_data` | string | null | no | None |
+
+
+## Batch operations
+
+### `apply_operations`
+
+Apply a list of edit operations to a sprite in one atomic, single-process batch.
+
+    Each operation is `{"op": "<name>", "args": {...}}`. Supported ops (v1):
+    add_layer, rename_layer, set_layer_visible, set_layer_opacity, remove_layer,
+    add_frame, duplicate_frame, set_frame_duration, add_tag, remove_tag, set_pixel,
+    draw_line, draw_rectangle, fill_rectangle, draw_ellipse, fill_ellipse, fill_layer,
+    clear_layer, add_slice, remove_slice, replace_color. Ops run **in order against the
+    same open sprite**, so later ops see earlier ones (e.g. add a layer then draw on it).
+
+    Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
+    error names the failing op index. `dry_run=True` validates the op list and returns
+    the plan **without launching Aseprite** (shape checks only — runtime issues like a
+    missing layer surface on a real run).
+
+    Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `operations` | array<object> | yes |  |
+| `dry_run` | boolean | no | False |
 
 
 ## GUI companion mode
