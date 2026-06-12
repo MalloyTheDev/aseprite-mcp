@@ -166,6 +166,29 @@ scaffolding, no AI generation.
 3. `make_4_frame_idle_animation("hero.aseprite")` — 4-frame loop tagged `idle`.
 4. `export_game_asset_bundle("hero.aseprite", scale=8)` — PNG/GIF/sheet+JSON/manifest in `hero_bundle/`.
 
+### Workflow manifest contract
+
+Every workflow tool returns a standardized **`workflow_manifest.v1`** object (defined in
+[`tools/manifest.py`](src/aseprite_mcp/tools/manifest.py)) so the asset layer stays
+consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created_files[]`,
+`suggested_next_actions[]`, `warnings[]`. Included when relevant: `sprite{}`, `exports[]`,
+`palette{}`, `animation{}`, `tilemap{}`. File/export entries are
+`{role, path, format, metadata_path?}`.
+
+```json
+{
+  "ok": true,
+  "schema_version": "workflow_manifest.v1",
+  "kind": "character_sprite",
+  "sprite": { "path": "...", "width": 32, "height": 32, "color_mode": "rgb",
+              "frames": 1, "layers": ["body", "details"], "tags": [] },
+  "created_files": [ { "role": "source_sprite", "path": "...", "format": "aseprite" } ],
+  "palette": { "colors": ["#1b1f2a", "..."], "count": 5 },
+  "suggested_next_actions": ["Draw the character on the 'body' layer", "..."],
+  "warnings": []
+}
+```
+
 ---
 
 ## Tool catalogue

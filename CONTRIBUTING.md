@@ -95,6 +95,10 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
 - Resolve user paths with `tools/common.resolve_path` (relative → workspace).
 - Pass paths to Lua via `tools/common.lua_path` (forward slashes).
 - Keep operations deterministic and headless — no GUI/persistent-state assumptions.
+- **Workflow tools** (high-level scaffolding in `tools/workflow.py`) must return a
+  `workflow_manifest.v1` object built with the helpers in `tools/manifest.py`
+  (`workflow_manifest`, `file_entry`, `export_entry`, `sprite_summary`) — don't hand-roll
+  a bespoke result dict. Add the `kind`/roles to `manifest.py` if you need new ones.
 
 ## Pull requests
 
