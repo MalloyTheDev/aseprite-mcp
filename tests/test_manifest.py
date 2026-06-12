@@ -99,5 +99,13 @@ def test_sprite_summary_includes_slices():
 
 
 def test_new_workflow_kinds_are_valid():
-    for kind in ("icon_set", "walk_template", "rpg_item_sheet", "validation"):
+    for kind in ("icon_set", "walk_template", "rpg_item_sheet", "validation", "batch"):
         assert M.workflow_manifest(kind)["kind"] == kind
+
+
+def test_batch_operations_and_dry_run_fields():
+    ops = [{"index": 0, "op": "add_layer", "status": "planned", "summary": "add_layer(name=x)"}]
+    m = M.workflow_manifest("batch", operations=ops, dry_run=True)
+    assert m["operations"] == ops and m["dry_run"] is True
+    m2 = M.workflow_manifest("batch", operations=[])
+    assert m2["operations"] == [] and "dry_run" not in m2  # dry_run omitted when False

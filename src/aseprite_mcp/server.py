@@ -6,6 +6,7 @@ from .app import mcp
 
 # Importing each module registers its @mcp.tool() functions on `mcp`.
 from .tools import (  # noqa: F401,E402
+    batch,
     brushes,
     cels,
     drawing,

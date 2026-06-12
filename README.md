@@ -26,8 +26,9 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **107 tools** — including high-level **workflow** tools that scaffold and validate whole
-  assets in one call — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
+- **108 tools** — including high-level **workflow** tools that scaffold and validate whole
+  assets in one call, and a **batch op-runner** that applies many edits atomically in a
+  single Aseprite process — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
   tags, slices/9-patch, effects (gradients/outline/drop-shadow/colour adjustments), text
   rendering, tilemaps, image stamping, reference/rotoscope layers, transforms, rich
@@ -177,7 +178,7 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 107 tools will be available. Ask the
+Restart the client; the `aseprite` server and its 108 tools will be available. Ask the
 agent to run `health_check` to confirm Aseprite is wired up correctly.
 
 ---
@@ -230,6 +231,31 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
   "warnings": []
 }
 ```
+
+---
+
+## Batch operations
+
+`apply_operations` applies a list of edits to one sprite in a **single Aseprite process**,
+**atomically** — open once → run every op inside one transaction → save only if all
+succeed. This collapses multi-launch agent flows (add layer → draw → add frame → tag)
+into one fast, all-or-nothing call. Pass `dry_run=true` to validate the op list **without
+launching Aseprite**.
+
+```jsonc
+apply_operations("hero.aseprite", [
+  {"op": "add_layer",      "args": {"name": "fg"}},
+  {"op": "fill_layer",     "args": {"layer": "fg", "color": "#1d2b53"}},
+  {"op": "draw_rectangle", "args": {"layer": "fg", "x": 2, "y": 2, "width": 12, "height": 8, "color": "#ff004d"}},
+  {"op": "add_frame",      "args": {"copy_from": 1, "duration_ms": 120}},
+  {"op": "add_tag",        "args": {"name": "idle", "from": 1, "to": 2}}
+])
+```
+
+If any op fails, the whole batch rolls back and the error names the failing op index.
+v1 ops: layer add/rename/visible/opacity/remove · frame add/duplicate/duration ·
+tag add/remove · draw set_pixel/line/rectangle/fill_rectangle/ellipse/fill_ellipse/fill_layer/clear_layer ·
+slice add/remove · replace_color.
 
 ---
 
@@ -375,6 +401,11 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | --- | --- |
 | `add_reference_layer` | Add a dimmed, locked layer holding a reference image to trace over. |
 | `import_reference_sequence` | Import a sequence of images as per-frame references (rotoscoping). |
+
+### Batch operations
+| Tool | Description |
+| --- | --- |
+| `apply_operations` | Apply many edits to one sprite atomically in a single process (`dry_run` to validate only). See [Batch operations](#batch-operations). |
 
 ### GUI companion mode
 | Tool | Description |

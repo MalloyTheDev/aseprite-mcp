@@ -38,6 +38,7 @@ VALID_KINDS = (
     "icon_set",
     "walk_template",
     "rpg_item_sheet",
+    "batch",
 )
 FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest")
 EXPORT_ROLES = ("spritesheet", "gif", "png", "tag_gif", "frames")
@@ -61,6 +62,8 @@ class WorkflowManifest(TypedDict, total=False):
     animation: dict
     tilemap: dict
     validation: dict
+    operations: list
+    dry_run: bool
     suggested_next_actions: list
     warnings: list
 
@@ -118,6 +121,8 @@ def workflow_manifest(
     animation: dict | None = None,
     tilemap: dict | None = None,
     validation: dict | None = None,
+    operations: list | None = None,
+    dry_run: bool = False,
     suggested_next_actions: Any = None,
     warnings: list | None = None,
 ) -> WorkflowManifest:
@@ -149,4 +154,8 @@ def workflow_manifest(
         manifest["tilemap"] = tilemap
     if validation:
         manifest["validation"] = validation
+    if operations is not None:
+        manifest["operations"] = operations
+    if dry_run:
+        manifest["dry_run"] = True
     return manifest
