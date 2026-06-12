@@ -12,6 +12,7 @@ from .tools import (  # noqa: F401,E402
     effects,
     export,
     frames,
+    gui,
     image,
     inspect,
     layers,

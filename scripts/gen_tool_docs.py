@@ -34,6 +34,7 @@ GROUPS = [
     ("transform", "Transforms"),
     ("export", "Export & import"),
     ("reference", "Reference / rotoscope"),
+    ("gui", "GUI companion mode"),
 ]
 
 

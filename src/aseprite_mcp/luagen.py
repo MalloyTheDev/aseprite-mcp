@@ -527,6 +527,10 @@ end
 
 -- Build a full-canvas, editable copy of a layer/frame's cel image.
 local function get_draw_image(spr, layer, framenum)
+  if layer.isTilemap then
+    error("Layer '" .. layer.name .. "' is a tilemap layer; use the tilemap tools " ..
+          "(set_tile, paint_tile_pixels, fill_tilemap, …) instead of pixel drawing.")
+  end
   local img = Image(spr.spec)
   img:clear()
   local cel = layer:cel(framenum)

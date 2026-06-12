@@ -215,14 +215,17 @@ def sort_palette(filename: str, by: str = "luminance", reverse: bool = False) ->
     spr:setPalette(newpal)
     if spr.colorMode == ColorMode.INDEXED then
       for _, cel in ipairs(spr.cels) do
-        local im = Image(cel.image)
-        for y = 0, im.height - 1 do
-          for x = 0, im.width - 1 do
-            local v = im:getPixel(x, y)
-            if remap[v] ~= nil then im:drawPixel(x, y, remap[v]) end
+        -- Skip tilemap cels: their pixels are tile indices, not palette indices.
+        if not cel.layer.isTilemap then
+          local im = Image(cel.image)
+          for y = 0, im.height - 1 do
+            for x = 0, im.width - 1 do
+              local v = im:getPixel(x, y)
+              if remap[v] ~= nil then im:drawPixel(x, y, remap[v]) end
+            end
           end
+          cel.image = im
         end
-        cel.image = im
       end
       if remap[spr.transparentColor] ~= nil then spr.transparentColor = remap[spr.transparentColor] end
     end

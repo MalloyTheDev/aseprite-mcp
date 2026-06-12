@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **96 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **98 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -23,6 +23,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Transforms](#transforms) (2)
 - [Export & import](#export-import) (10)
 - [Reference / rotoscope](#reference-rotoscope) (2)
+- [GUI companion mode](#gui-companion-mode) (2)
 
 ## Sprite lifecycle
 
@@ -1513,4 +1514,30 @@ Import a sequence of images as per-frame references for rotoscoping.
 | `opacity` | integer | no | 128 |
 | `scale_to_fit` | boolean | no | False |
 | `start_frame` | integer | no | 1 |
+
+
+## GUI companion mode
+
+### `gui_available`
+
+Check whether the Aseprite GUI can be launched (executable resolvable).
+
+_No parameters._
+
+
+### `open_in_editor`
+
+Open a sprite in the Aseprite GUI window (non-blocking) for live viewing.
+
+    The window stays open and runs independently of this server. Keep editing the
+    file with the other tools — Aseprite detects the on-disk change and prompts to
+    reload (or reloads automatically, depending on your Aseprite preferences), so
+    you can watch edits land without re-opening.
+
+    Returns the launched process id. To stop watching, just close the Aseprite
+    window yourself.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
 

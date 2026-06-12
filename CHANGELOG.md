@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format is based on
 
 ## [0.1.0] - 2026-06-12
 
-Initial release. **96 tools** driving Aseprite 1.3+ headlessly via batch Lua scripting
+Initial release. **98 tools** driving Aseprite 1.3+ headlessly via batch Lua scripting
 and the Aseprite CLI.
 
 ### Added
@@ -39,5 +39,7 @@ and the Aseprite CLI.
   filters & splits), per-frame, per-layer, per-tag files, and onion-skin composites.
 - **Reference / rotoscope** — dimmed locked reference layers and per-frame reference
   sequences.
+- **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
+  (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
 [0.1.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.1.0

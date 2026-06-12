@@ -12,7 +12,7 @@ from __future__ import annotations
 from ..app import mcp
 from ..runner import run_lua
 from .common import lua_path, parse_color, resolve_path
-from .drawing import _CLOSE, _OPEN, _draw
+from .drawing import _draw
 
 _GRAD_TYPES = {"linear", "radial"}
 

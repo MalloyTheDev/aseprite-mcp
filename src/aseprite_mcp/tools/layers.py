@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..app import mcp
 from ..runner import run_lua
-from .common import lua_path, parse_color, resolve_path
+from .common import lua_path, resolve_path
 
 
 @mcp.tool()

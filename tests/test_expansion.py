@@ -6,7 +6,6 @@ from aseprite_mcp.tools import (
     export,
     image,
     inspect,
-    layers,
     sprite,
     text,
     tilemap,

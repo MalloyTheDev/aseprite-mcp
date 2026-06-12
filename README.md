@@ -17,11 +17,11 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **96 tools** across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
+- **98 tools** across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
   tags, slices/9-patch, effects (gradients/outline/drop-shadow/colour adjustments), text
-  rendering, tilemaps, image stamping, reference/rotoscope layers, transforms, and rich
-  export (per-layer/per-tag, sprite sheets, onion-skin).
+  rendering, tilemaps, image stamping, reference/rotoscope layers, transforms, rich
+  export (per-layer/per-tag, sprite sheets, onion-skin), and a GUI companion view.
 - **Structured results** — every tool returns JSON describing the updated sprite.
 - **`render_preview`** returns a PNG so the agent can *see* its work and self-correct.
 - **Deterministic, stateless, robust** — each call is an isolated, headless Aseprite run.
@@ -105,7 +105,7 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 96 tools will be available.
+Restart the client; the `aseprite` server and its 98 tools will be available.
 
 ---
 
@@ -250,6 +250,27 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | --- | --- |
 | `add_reference_layer` | Add a dimmed, locked layer holding a reference image to trace over. |
 | `import_reference_sequence` | Import a sequence of images as per-frame references (rotoscoping). |
+
+### GUI companion mode
+| Tool | Description |
+| --- | --- |
+| `open_in_editor` | Open a sprite in the live Aseprite GUI window (non-blocking) to watch edits. |
+| `gui_available` | Report whether the Aseprite GUI can be launched. |
+
+---
+
+## Live viewing (GUI companion mode)
+
+The server edits files **headlessly**, but you can watch the work in the real Aseprite
+window. Call `open_in_editor("sprite.aseprite")` and Aseprite opens it in a normal,
+non-blocking window. As the agent keeps saving edits with the other tools, Aseprite
+detects the on-disk change and offers to reload (or reloads automatically, depending on
+your Aseprite preferences) — so edits appear without re-opening.
+
+**What this is and isn't:** Aseprite's Lua scripting sandbox has no networking or timers,
+so the server can't *stream* a live canvas into the GUI frame-by-frame. The companion view
+above (open once → headless edits → Aseprite reloads) is the robust, supported workflow.
+The agent's own "eyes" remain `render_preview`, which returns a PNG it can inspect directly.
 
 ---
 
