@@ -7,22 +7,22 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 ## Contents
 
 - [Sprite lifecycle](#sprite-lifecycle) (10)
-- [Inspection & preview](#inspection-preview) (4)
+- [Inspection & preview](#inspection--preview) (4)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (5)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (5)
 - [Drawing](#drawing) (9)
-- [Brushes & symmetry](#brushes-symmetry) (4)
-- [Effects & colour adjustments](#effects-colour-adjustments) (9)
+- [Brushes & symmetry](#brushes--symmetry) (4)
+- [Effects & colour adjustments](#effects--colour-adjustments) (9)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (2)
 - [Palette](#palette) (10)
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
-- [Export & import](#export-import) (10)
-- [Reference / rotoscope](#reference-rotoscope) (2)
+- [Export & import](#export--import) (10)
+- [Reference / rotoscope](#reference--rotoscope) (2)
 - [GUI companion mode](#gui-companion-mode) (2)
 
 ## Sprite lifecycle

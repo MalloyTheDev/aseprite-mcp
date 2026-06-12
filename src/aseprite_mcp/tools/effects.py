@@ -243,7 +243,14 @@ def replace_color(
         "tolerance": max(0, int(tolerance)),
     }
     snippet = """
-    local fr, fg, fb, fa = ARG["from"].r, ARG["from"].g, ARG["from"].b, ARG["from"].a or 255
+    local fc = ARG["from"]
+    local fr, fg, fb, fa
+    if fc.index ~= nil then
+      local col = spr.palettes[1]:getColor(fc.index)
+      fr, fg, fb, fa = col.red, col.green, col.blue, col.alpha
+    else
+      fr, fg, fb, fa = fc.r, fc.g, fc.b, fc.a or 255
+    end
     local tol = ARG.tolerance
     local tp = to_pixel(spr, ARG.to)
     for yy = 0, img.height - 1 do

@@ -18,7 +18,8 @@ Workflow notes:
     absolute paths are honoured as-is. Most tools return the resolved path.
   * Sprites are real files on disk. Edits open the file, modify it, and save.
   * Frames are 1-based. Colours accept "#RRGGBB", "#RRGGBBAA", "r,g,b", "r,g,b,a",
-    or a few names (black, white, red, green, blue, transparent, ...).
+    "index:N" (for indexed sprites), or a few names (black, white, red, green,
+    blue, yellow, cyan, magenta, transparent, ...).
   * Call `render_preview` to get a PNG image of your work so you can see the result
     before continuing. Call `get_sprite_info` for the structured state of a sprite.
   * Recommended first step for a new asset: `create_sprite`, then draw, then preview.

@@ -87,7 +87,7 @@ def stamp_pattern(
         "source": lua_path(resolve_path(source)),
         "layer": layer, "frame": int(frame),
         "x": int(x), "y": int(y), "width": width, "height": height,
-        "sx": int(spacing_x), "sy": int(spacing_y),
+        "sx": max(0, int(spacing_x)), "sy": max(0, int(spacing_y)),
         "opacity": max(0, min(255, int(opacity))),
         "blend_mode": blend_mode,
     }

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import re
 from pathlib import Path
 
 from aseprite_mcp.app import mcp
@@ -47,6 +48,12 @@ def _build_name_to_module() -> dict[str, str]:
             if inspect.isfunction(obj) and getattr(obj, "__module__", "") == mod.__name__:
                 mapping[attr] = mod_name
     return mapping
+
+
+def _anchor(heading: str) -> str:
+    """Slugify a heading exactly like GitHub does (lowercase, drop punctuation
+    except spaces/hyphens, spaces -> hyphens; consecutive hyphens are NOT collapsed)."""
+    return re.sub(r"[^\w\s-]", "", heading.lower()).replace(" ", "-")
 
 
 def _type_str(info: dict) -> str:
@@ -102,8 +109,7 @@ async def main() -> None:
     ]
     for mod_name, heading in GROUPS:
         if by_mod.get(mod_name):
-            anchor = heading.lower().replace(" ", "-").replace("&", "").replace("/", "").replace("(", "").replace(")", "").replace("--", "-")
-            out.append(f"- [{heading}](#{anchor}) ({len(by_mod[mod_name])})")
+            out.append(f"- [{heading}](#{_anchor(heading)}) ({len(by_mod[mod_name])})")
     out.append("")
 
     for mod_name, heading in GROUPS:

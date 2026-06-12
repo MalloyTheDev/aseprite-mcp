@@ -27,8 +27,8 @@ def create_sprite(
 
     Returns the new sprite's structured info.
     """
-    if width < 1 or height < 1:
-        raise ValueError("width and height must be >= 1")
+    if not (1 <= width <= 65535) or not (1 <= height <= 65535):
+        raise ValueError("width and height must be between 1 and 65535")
     path = resolve_path(filename)
     args = {
         "path": lua_path(path),
@@ -84,13 +84,16 @@ def set_color_mode(filename: str, color_mode: str, dithering: str = "none") -> d
     When converting to "indexed", dithering can be "none", "ordered", or
     "old" to control how RGB colours are mapped to the palette.
     """
+    mode = str(color_mode).strip().lower()
+    if mode in ("grayscale", "grey"):
+        mode = "gray"
+    if mode not in ("rgb", "indexed", "gray"):
+        raise ValueError('color_mode must be "rgb", "indexed", or "gray".')
     src = resolve_path(filename)
-    args = {"src": lua_path(src), "mode": color_mode, "dither": dithering}
+    args = {"src": lua_path(src), "mode": mode, "dither": dithering}
     body = """
     local spr = open_sprite(ARG.src)
-    local fmt = ARG.mode
-    if fmt == "grayscale" or fmt == "grey" then fmt = "gray" end
-    app.command.ChangePixelFormat{ ui = false, format = fmt, dithering = ARG.dither }
+    app.command.ChangePixelFormat{ ui = false, format = ARG.mode, dithering = ARG.dither }
     save_sprite(spr)
     RESULT = sprite_info(spr)
     """

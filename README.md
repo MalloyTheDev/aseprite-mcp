@@ -28,6 +28,29 @@ Aseprite GUI.
 
 ---
 
+## Showcase
+
+Everything below was produced **entirely through MCP tool calls** — no manual pixel-pushing —
+exercising drawing, shading, outlines, animation, tilemaps, and palette generation.
+
+<p align="center">
+  <img src="assets/slime.gif" width="130" alt="Animated bouncing slime (4-frame GIF)">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/skeleton.png" width="130" alt="Pixel-art skeleton">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/tilemap_scene.png" width="250" alt="Tilemap scene: grass, dirt, water, stone">
+</p>
+<p align="center">
+  <sub>A bouncing slime (4-frame animation), a skeleton, and a tilemap scene built from 4 painted tiles.</sub>
+</p>
+<p align="center">
+  <img src="assets/ramp.png" width="300" alt="Hue-shifted shading ramp from generate_ramp">
+  <br>
+  <sub><code>generate_ramp</code> — a hue-shifted shading ramp (cool shadows → warm highlights) from one base colour.</sub>
+</p>
+
+---
+
 ## Requirements
 
 - **Aseprite 1.3+** (the scripting API). The Steam and standalone builds both work.
