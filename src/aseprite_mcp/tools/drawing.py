@@ -8,7 +8,7 @@ coordinates are always predictable.
 from __future__ import annotations
 
 from ..app import mcp
-from ..runner import run_lua
+from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
 # Shared Lua preamble: open sprite, resolve a non-group layer + frame, build an

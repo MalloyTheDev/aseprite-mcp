@@ -1,6 +1,6 @@
 """Pure-Python tests for the export-validation logic — no Aseprite (always run)."""
 
-from aseprite_mcp.tools import validation
+from aseprite_mcp.core import validation
 
 
 def _info(**over):

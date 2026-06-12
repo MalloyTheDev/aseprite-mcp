@@ -8,7 +8,7 @@ import os
 import tempfile
 
 from ..app import mcp
-from ..runner import run_lua
+from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
 _STAMP_BODY = """

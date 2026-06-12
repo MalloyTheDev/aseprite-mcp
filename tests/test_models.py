@@ -3,7 +3,7 @@
 import pytest
 
 from aseprite_mcp.tools.common import parse_color
-from aseprite_mcp.tools.models import (
+from aseprite_mcp.core.models import (
     ColorSpec,
     FrameRange,
     FrameRef,

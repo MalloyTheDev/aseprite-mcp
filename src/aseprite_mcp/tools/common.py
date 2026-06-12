@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import config
-from .models import ColorSpec, SpritePath
+from ..core import config
+from ..core.models import ColorSpec, SpritePath
 
 
 def parse_color(spec: str | None) -> dict:

@@ -8,7 +8,7 @@ a normal, dimmed, locked layer instead. Exclude it at export time with
 from __future__ import annotations
 
 from ..app import mcp
-from ..runner import run_lua
+from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
 

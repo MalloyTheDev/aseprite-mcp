@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from aseprite_mcp.tools import manifest as M
+from aseprite_mcp.core import manifest as M
 
 _REQUIRED_KEYS = {"ok", "schema_version", "kind", "created_files", "suggested_next_actions", "warnings"}
 

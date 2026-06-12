@@ -10,9 +10,10 @@ import os
 import shutil
 import tempfile
 
-from .. import __version__, config
+from .. import __version__
 from ..app import mcp
-from ..runner import run_cli, run_lua
+from ..core import config
+from ..core.runner import run_cli, run_lua
 from .common import lua_path
 
 

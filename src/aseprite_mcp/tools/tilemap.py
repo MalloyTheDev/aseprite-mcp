@@ -11,7 +11,7 @@ always the empty tile. Workflow:
 from __future__ import annotations
 
 from ..app import mcp
-from ..runner import run_lua
+from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
 # Common preamble: open sprite, resolve a tilemap layer, grab tileset + frame.

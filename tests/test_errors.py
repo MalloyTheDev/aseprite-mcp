@@ -4,8 +4,8 @@ import subprocess
 
 import pytest
 
-from aseprite_mcp import config, errors, runner
-from aseprite_mcp.errors import (
+from aseprite_mcp.core import config, errors, runner
+from aseprite_mcp.core.errors import (
     AsepriteCLIError,
     AsepriteError,
     AsepriteMCPError,
@@ -17,7 +17,7 @@ from aseprite_mcp.errors import (
     ValidationFailed,
     WorkspaceError,
 )
-from aseprite_mcp.luagen import ERROR_PREFIX, RESULT_PREFIX
+from aseprite_mcp.core.luagen import ERROR_PREFIX, RESULT_PREFIX
 
 _ALL = [
     ConfigError, AsepriteNotFoundError, WorkspaceError, AsepriteTimeoutError,

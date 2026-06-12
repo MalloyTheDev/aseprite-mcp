@@ -6,7 +6,7 @@ A *cel* is the image of one layer at one frame. Frames and layers are 1-based.
 from __future__ import annotations
 
 from ..app import mcp
-from ..runner import run_lua
+from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
 

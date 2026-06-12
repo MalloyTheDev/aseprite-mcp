@@ -5,8 +5,8 @@ Cover colour parsing, Python->Lua serialization, and the workspace path sandbox.
 
 import pytest
 
-from aseprite_mcp import config, luagen
-from aseprite_mcp.errors import WorkspaceError
+from aseprite_mcp.core import config, luagen
+from aseprite_mcp.core.errors import WorkspaceError
 from aseprite_mcp.tools.common import lua_path, parse_color
 
 
