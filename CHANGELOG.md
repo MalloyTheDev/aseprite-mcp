@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-12
+
 ### Added
 - `health_check` self-test tool — reports whether Aseprite is found, its version, the
   workspace, the registered tool count, and a real create-sprite + export-PNG round-trip.
@@ -58,4 +60,5 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.2.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.1.0
