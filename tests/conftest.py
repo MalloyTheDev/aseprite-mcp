@@ -19,6 +19,9 @@ import pytest
 
 from aseprite_mcp import config as ase_config
 
+# Test files that are pure-Python (no Aseprite) and must always run, including on CI.
+PURE_PYTHON_TESTS = ("test_unit", "test_manifest")
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -48,8 +51,8 @@ def pytest_collection_modifyitems(config, items):
             missing_reason = f"--run-aseprite was given but Aseprite was not found: {exc}"
 
     for item in items:
-        # Pure-Python unit tests always run.
-        if "test_unit" in item.nodeid:
+        # Pure-Python tests always run (no Aseprite needed).
+        if any(name in item.nodeid for name in PURE_PYTHON_TESTS):
             continue
         if not run_aseprite:
             item.add_marker(pytest.mark.skip(reason="needs --run-aseprite (Aseprite integration test)"))

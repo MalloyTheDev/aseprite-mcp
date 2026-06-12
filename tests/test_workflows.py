@@ -1,52 +1,73 @@
 """Integration tests for the high-level workflow tools.
 
-Requires Aseprite — runs only under `pytest --run-aseprite`.
+Asserts the shared workflow_manifest.v1 contract. Requires Aseprite — runs only
+under `pytest --run-aseprite`.
 """
 
 import os
 
 from aseprite_mcp.tools import inspect, workflow
 
+_REQUIRED = {"ok", "schema_version", "kind", "created_files", "suggested_next_actions", "warnings"}
+
+
+def _assert_manifest(m, kind):
+    assert _REQUIRED <= set(m)
+    assert m["ok"] is True
+    assert m["schema_version"] == "workflow_manifest.v1"
+    assert m["kind"] == kind
+    assert isinstance(m["created_files"], list)
+    assert isinstance(m["suggested_next_actions"], list) and m["suggested_next_actions"]
+    assert m["warnings"] == []
+    # every created-file entry has a consistent shape
+    for entry in m["created_files"]:
+        assert {"role", "path", "format"} <= set(entry)
+
 
 def test_create_character_sprite():
     m = workflow.create_character_sprite("w/hero", 32, 32, base_color="#3878c8")
-    assert m["ok"] and m["kind"] == "character_sprite"
-    assert m["width"] == 32 and m["height"] == 32
-    assert "body" in m["layers"] and "details" in m["layers"]
-    assert len(m["palette"]) == 5
-    assert m["suggested_next_actions"]
-    info = inspect.get_sprite_info("w/hero.aseprite")
-    assert info["paletteSize"] == 5
+    _assert_manifest(m, "character_sprite")
+    assert m["sprite"]["width"] == 32 and m["sprite"]["height"] == 32
+    assert m["sprite"]["layers"] == ["body", "details"]
+    assert m["palette"]["count"] == 5
+    assert [f["role"] for f in m["created_files"]] == ["source_sprite"]
+    assert inspect.get_sprite_info("w/hero.aseprite")["paletteSize"] == 5
 
 
 def test_make_4_frame_idle_animation():
     workflow.create_character_sprite("w/idle", 16, 16)
     m = workflow.make_4_frame_idle_animation("w/idle.aseprite", layer="body", frame_duration_ms=120)
-    assert m["ok"] and m["frameCount"] == 4 and m["tag"] == "idle"
-    info = inspect.get_sprite_info("w/idle.aseprite")
-    assert info["frameCount"] == 4
-    assert [t["name"] for t in info["tags"]] == ["idle"]
-    assert all(abs(f["duration"] - 0.12) < 1e-6 for f in info["frames"])
+    _assert_manifest(m, "idle_animation")
+    assert m["sprite"]["frames"] == 4
+    assert m["animation"]["tag"] == "idle"
+    assert m["animation"]["frames"] == [1, 2, 3, 4]
+    assert m["animation"]["duration_ms"] == 120
 
 
 def test_create_tileset_project():
     m = workflow.create_tileset_project("w/tiles", tile_size=16, columns=4, rows=3)
-    assert m["ok"] and m["kind"] == "tileset_project"
-    assert m["width"] == 64 and m["height"] == 48
-    names = [t["name"] for t in m["tiles"]]
-    assert names == ["grass", "dirt", "water", "stone"]
-    # indices are 1..4 (0 is the empty tile)
-    assert [t["index"] for t in m["tiles"]] == [1, 2, 3, 4]
+    _assert_manifest(m, "tileset_project")
+    assert m["sprite"]["width"] == 64 and m["sprite"]["height"] == 48
+    tm = m["tilemap"]
+    assert tm["layer"] == "tiles" and tm["tile_width"] == 16
+    assert [t["name"] for t in tm["tiles"]] == ["grass", "dirt", "water", "stone"]
+    assert [t["index"] for t in tm["tiles"]] == [1, 2, 3, 4]
 
 
 def test_export_game_asset_bundle():
     workflow.create_character_sprite("w/bundle", 16, 16)
     workflow.make_4_frame_idle_animation("w/bundle.aseprite")
     m = workflow.export_game_asset_bundle("w/bundle.aseprite", scale=2)
-    assert m["ok"] and m["kind"] == "game_asset_bundle"
+    _assert_manifest(m, "game_asset_bundle")
     assert m["sprite"]["frames"] == 4
+
+    roles = {e["role"] for e in m["exports"]}
+    assert {"png", "gif", "spritesheet", "tag_gif"} <= roles
+    # the spritesheet export carries its metadata path
+    sheet = next(e for e in m["exports"] if e["role"] == "spritesheet")
+    assert "metadata_path" in sheet and os.path.getsize(sheet["metadata_path"]) > 0
     # every advertised file exists on disk
-    for key in ("png", "gif", "spritesheet", "spritesheet_data", "manifest"):
-        assert os.path.getsize(m["files"][key]) > 0
-    assert len(m["files"]["tag_gifs"]) == 1  # the "idle" tag
-    assert os.path.getsize(m["files"]["tag_gifs"][0]["file"]) > 0
+    for e in m["exports"]:
+        assert os.path.getsize(e["path"]) > 0
+    for f in m["created_files"]:
+        assert os.path.getsize(f["path"]) > 0  # manifest.json

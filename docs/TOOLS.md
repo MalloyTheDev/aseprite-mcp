@@ -1526,7 +1526,8 @@ Scaffold a character sprite project: a transparent canvas with a tidy layer
     stack (body + details), an auto-generated shading palette ramp from `base_color`,
     and (optionally) an outlined placeholder body to draw over.
 
-    Returns a manifest with the file path, dimensions, layers, palette, and next steps.
+    Returns a ``workflow_manifest.v1`` manifest (sprite summary, created files,
+    palette, and suggested next actions).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1543,7 +1544,8 @@ Scaffold a tilemap project: a canvas sized columns×rows tiles, a tilemap layer,
     and a starter tileset (grass/dirt/water/stone by default, or your own
     [{"name","color"}] list). The grid is filled with the first tile to start.
 
-    Returns a manifest mapping tile names to their tileset indices.
+    Returns a ``workflow_manifest.v1`` manifest with a tilemap block mapping tile
+    names to their tileset indices.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1560,7 +1562,8 @@ Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
     GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
     `manifest.json` describing everything.
 
-    Returns the manifest (also written to disk as manifest.json in the bundle).
+    Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
+    disk as manifest.json inside the bundle).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1575,6 +1578,8 @@ Turn a single-frame sprite into a 4-frame idle "bob" loop.
 
     Duplicates frame 1 to 4 frames, nudges `layer` down by `bob_pixels` on frames 2
     and 4 for a subtle bob, sets uniform durations, and adds a looping tag.
+
+    Returns a ``workflow_manifest.v1`` manifest (sprite summary + animation block).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

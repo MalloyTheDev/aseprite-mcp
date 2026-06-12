@@ -28,6 +28,7 @@ from . import (
     tilemap,
 )
 from .common import resolve_path
+from .manifest import export_entry, file_entry, sprite_summary, workflow_manifest
 
 
 def _aseprite_name(name: str) -> str:
@@ -46,7 +47,8 @@ def create_character_sprite(
     stack (body + details), an auto-generated shading palette ramp from `base_color`,
     and (optionally) an outlined placeholder body to draw over.
 
-    Returns a manifest with the file path, dimensions, layers, palette, and next steps.
+    Returns a ``workflow_manifest.v1`` manifest (sprite summary, created files,
+    palette, and suggested next actions).
     """
     filename = _aseprite_name(name)
     sprite.create_sprite(filename, width, height, "rgb")
@@ -63,22 +65,18 @@ def create_character_sprite(
         effects.add_outline(filename, ramp[0], thickness=1, where="outside", layer="body")
 
     final = inspect.get_sprite_info(filename)
-    return {
-        "ok": True,
-        "kind": "character_sprite",
-        "file": final["path"],
-        "width": final["width"],
-        "height": final["height"],
-        "color_mode": final["colorMode"],
-        "layers": [l["name"] for l in final["layers"]],
-        "palette": ramp,
-        "suggested_next_actions": [
+    return workflow_manifest(
+        "character_sprite",
+        sprite=sprite_summary(final),
+        created_files=[file_entry("source_sprite", final["path"], "aseprite")],
+        palette={"colors": ramp, "count": len(ramp)},
+        suggested_next_actions=[
             f"Draw the character on the 'body' layer with the palette shades {ramp}.",
             "Add a face/features on the 'details' layer.",
             f"Animate it: make_4_frame_idle_animation('{filename}').",
             f"Preview with render_preview('{filename}').",
         ],
-    }
+    )
 
 
 @mcp.tool()
@@ -93,6 +91,8 @@ def make_4_frame_idle_animation(
 
     Duplicates frame 1 to 4 frames, nudges `layer` down by `bob_pixels` on frames 2
     and 4 for a subtle bob, sets uniform durations, and adds a looping tag.
+
+    Returns a ``workflow_manifest.v1`` manifest (sprite summary + animation block).
     """
     info = inspect.get_sprite_info(filename)
     while info["frameCount"] < 4:
@@ -107,21 +107,23 @@ def make_4_frame_idle_animation(
     tags.add_tag(filename, tag_name, 1, 4, "forward")
 
     final = inspect.get_sprite_info(filename)
-    return {
-        "ok": True,
-        "kind": "idle_animation",
-        "file": final["path"],
-        "frameCount": final["frameCount"],
-        "tag": tag_name,
-        "frame_duration_ms": frame_duration_ms,
-        "bob_pixels": bob_pixels,
-        "animated_layer": layer,
-        "suggested_next_actions": [
+    return workflow_manifest(
+        "idle_animation",
+        sprite=sprite_summary(final),
+        created_files=[file_entry("source_sprite", final["path"], "aseprite")],
+        animation={
+            "tag": tag_name,
+            "frames": list(range(1, final["frameCount"] + 1)),
+            "duration_ms": frame_duration_ms,
+            "bob_pixels": bob_pixels,
+            "animated_layer": layer,
+        },
+        suggested_next_actions=[
             f"Preview the loop: render_preview('{filename}', frame=2).",
             f"Export it: export_gif('{filename}', '{Path(filename).stem}.gif', scale=8).",
             "Add more poses with draw_* tools per frame, or another tag for 'walk'.",
         ],
-    }
+    )
 
 
 _DEFAULT_TILES = [
@@ -144,7 +146,8 @@ def create_tileset_project(
     and a starter tileset (grass/dirt/water/stone by default, or your own
     [{"name","color"}] list). The grid is filled with the first tile to start.
 
-    Returns a manifest mapping tile names to their tileset indices.
+    Returns a ``workflow_manifest.v1`` manifest with a tilemap block mapping tile
+    names to their tileset indices.
     """
     tile_defs = tiles or _DEFAULT_TILES
     if not tile_defs:
@@ -162,21 +165,23 @@ def create_tileset_project(
         tilemap.fill_tilemap(filename, "tiles", created[0]["index"])
 
     final = inspect.get_sprite_info(filename)
-    return {
-        "ok": True,
-        "kind": "tileset_project",
-        "file": final["path"],
-        "width": final["width"],
-        "height": final["height"],
-        "tile_size": tile_size,
-        "grid": {"columns": columns, "rows": rows},
-        "tiles": created,
-        "suggested_next_actions": [
+    return workflow_manifest(
+        "tileset_project",
+        sprite=sprite_summary(final),
+        created_files=[file_entry("source_sprite", final["path"], "aseprite")],
+        tilemap={
+            "layer": "tiles",
+            "tile_width": tile_size,
+            "tile_height": tile_size,
+            "grid": {"columns": columns, "rows": rows},
+            "tiles": created,
+        },
+        suggested_next_actions=[
             "Paint detail into tiles with paint_tile_pixels(filename, 'tiles', <index>, [...]).",
             "Lay out the map with set_tiles(filename, 'tiles', [{'column','row','index'}, ...]).",
             "Read it back with get_tilemap(filename, 'tiles').",
         ],
-    }
+    )
 
 
 @mcp.tool()
@@ -189,7 +194,8 @@ def export_game_asset_bundle(
     GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
     `manifest.json` describing everything.
 
-    Returns the manifest (also written to disk as manifest.json in the bundle).
+    Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
+    disk as manifest.json inside the bundle).
     """
     info = inspect.get_sprite_info(filename)
     base = Path(filename).stem
@@ -198,43 +204,28 @@ def export_game_asset_bundle(
     def rel(p: str) -> str:
         return f"{bundle}/{p}"
 
-    files: dict = {}
-    files["png"] = export.export_png(filename, rel(f"{base}.png"), 1, scale)["output"]
-    files["gif"] = export.export_gif(filename, rel(f"{base}.gif"), scale)["output"]
+    exports = [
+        export_entry("png", export.export_png(filename, rel(f"{base}.png"), 1, scale)["output"], "png"),
+        export_entry("gif", export.export_gif(filename, rel(f"{base}.gif"), scale)["output"], "gif"),
+    ]
     sheet = export.export_spritesheet(
         filename, rel(f"{base}_sheet.png"), "packed", scale, rel(f"{base}_sheet.json")
     )
-    files["spritesheet"] = sheet["output"]
-    files["spritesheet_data"] = sheet["data_output"]
-
-    tag_gifs = []
+    exports.append(export_entry("spritesheet", sheet["output"], "png", metadata_path=sheet["data_output"]))
     for tag in info["tags"]:
         out = export.export_tag_gif(filename, tag["name"], rel(f"{base}_{tag['name']}.gif"), scale)
-        tag_gifs.append({"tag": tag["name"], "file": out["output"]})
-    files["tag_gifs"] = tag_gifs
+        exports.append(export_entry("tag_gif", out["output"], "gif"))
 
-    manifest = {
-        "ok": True,
-        "kind": "game_asset_bundle",
-        "source": info["path"],
-        "bundle_dir": str(resolve_path(bundle)),
-        "scale": scale,
-        "sprite": {
-            "width": info["width"],
-            "height": info["height"],
-            "color_mode": info["colorMode"],
-            "frames": info["frameCount"],
-            "layers": [l["name"] for l in info["layers"]],
-            "tags": [{"name": t["name"], "from": t["from"], "to": t["to"]} for t in info["tags"]],
-        },
-        "files": files,
-        "suggested_next_actions": [
+    manifest_path = resolve_path(rel("manifest.json"))
+    manifest = workflow_manifest(
+        "game_asset_bundle",
+        sprite=sprite_summary(info),
+        created_files=[file_entry("manifest", manifest_path, "json")],
+        exports=exports,
+        suggested_next_actions=[
             "Import the sprite sheet + JSON into your engine (Godot/Unity/Phaser).",
             "Use the per-tag GIFs to preview each animation.",
         ],
-    }
-
-    manifest_path = resolve_path(rel("manifest.json"))
+    )
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8", newline="\n")
-    manifest["files"]["manifest"] = str(manifest_path)
     return manifest
