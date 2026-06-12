@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-12
+
+### Added
+- **Atomic batch operations** — `apply_operations(filename, operations, dry_run)` applies a
+  curated set of 21 mutating ops (layers, frames, tags, drawing, slices, `replace_color`) to
+  one sprite in a **single Aseprite process**, inside one `app.transaction`: open once → run
+  all ops → save only if every op succeeds. `dry_run=True` validates the op list with **zero**
+  Aseprite launches. Any failure rolls back, saves nothing, and names the failing op index.
+  Returns a `workflow_manifest.v1` (kind `batch`).
+
+### Changed
+- **Internal hardening (since v0.5.0):**
+  - Typed error hierarchy — `AsepriteMCPError` base with `ConfigError`/`AsepriteNotFoundError`/
+    `WorkspaceError`/`AsepriteTimeoutError`/`LuaToolError`/`AsepriteCLIError`/`ExportError`/
+    `ValidationFailed`. `AsepriteError` kept as a backwards-compatible alias.
+  - Typed value models (`Point`/`Size`/`Rect`/`Pixel`/`ColorSpec`/`LayerRef`/`FrameRef`/
+    `FrameRange`/`SpritePath`) at the validation boundary; `parse_color` delegates to `ColorSpec`.
+  - `core/` vs MCP-tool split — reusable logic now lives in `aseprite_mcp.core` (importable
+    without the FastMCP app); backwards-compatible top-level import shims are preserved.
+
 ## [0.5.0] - 2026-06-12
 
 ### Added
@@ -95,6 +115,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.6.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.3.0
