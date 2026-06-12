@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **99 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **103 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -23,6 +23,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (10)
 - [Reference / rotoscope](#reference--rotoscope) (2)
+- [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (4)
 - [GUI companion mode](#gui-companion-mode) (2)
 - [Health & self-test](#health--self-test) (1)
 
@@ -1515,6 +1516,73 @@ Import a sequence of images as per-frame references for rotoscoping.
 | `opacity` | integer | no | 128 |
 | `scale_to_fit` | boolean | no | False |
 | `start_frame` | integer | no | 1 |
+
+
+## Workflows (high-level scaffolding)
+
+### `create_character_sprite`
+
+Scaffold a character sprite project: a transparent canvas with a tidy layer
+    stack (body + details), an auto-generated shading palette ramp from `base_color`,
+    and (optionally) an outlined placeholder body to draw over.
+
+    Returns a manifest with the file path, dimensions, layers, palette, and next steps.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `name` | string | yes |  |
+| `width` | integer | no | 32 |
+| `height` | integer | no | 32 |
+| `base_color` | string | no | #3878c8 |
+| `with_placeholder` | boolean | no | True |
+
+
+### `create_tileset_project`
+
+Scaffold a tilemap project: a canvas sized columns×rows tiles, a tilemap layer,
+    and a starter tileset (grass/dirt/water/stone by default, or your own
+    [{"name","color"}] list). The grid is filled with the first tile to start.
+
+    Returns a manifest mapping tile names to their tileset indices.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `name` | string | yes |  |
+| `tile_size` | integer | no | 16 |
+| `columns` | integer | no | 4 |
+| `rows` | integer | no | 4 |
+| `tiles` | array | null | no | None |
+
+
+### `export_game_asset_bundle`
+
+Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
+    GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
+    `manifest.json` describing everything.
+
+    Returns the manifest (also written to disk as manifest.json in the bundle).
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `bundle_name` | string | null | no | None |
+| `scale` | integer | no | 1 |
+
+
+### `make_4_frame_idle_animation`
+
+Turn a single-frame sprite into a 4-frame idle "bob" loop.
+
+    Duplicates frame 1 to 4 frames, nudges `layer` down by `bob_pixels` on frames 2
+    and 4 for a subtle bob, sets uniform durations, and adds a looping tag.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | no | body |
+| `frame_duration_ms` | integer | no | 150 |
+| `bob_pixels` | integer | no | 1 |
+| `tag_name` | string | no | idle |
 
 
 ## GUI companion mode
