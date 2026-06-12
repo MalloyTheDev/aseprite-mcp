@@ -6,6 +6,7 @@ Cover colour parsing, Python->Lua serialization, and the workspace path sandbox.
 import pytest
 
 from aseprite_mcp import config, luagen
+from aseprite_mcp.errors import WorkspaceError
 from aseprite_mcp.tools.common import lua_path, parse_color
 
 
@@ -82,14 +83,14 @@ def test_resolve_relative_under_workspace(tmp_path, monkeypatch):
 def test_resolve_rejects_absolute_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("ASEPRITE_MCP_WORKSPACE", str(tmp_path))
     monkeypatch.delenv("ASEPRITE_MCP_ALLOW_ABSOLUTE", raising=False)
-    with pytest.raises(ValueError, match="Absolute paths are disabled"):
+    with pytest.raises(WorkspaceError, match="Absolute paths are disabled"):
         config.resolve(str(tmp_path.parent / "outside.aseprite"))
 
 
 def test_resolve_rejects_escape_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("ASEPRITE_MCP_WORKSPACE", str(tmp_path))
     monkeypatch.delenv("ASEPRITE_MCP_ALLOW_ABSOLUTE", raising=False)
-    with pytest.raises(ValueError, match="escapes the workspace"):
+    with pytest.raises(WorkspaceError, match="escapes the workspace"):
         config.resolve("../../etc/passwd.aseprite")
 
 
