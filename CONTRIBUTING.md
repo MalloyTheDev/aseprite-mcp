@@ -22,15 +22,32 @@ export ASEPRITE_PATH="/Applications/Aseprite.app/Contents/MacOS/aseprite"
 
 ## Running the tests
 
+There are two tiers:
+
 ```bash
-uv run pytest
+uv run pytest                 # fast: pure-Python unit tests only (no Aseprite needed)
+uv run pytest --run-aseprite  # full: unit + Aseprite integration + golden-output tests
 ```
 
-The suite is **integration-level** — it drives a real Aseprite install. If Aseprite
-can't be found, every test is skipped (so it stays green on machines/CI without it).
+- **Unit tests** (`tests/test_unit.py`) cover colour parsing, Python→Lua serialization,
+  and the path sandbox. They always run — this is what CI exercises on every push.
+- **Integration & golden tests** drive a real Aseprite install and run only with
+  `--run-aseprite` (and require Aseprite to be found). Golden tests assert exact
+  dimensions, pixel colours, frame/layer counts, tag metadata, and exported geometry.
 
 > On Windows, pytest may print a harmless `PermissionError` from an `atexit` temp-dir
 > cleanup handler *after* the run finishes. It does not affect results.
+
+## Local release gate
+
+Run all of these green before tagging a release:
+
+```bash
+uv run ruff check . --select F,E9               # lint (no unused imports / undefined names)
+uv run pytest                                   # unit tests
+uv run pytest --run-aseprite                    # full integration + golden tests
+uv run python scripts/gen_tool_docs.py --check  # docs/TOOLS.md is in sync with the registry
+```
 
 ## Architecture (how a tool works)
 
