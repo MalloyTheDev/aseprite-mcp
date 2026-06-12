@@ -8,11 +8,13 @@ import subprocess
 import tempfile
 
 from . import config
+from .errors import (  # noqa: F401  (AsepriteError re-exported for back-compat)
+    AsepriteCLIError,
+    AsepriteError,
+    AsepriteTimeoutError,
+    LuaToolError,
+)
 from .luagen import ERROR_PREFIX, RESULT_PREFIX, assemble_script
-
-
-class AsepriteError(RuntimeError):
-    """Raised when an Aseprite invocation fails or a Lua body reports an error."""
 
 
 def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -> dict:
@@ -36,7 +38,7 @@ def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -
             timeout=timeout or config.timeout(),
         )
     except subprocess.TimeoutExpired as exc:
-        raise AsepriteError(
+        raise AsepriteTimeoutError(
             f"Aseprite timed out after {exc.timeout:.0f}s. Increase ASEPRITE_MCP_TIMEOUT "
             "or split the operation into smaller steps."
         ) from exc
@@ -62,18 +64,18 @@ def _parse_result(proc: subprocess.CompletedProcess) -> dict:
             error_msg = line[len(ERROR_PREFIX):]
 
     if error_msg is not None:
-        raise AsepriteError(error_msg)
+        raise LuaToolError(error_msg)
 
     if result_json is None:
         detail = (proc.stderr or "").strip() or out.strip() or (
             f"Aseprite exited with code {proc.returncode} and produced no result."
         )
-        raise AsepriteError(detail)
+        raise LuaToolError(detail)
 
     try:
         parsed = json.loads(result_json)
     except json.JSONDecodeError as exc:
-        raise AsepriteError(f"Could not parse Aseprite result as JSON: {exc}") from exc
+        raise LuaToolError(f"Could not parse Aseprite result as JSON: {exc}") from exc
 
     # The Lua side encodes an empty result table as a JSON array; normalize to {}.
     if isinstance(parsed, list) and not parsed:
@@ -94,11 +96,11 @@ def run_cli(cli_args: list[str], timeout: float | None = None) -> subprocess.Com
             timeout=timeout or config.timeout(),
         )
     except subprocess.TimeoutExpired as exc:
-        raise AsepriteError(f"Aseprite CLI timed out after {exc.timeout:.0f}s.") from exc
+        raise AsepriteTimeoutError(f"Aseprite CLI timed out after {exc.timeout:.0f}s.") from exc
 
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip() or (
             f"Aseprite CLI failed with exit code {proc.returncode}."
         )
-        raise AsepriteError(detail)
+        raise AsepriteCLIError(detail)
     return proc

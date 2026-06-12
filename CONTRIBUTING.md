@@ -95,6 +95,12 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
 - Resolve user paths with `tools/common.resolve_path` (relative → workspace).
 - Pass paths to Lua via `tools/common.lua_path` (forward slashes).
 - Keep operations deterministic and headless — no GUI/persistent-state assumptions.
+- Raise **typed errors** from `errors.py` at boundaries: `AsepriteNotFoundError` /
+  `WorkspaceError` (config & path sandbox), `LuaToolError` (a Lua body failed),
+  `AsepriteCLIError` / `ExportError` (CLI/export), `AsepriteTimeoutError` (timeout).
+  All subclass `AsepriteMCPError`, aliased as `AsepriteError` for backwards
+  compatibility (`from aseprite_mcp.runner import AsepriteError` still works and still
+  catches every aseprite-mcp error).
 - **Workflow tools** (high-level scaffolding in `tools/workflow.py`) must return a
   `workflow_manifest.v1` object built with the helpers in `tools/manifest.py`
   (`workflow_manifest`, `file_entry`, `export_entry`, `sprite_summary`) — don't hand-roll
