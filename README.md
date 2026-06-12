@@ -43,22 +43,59 @@ Aseprite GUI.
 
 ## Showcase
 
-Everything below was produced **entirely through MCP tool calls** — no manual pixel-pushing —
-exercising drawing, shading, outlines, animation, tilemaps, and palette generation.
+Everything below was produced **entirely through MCP tool calls** — no manual pixel-pushing.
+
+### 🟢 Easy — one call scaffolds usable pixel art
 
 <p align="center">
-  <img src="assets/skeleton.png" width="140" alt="Pixel-art skeleton">
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="assets/tilemap_scene.png" width="270" alt="Tilemap scene: grass, dirt, water, stone">
+  <img src="docs/assets/showcase/easy_item_sheet.png" width="420" alt="Pixel-art item sheet with heart, coin, potion, and sword icons">
 </p>
 <p align="center">
-  <sub>A skeleton character, and a tilemap scene built from 4 painted tiles (grass, dirt, water, stone).</sub>
+  <sub><code>create_rpg_item_sheet</code> lays out named item slices in one call; filled here with the drawing tools — heart / coin / potion / sword, each its own export-ready slice.</sub>
+</p>
+
+### 🟡 Medium — animation & tag generation
+
+<p align="center">
+  <img src="docs/assets/showcase/medium_walk8.gif" width="120" alt="Animated sprite cycling through eight facing directions">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/assets/showcase/medium_walk8_sheet.png" width="460" alt="Eight-direction walk sheet: one frame and animation tag per compass direction">
 </p>
 <p align="center">
-  <img src="assets/ramp.png" width="300" alt="Hue-shifted shading ramp from generate_ramp">
-  <br>
-  <sub><code>generate_ramp</code> — a hue-shifted shading ramp (cool shadows → warm highlights) from one base colour.</sub>
+  <sub><code>make_8_direction_walk_template</code> generates the frames <strong>and one animation tag per direction</strong> (N / NE / E / SE / S / SW / W / NW) — ready to draw the walk cycle into.</sub>
 </p>
+
+### 🔴 Hard — the full pipeline: create → animate → validate → export
+
+<p align="center">
+  <img src="docs/assets/showcase/hard_pipeline.gif" width="160" alt="Animated idle bounce of a blue character produced by the full pipeline">
+</p>
+<p align="center">
+  <sub>One agent run: <code>create_character_sprite</code> → draw → <code>make_4_frame_idle_animation</code> → <code>validate_sprite_for_game_export</code> → <code>export_game_asset_bundle</code>.</sub>
+</p>
+
+```text
+validate_sprite_for_game_export → passed ✅  (width, height, color_mode, min_frames, required_tags)
+export_game_asset_bundle        → hero.png · hero.gif · hero_sheet.png (+JSON) · hero_idle.gif · manifest.json
+```
+
+<details>
+<summary>More examples</summary>
+
+<p align="center">
+  <img src="assets/slime.gif" width="110" alt="Animated bouncing slime">
+  &nbsp;
+  <img src="assets/skeleton.png" width="110" alt="Pixel-art skeleton">
+  &nbsp;
+  <img src="assets/tilemap_scene.png" width="200" alt="Tilemap scene with grass, dirt, water, and stone">
+  &nbsp;
+  <img src="assets/ramp.png" width="200" alt="Hue-shifted shading ramp from generate_ramp">
+</p>
+<p align="center">
+  <sub>A bouncing slime, a skeleton, a tilemap scene from 4 painted tiles, and a hue-shifted <code>generate_ramp</code> palette.</sub>
+</p>
+
+</details>
 
 ---
 
