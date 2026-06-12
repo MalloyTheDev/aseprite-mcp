@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **High-level workflow tools** that scaffold whole assets in one call and return a
+  structured manifest (files, paths, frames, tags, dimensions, suggested next actions):
+  `create_character_sprite`, `make_4_frame_idle_animation`, `create_tileset_project`,
+  and `export_game_asset_bundle`. They compose the existing low-level tools — deterministic
+  scaffolding, no AI/model generation.
+- A `--run-aseprite` pytest flag gating the integration & golden suites; pure-Python unit
+  tests always run. Golden-output tests assert exact dimensions, pixel colours, frame/layer
+  counts, tag metadata, and exported geometry. `scripts/gen_tool_docs.py --check` verifies
+  the tool docs are in sync (now enforced in CI).
+
 ## [0.2.0] - 2026-06-12
 
 ### Added

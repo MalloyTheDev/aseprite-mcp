@@ -26,7 +26,8 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **99 tools** across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
+- **103 tools** — including high-level **workflow** tools that scaffold whole assets in
+  one call — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
   tags, slices/9-patch, effects (gradients/outline/drop-shadow/colour adjustments), text
   rendering, tilemaps, image stamping, reference/rotoscope layers, transforms, rich
@@ -139,8 +140,31 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 99 tools will be available. Ask the
+Restart the client; the `aseprite` server and its 103 tools will be available. Ask the
 agent to run `health_check` to confirm Aseprite is wired up correctly.
+
+---
+
+## High-level workflows
+
+Beyond the low-level tools, a few **workflow tools** scaffold a whole asset in one call
+and return a manifest (created files, paths, frames, tags, dimensions, and suggested next
+steps) so an agent can keep going. They compose the low-level tools — deterministic
+scaffolding, no AI generation.
+
+| Tool | Description |
+| --- | --- |
+| `create_character_sprite` | Transparent canvas + body/details layers + a generated shading ramp + an outlined placeholder. |
+| `make_4_frame_idle_animation` | Turn a 1-frame sprite into a 4-frame idle "bob" loop with a tag. |
+| `create_tileset_project` | Canvas + tilemap layer + a starter tileset (grass/dirt/water/stone, or your own). |
+| `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. |
+
+> "Make me an idle-animated hero and a game-ready bundle."
+
+1. `create_character_sprite("hero", 32, 32, base_color="#3878c8")` — layers + palette + placeholder.
+2. Draw the character on the `body` / `details` layers (low-level tools).
+3. `make_4_frame_idle_animation("hero.aseprite")` — 4-frame loop tagged `idle`.
+4. `export_game_asset_bundle("hero.aseprite", scale=8)` — PNG/GIF/sheet+JSON/manifest in `hero_bundle/`.
 
 ---
 
