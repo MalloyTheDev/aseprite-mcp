@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy into your MCP client config (e.g. claude_desktop_config.json). Replace the paths below. On Windows, escape backslashes (\\\\). On macOS/Linux use forward slashes and the aseprite binary path.",
+  "mcpServers": {
+    "aseprite": {
+      "command": "uv",
+      "args": ["--directory", "C:\\path\\to\\aseprite-mcp", "run", "aseprite-mcp"],
+      "env": {
+        "ASEPRITE_PATH": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Aseprite\\Aseprite.exe",
+        "ASEPRITE_MCP_WORKSPACE": "C:\\path\\to\\aseprite-mcp\\workspace"
+      }
+    }
+  }
+}

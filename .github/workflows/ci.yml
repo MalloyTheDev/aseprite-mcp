@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --python ${{ matrix.python-version }}
+
+      - name: Import check (server + all tool modules register)
+        run: uv run --python ${{ matrix.python-version }} python -c "import asyncio; from aseprite_mcp.server import mcp; print('tools:', len(asyncio.run(mcp.list_tools())))"
+
+      - name: Run tests
+        # Aseprite is not available on CI runners, so the integration suite
+        # auto-skips. This still verifies the package installs and imports cleanly.
+        run: uv run --python ${{ matrix.python-version }} pytest -q
