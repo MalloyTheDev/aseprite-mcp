@@ -8,9 +8,9 @@ from pathlib import Path
 
 from mcp.server.fastmcp import Image
 
-from .. import config
+from ..core import config
 from ..app import mcp
-from ..runner import AsepriteError, run_cli, run_lua
+from ..core.runner import AsepriteError, run_cli, run_lua
 from .common import lua_path, resolve_path
 
 

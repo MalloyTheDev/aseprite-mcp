@@ -7,7 +7,7 @@ Slices are exported in sprite-sheet JSON data and are handy for UI atlases,
 from __future__ import annotations
 
 from ..app import mcp
-from ..runner import run_lua
+from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
 

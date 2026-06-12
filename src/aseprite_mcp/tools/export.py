@@ -7,7 +7,7 @@ same workspace rules as everything else.
 from __future__ import annotations
 
 from ..app import mcp
-from ..runner import run_cli, run_lua
+from ..core.runner import run_cli, run_lua
 from .common import lua_path, resolve_path
 
 _SHEET_TYPES = {"horizontal", "vertical", "rows", "columns", "packed"}

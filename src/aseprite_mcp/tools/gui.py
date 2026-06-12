@@ -14,9 +14,9 @@ from __future__ import annotations
 import os
 import subprocess
 
-from .. import config
+from ..core import config
 from ..app import mcp
-from ..runner import AsepriteError
+from ..core.runner import AsepriteError
 from .common import resolve_path
 
 
