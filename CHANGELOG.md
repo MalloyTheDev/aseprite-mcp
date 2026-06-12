@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-12
+
+### Added
+- **`validate_sprite_for_game_export`** — a game-readiness validation workflow. Checks
+  optional criteria (dimensions / tile multiples, colour mode, frame counts, required
+  animation tags, transparent-background expectations, palette budget, expected export
+  files, sprite-sheet metadata) and returns a `workflow_manifest.v1` (kind `validation`)
+  with `{passed, checks, errors, warnings}`. The pipeline is now create → animate →
+  validate → export. Pure decision logic lives in `tools/validation.py` (unit-tested in CI).
+
 ## [0.3.0] - 2026-06-12
 
 ### Added
@@ -73,6 +83,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.4.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.1.0
