@@ -29,7 +29,13 @@ from typing import Any, TypedDict
 
 SCHEMA_VERSION = "workflow_manifest.v1"
 
-VALID_KINDS = ("character_sprite", "idle_animation", "tileset_project", "game_asset_bundle")
+VALID_KINDS = (
+    "character_sprite",
+    "idle_animation",
+    "tileset_project",
+    "game_asset_bundle",
+    "validation",
+)
 FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest")
 EXPORT_ROLES = ("spritesheet", "gif", "png", "tag_gif", "frames")
 
@@ -51,6 +57,7 @@ class WorkflowManifest(TypedDict, total=False):
     palette: dict
     animation: dict
     tilemap: dict
+    validation: dict
     suggested_next_actions: list
     warnings: list
 
@@ -104,6 +111,7 @@ def workflow_manifest(
     palette: dict | None = None,
     animation: dict | None = None,
     tilemap: dict | None = None,
+    validation: dict | None = None,
     suggested_next_actions: Any = None,
     warnings: list | None = None,
 ) -> WorkflowManifest:
@@ -133,4 +141,6 @@ def workflow_manifest(
         manifest["animation"] = animation
     if tilemap:
         manifest["tilemap"] = tilemap
+    if validation:
+        manifest["validation"] = validation
     return manifest

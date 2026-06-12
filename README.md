@@ -26,8 +26,8 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **103 tools** — including high-level **workflow** tools that scaffold whole assets in
-  one call — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
+- **104 tools** — including high-level **workflow** tools that scaffold and validate whole
+  assets in one call — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
   tags, slices/9-patch, effects (gradients/outline/drop-shadow/colour adjustments), text
   rendering, tilemaps, image stamping, reference/rotoscope layers, transforms, rich
@@ -140,7 +140,7 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 103 tools will be available. Ask the
+Restart the client; the `aseprite` server and its 104 tools will be available. Ask the
 agent to run `health_check` to confirm Aseprite is wired up correctly.
 
 ---
@@ -158,13 +158,15 @@ scaffolding, no AI generation.
 | `make_4_frame_idle_animation` | Turn a 1-frame sprite into a 4-frame idle "bob" loop with a tag. |
 | `create_tileset_project` | Canvas + tilemap layer + a starter tileset (grass/dirt/water/stone, or your own). |
 | `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. |
+| `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
 
 > "Make me an idle-animated hero and a game-ready bundle."
 
 1. `create_character_sprite("hero", 32, 32, base_color="#3878c8")` — layers + palette + placeholder.
 2. Draw the character on the `body` / `details` layers (low-level tools).
 3. `make_4_frame_idle_animation("hero.aseprite")` — 4-frame loop tagged `idle`.
-4. `export_game_asset_bundle("hero.aseprite", scale=8)` — PNG/GIF/sheet+JSON/manifest in `hero_bundle/`.
+4. `validate_sprite_for_game_export("hero.aseprite", expected_width=32, required_tags=["idle"])` — confirm it's game-ready.
+5. `export_game_asset_bundle("hero.aseprite", scale=8)` — PNG/GIF/sheet+JSON/manifest in `hero_bundle/`.
 
 ### Workflow manifest contract
 

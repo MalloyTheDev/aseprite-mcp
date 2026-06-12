@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from ..app import mcp
+from ..runner import AsepriteError
 from . import (
     cels,
     drawing,
@@ -26,6 +27,7 @@ from . import (
     sprite,
     tags,
     tilemap,
+    validation,
 )
 from .common import resolve_path
 from .manifest import export_entry, file_entry, sprite_summary, workflow_manifest
@@ -229,3 +231,109 @@ def export_game_asset_bundle(
     )
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8", newline="\n")
     return manifest
+
+
+@mcp.tool()
+def validate_sprite_for_game_export(
+    filename: str,
+    expected_width: int | None = None,
+    expected_height: int | None = None,
+    tile_multiple: int | None = None,
+    allowed_color_modes: list[str] | None = None,
+    min_frames: int | None = None,
+    max_frames: int | None = None,
+    required_tags: list[str] | None = None,
+    require_transparent_background: bool = False,
+    max_palette_size: int | None = None,
+    expected_exports: list[str] | None = None,
+    spritesheet_data: str | None = None,
+) -> dict:
+    """Check whether a sprite is game-ready against the criteria you specify.
+
+    Runs a series of checks — does the file open, do dimensions match (exactly or as
+    a tile multiple), is the colour mode allowed, are frame counts / required animation
+    tags present, is the background transparent, is the palette within budget, do
+    expected export files exist, and is sprite-sheet metadata readable — plus soft
+    warnings for oversized canvases, missing tags, and default/blank layer names.
+
+    All criteria are optional; only the ones you pass are enforced. Returns a
+    ``workflow_manifest.v1`` manifest (kind "validation") with a `validation` section
+    `{passed, checks[], errors[], warnings[]}`. `validation.passed` is the verdict;
+    `ok` just means the check ran.
+    """
+    path = resolve_path(filename)
+    if not path.exists():
+        report = {
+            "passed": False,
+            "checks": [{"name": "file_exists", "ok": False, "level": "error",
+                        "detail": f"no such file: {path}"}],
+            "errors": [f"no such file: {path}"],
+            "warnings": [],
+        }
+        return workflow_manifest(
+            "validation", validation=report, warnings=report["warnings"],
+            suggested_next_actions=["Create or export the sprite before validating it."],
+        )
+
+    try:
+        info = inspect.get_sprite_info(filename)
+    except AsepriteError as exc:
+        report = {
+            "passed": False,
+            "checks": [{"name": "opens", "ok": False, "level": "error", "detail": str(exc)}],
+            "errors": [str(exc)],
+            "warnings": [],
+        }
+        return workflow_manifest("validation", validation=report, warnings=report["warnings"])
+
+    transparent_corners = None
+    if require_transparent_background:
+        w, h = info["width"], info["height"]
+        transparent_corners = []
+        for x, y in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)):
+            px = inspect.get_pixels(filename, x, y, 1, 1)["pixels"][0][0]
+            transparent_corners.append(px[7:9] == "00")  # alpha byte == 00
+
+    missing_exports = None
+    if expected_exports is not None:
+        missing_exports = [p for p in expected_exports if not resolve_path(p).exists()]
+
+    unreadable_metadata = None
+    if spritesheet_data is not None:
+        meta = resolve_path(spritesheet_data)
+        if not meta.exists():
+            unreadable_metadata = str(meta)
+        else:
+            try:
+                json.loads(meta.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                unreadable_metadata = str(meta)
+
+    report = validation.evaluate(
+        info,
+        expected_width=expected_width,
+        expected_height=expected_height,
+        tile_multiple=tile_multiple,
+        allowed_color_modes=allowed_color_modes,
+        min_frames=min_frames,
+        max_frames=max_frames,
+        required_tags=required_tags,
+        max_palette_size=max_palette_size,
+        require_transparent_background=require_transparent_background,
+        transparent_corners=transparent_corners,
+        missing_exports=missing_exports,
+        unreadable_metadata=unreadable_metadata,
+    )
+
+    actions = (
+        ["The sprite passed all required checks — ready to export."]
+        if report["passed"]
+        else [f"Fix: {e}" for e in report["errors"]]
+    )
+    return workflow_manifest(
+        "validation",
+        sprite=sprite_summary(info),
+        validation=report,
+        warnings=report["warnings"],
+        suggested_next_actions=actions,
+    )

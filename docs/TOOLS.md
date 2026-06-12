@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **103 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **104 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -23,7 +23,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (10)
 - [Reference / rotoscope](#reference--rotoscope) (2)
-- [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (4)
+- [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (5)
 - [GUI companion mode](#gui-companion-mode) (2)
 - [Health & self-test](#health--self-test) (1)
 
@@ -1588,6 +1588,37 @@ Turn a single-frame sprite into a 4-frame idle "bob" loop.
 | `frame_duration_ms` | integer | no | 150 |
 | `bob_pixels` | integer | no | 1 |
 | `tag_name` | string | no | idle |
+
+
+### `validate_sprite_for_game_export`
+
+Check whether a sprite is game-ready against the criteria you specify.
+
+    Runs a series of checks — does the file open, do dimensions match (exactly or as
+    a tile multiple), is the colour mode allowed, are frame counts / required animation
+    tags present, is the background transparent, is the palette within budget, do
+    expected export files exist, and is sprite-sheet metadata readable — plus soft
+    warnings for oversized canvases, missing tags, and default/blank layer names.
+
+    All criteria are optional; only the ones you pass are enforced. Returns a
+    ``workflow_manifest.v1`` manifest (kind "validation") with a `validation` section
+    `{passed, checks[], errors[], warnings[]}`. `validation.passed` is the verdict;
+    `ok` just means the check ran.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `expected_width` | integer | null | no | None |
+| `expected_height` | integer | null | no | None |
+| `tile_multiple` | integer | null | no | None |
+| `allowed_color_modes` | array | null | no | None |
+| `min_frames` | integer | null | no | None |
+| `max_frames` | integer | null | no | None |
+| `required_tags` | array | null | no | None |
+| `require_transparent_background` | boolean | no | False |
+| `max_palette_size` | integer | null | no | None |
+| `expected_exports` | array | null | no | None |
+| `spritesheet_data` | string | null | no | None |
 
 
 ## GUI companion mode
