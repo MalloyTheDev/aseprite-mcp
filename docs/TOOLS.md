@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **104 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **107 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -23,7 +23,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (10)
 - [Reference / rotoscope](#reference--rotoscope) (2)
-- [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (5)
+- [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (8)
 - [GUI companion mode](#gui-companion-mode) (2)
 - [Health & self-test](#health--self-test) (1)
 
@@ -1538,6 +1538,38 @@ Scaffold a character sprite project: a transparent canvas with a tidy layer
 | `with_placeholder` | boolean | no | True |
 
 
+### `create_icon_set`
+
+Scaffold an icon set: a grid sheet with `count` icon cells, each a placeholder
+    inside a named slice (`icon_0`, `icon_1`, …) for easy atlas export.
+
+    Returns a ``workflow_manifest.v1`` manifest (kind "icon_set"); the per-icon regions
+    appear as slices under `sprite.slices`.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `name` | string | yes |  |
+| `icon_size` | integer | no | 16 |
+| `count` | integer | no | 4 |
+| `columns` | integer | null | no | None |
+
+
+### `create_rpg_item_sheet`
+
+Scaffold an RPG item sheet: a grid sheet with one named slice per item
+    (default sword/shield/potion/coin/key/gem), each with a placeholder.
+
+    Returns a ``workflow_manifest.v1`` manifest (kind "rpg_item_sheet"); item regions
+    appear as slices (named after each item) under `sprite.slices`.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `name` | string | yes |  |
+| `item_size` | integer | no | 16 |
+| `items` | array | null | no | None |
+| `columns` | integer | null | no | None |
+
+
 ### `create_tileset_project`
 
 Scaffold a tilemap project: a canvas sized columns×rows tiles, a tilemap layer,
@@ -1588,6 +1620,23 @@ Turn a single-frame sprite into a 4-frame idle "bob" loop.
 | `frame_duration_ms` | integer | no | 150 |
 | `bob_pixels` | integer | no | 1 |
 | `tag_name` | string | no | idle |
+
+
+### `make_8_direction_walk_template`
+
+Scaffold an 8-direction walk-cycle template on an existing sprite: enough frames
+    for `frames_per_direction` per direction, with one animation tag per direction
+    (N, NE, E, SE, S, SW, W, NW by default).
+
+    Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifest
+    (kind "walk_template") with an animation block listing the directions/tags.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `frames_per_direction` | integer | no | 4 |
+| `frame_duration_ms` | integer | no | 120 |
+| `directions` | array | null | no | None |
 
 
 ### `validate_sprite_for_game_export`

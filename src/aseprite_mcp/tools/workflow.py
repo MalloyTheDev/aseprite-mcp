@@ -11,6 +11,7 @@ with the low-level drawing/effects/tilemap tools.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from ..app import mcp
@@ -24,6 +25,7 @@ from . import (
     inspect,
     layers,
     palette,
+    slices,
     sprite,
     tags,
     tilemap,
@@ -336,4 +338,140 @@ def validate_sprite_for_game_export(
         validation=report,
         warnings=report["warnings"],
         suggested_next_actions=actions,
+    )
+
+
+_DEFAULT_ITEMS = ["sword", "shield", "potion", "coin", "key", "gem"]
+_DIRECTIONS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+def _grid_sheet(filename: str, cell: int, names: list[str], columns: int | None,
+                shape: str) -> dict:
+    """Scaffold a grid sheet: a cell per name, each with a placeholder + a named slice.
+    Returns the final get_sprite_info dict. (Shared by icon_set / rpg_item_sheet.)"""
+    if len(set(names)) != len(names):
+        raise ValueError("Cell/slice names must be unique.")
+    n = len(names)
+    cols = columns or min(n, 4)
+    rows = math.ceil(n / cols)
+    sprite.create_sprite(filename, cols * cell, rows * cell, "rgb")
+    ramp = palette.generate_ramp(
+        "#e0c060", steps=max(3, min(8, n)), hue_shift=200, light_range=0.5
+    )["colors"]
+    palette.set_palette(filename, ramp)
+    inset = max(1, cell // 6)
+    for i, nm in enumerate(names):
+        r, c = divmod(i, cols)
+        x0, y0 = c * cell, r * cell
+        color = ramp[i % len(ramp)]
+        if shape == "circle":
+            drawing.draw_ellipse(
+                filename, x0 + cell // 2, y0 + cell // 2,
+                cell // 2 - inset, cell // 2 - inset, color, filled=True
+            )
+        else:
+            drawing.draw_rectangle(
+                filename, x0 + inset, y0 + inset, cell - 2 * inset, cell - 2 * inset,
+                color, filled=True
+            )
+        slices.add_slice(filename, nm, x0, y0, cell, cell)
+    return inspect.get_sprite_info(filename)
+
+
+@mcp.tool()
+def create_icon_set(
+    name: str, icon_size: int = 16, count: int = 4, columns: int | None = None
+) -> dict:
+    """Scaffold an icon set: a grid sheet with `count` icon cells, each a placeholder
+    inside a named slice (`icon_0`, `icon_1`, …) for easy atlas export.
+
+    Returns a ``workflow_manifest.v1`` manifest (kind "icon_set"); the per-icon regions
+    appear as slices under `sprite.slices`.
+    """
+    if count < 1:
+        raise ValueError("count must be >= 1")
+    filename = _aseprite_name(name)
+    info = _grid_sheet(filename, icon_size, [f"icon_{i}" for i in range(count)], columns, "circle")
+    return workflow_manifest(
+        "icon_set",
+        sprite=sprite_summary(info),
+        created_files=[file_entry("source_sprite", info["path"], "aseprite")],
+        suggested_next_actions=[
+            "Draw each icon inside its named slice region.",
+            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', tile_multiple={icon_size}).",
+            f"Export the atlas: export_game_asset_bundle('{filename}').",
+        ],
+    )
+
+
+@mcp.tool()
+def create_rpg_item_sheet(
+    name: str, item_size: int = 16, items: list[str] | None = None, columns: int | None = None
+) -> dict:
+    """Scaffold an RPG item sheet: a grid sheet with one named slice per item
+    (default sword/shield/potion/coin/key/gem), each with a placeholder.
+
+    Returns a ``workflow_manifest.v1`` manifest (kind "rpg_item_sheet"); item regions
+    appear as slices (named after each item) under `sprite.slices`.
+    """
+    item_names = items or _DEFAULT_ITEMS
+    if not item_names:
+        raise ValueError("items must be non-empty when provided.")
+    filename = _aseprite_name(name)
+    info = _grid_sheet(filename, item_size, list(item_names), columns, "rect")
+    return workflow_manifest(
+        "rpg_item_sheet",
+        sprite=sprite_summary(info),
+        created_files=[file_entry("source_sprite", info["path"], "aseprite")],
+        suggested_next_actions=[
+            "Draw each item inside its named slice region.",
+            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', tile_multiple={item_size}).",
+            f"Export the atlas: export_game_asset_bundle('{filename}').",
+        ],
+    )
+
+
+@mcp.tool()
+def make_8_direction_walk_template(
+    filename: str,
+    frames_per_direction: int = 4,
+    frame_duration_ms: int = 120,
+    directions: list[str] | None = None,
+) -> dict:
+    """Scaffold an 8-direction walk-cycle template on an existing sprite: enough frames
+    for `frames_per_direction` per direction, with one animation tag per direction
+    (N, NE, E, SE, S, SW, W, NW by default).
+
+    Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifest
+    (kind "walk_template") with an animation block listing the directions/tags.
+    """
+    if frames_per_direction < 1:
+        raise ValueError("frames_per_direction must be >= 1")
+    dirs = directions or _DIRECTIONS_8
+    total = frames_per_direction * len(dirs)
+    info = inspect.get_sprite_info(filename)
+    while info["frameCount"] < total:
+        frames.add_frame(filename, frame_duration_ms, copy_from=1)
+        info = inspect.get_sprite_info(filename)
+    frames.set_all_frame_durations(filename, frame_duration_ms)
+    for i, direction in enumerate(dirs):
+        start = i * frames_per_direction + 1
+        tags.add_tag(filename, direction, start, start + frames_per_direction - 1, "forward")
+
+    final = inspect.get_sprite_info(filename)
+    return workflow_manifest(
+        "walk_template",
+        sprite=sprite_summary(final),
+        created_files=[file_entry("source_sprite", final["path"], "aseprite")],
+        animation={
+            "directions": list(dirs),
+            "frames_per_direction": frames_per_direction,
+            "duration_ms": frame_duration_ms,
+            "tags": [t["name"] for t in final["tags"]],
+        },
+        suggested_next_actions=[
+            "Draw each direction's walk frames under its tag.",
+            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', required_tags={dirs}).",
+            f"Export per direction: export_tags('{filename}', 'walk/{{tag}}_{{frame}}.png').",
+        ],
     )

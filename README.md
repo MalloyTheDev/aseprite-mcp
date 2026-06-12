@@ -26,7 +26,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **104 tools** — including high-level **workflow** tools that scaffold and validate whole
+- **107 tools** — including high-level **workflow** tools that scaffold and validate whole
   assets in one call — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
   tags, slices/9-patch, effects (gradients/outline/drop-shadow/colour adjustments), text
@@ -140,7 +140,7 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 104 tools will be available. Ask the
+Restart the client; the `aseprite` server and its 107 tools will be available. Ask the
 agent to run `health_check` to confirm Aseprite is wired up correctly.
 
 ---
@@ -157,6 +157,9 @@ scaffolding, no AI generation.
 | `create_character_sprite` | Transparent canvas + body/details layers + a generated shading ramp + an outlined placeholder. |
 | `make_4_frame_idle_animation` | Turn a 1-frame sprite into a 4-frame idle "bob" loop with a tag. |
 | `create_tileset_project` | Canvas + tilemap layer + a starter tileset (grass/dirt/water/stone, or your own). |
+| `create_icon_set` | Grid sheet of icon cells, each a placeholder inside a named slice (`icon_0`, …). |
+| `create_rpg_item_sheet` | Grid sheet with a named slice per item (sword/shield/potion/…). |
+| `make_8_direction_walk_template` | 8-direction walk template — frames + one tag per direction (N/NE/E/…). |
 | `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
 

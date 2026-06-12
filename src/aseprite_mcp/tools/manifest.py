@@ -35,6 +35,9 @@ VALID_KINDS = (
     "tileset_project",
     "game_asset_bundle",
     "validation",
+    "icon_set",
+    "walk_template",
+    "rpg_item_sheet",
 )
 FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest")
 EXPORT_ROLES = ("spritesheet", "gif", "png", "tag_gif", "frames")
@@ -91,6 +94,9 @@ def sprite_summary(info: dict) -> dict:
         "tags": [
             {"name": t["name"], "from": t["from"], "to": t["to"], "aniDir": t.get("aniDir")}
             for t in info["tags"]
+        ],
+        "slices": [
+            {"name": s["name"], "bounds": s["bounds"]} for s in info.get("slices", [])
         ],
     }
 

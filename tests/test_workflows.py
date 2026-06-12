@@ -96,3 +96,32 @@ def test_validate_sprite_for_game_export():
     missing = workflow.validate_sprite_for_game_export("w/does_not_exist.aseprite")
     assert missing["validation"]["passed"] is False
     assert any("no such file" in e for e in missing["validation"]["errors"])
+
+
+def _has_validate_suggestion(m):
+    return any("validate_sprite_for_game_export" in a for a in m["suggested_next_actions"])
+
+
+def test_create_icon_set():
+    m = workflow.create_icon_set("w/icons", icon_size=16, count=6, columns=3)
+    _assert_manifest(m, "icon_set")
+    assert m["sprite"]["width"] == 48 and m["sprite"]["height"] == 32  # 3x2 grid of 16px
+    assert [s["name"] for s in m["sprite"]["slices"]] == [f"icon_{i}" for i in range(6)]
+    assert _has_validate_suggestion(m)
+
+
+def test_create_rpg_item_sheet():
+    m = workflow.create_rpg_item_sheet("w/items", item_size=16, items=["sword", "potion", "coin"])
+    _assert_manifest(m, "rpg_item_sheet")
+    assert [s["name"] for s in m["sprite"]["slices"]] == ["sword", "potion", "coin"]
+    assert _has_validate_suggestion(m)
+
+
+def test_make_8_direction_walk_template():
+    workflow.create_character_sprite("w/walk", 16, 16)
+    m = workflow.make_8_direction_walk_template("w/walk.aseprite", frames_per_direction=2)
+    _assert_manifest(m, "walk_template")
+    assert m["sprite"]["frames"] == 16  # 8 directions x 2 frames
+    assert m["animation"]["directions"] == ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    assert len(m["animation"]["tags"]) == 8
+    assert _has_validate_suggestion(m)

@@ -85,3 +85,19 @@ def test_sprite_summary_shape():
     assert s["width"] == 32 and s["height"] == 16 and s["color_mode"] == "rgb"
     assert s["frames"] == 4 and s["layers"] == ["body", "details"]
     assert s["tags"][0]["name"] == "idle"
+    assert s["slices"] == []  # absent -> consistently empty
+
+
+def test_sprite_summary_includes_slices():
+    info = {
+        "width": 16, "height": 16, "colorMode": "rgb", "frameCount": 1,
+        "layers": [{"name": "Layer 1"}], "tags": [],
+        "slices": [{"name": "icon_0", "bounds": {"x": 0, "y": 0, "width": 8, "height": 8}}],
+    }
+    s = M.sprite_summary(info)
+    assert s["slices"][0]["name"] == "icon_0"
+
+
+def test_new_workflow_kinds_are_valid():
+    for kind in ("icon_set", "walk_template", "rpg_item_sheet", "validation"):
+        assert M.workflow_manifest(kind)["kind"] == kind
