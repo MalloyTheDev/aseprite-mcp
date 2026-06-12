@@ -16,6 +16,8 @@ import os
 import shutil
 from pathlib import Path
 
+from .errors import AsepriteNotFoundError, WorkspaceError
+
 # Project root = two levels up from this file (src/aseprite_mcp/config.py -> repo root).
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -36,7 +38,8 @@ _cached_exe: str | None = None
 
 
 def find_aseprite() -> str:
-    """Return the path to the Aseprite executable, or raise FileNotFoundError."""
+    """Return the path to the Aseprite executable, or raise AsepriteNotFoundError
+    (which is also a FileNotFoundError, for backwards compatibility)."""
     global _cached_exe
     if _cached_exe and Path(_cached_exe).exists():
         return _cached_exe
@@ -46,7 +49,7 @@ def find_aseprite() -> str:
         if Path(env).exists():
             _cached_exe = env
             return env
-        raise FileNotFoundError(
+        raise AsepriteNotFoundError(
             f"ASEPRITE_PATH is set to '{env}' but no file exists there."
         )
 
@@ -60,7 +63,7 @@ def find_aseprite() -> str:
             _cached_exe = candidate
             return candidate
 
-    raise FileNotFoundError(
+    raise AsepriteNotFoundError(
         "Could not locate Aseprite. Set the ASEPRITE_PATH environment variable to "
         "the full path of Aseprite.exe (e.g. "
         r"C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe)."
@@ -97,7 +100,7 @@ def resolve(filename: str) -> Path:
 
     if p.is_absolute():
         if not permissive:
-            raise ValueError(
+            raise WorkspaceError(
                 f"Absolute paths are disabled. Use a path relative to the workspace "
                 f"({ws}), or set ASEPRITE_MCP_ALLOW_ABSOLUTE=1 to allow absolute paths."
             )
@@ -108,10 +111,10 @@ def resolve(filename: str) -> Path:
             try:
                 full.relative_to(ws)
             except ValueError:
-                raise ValueError(
+                raise WorkspaceError(
                     f"Path '{filename}' escapes the workspace ({ws}). Remove '..' "
                     f"segments, or set ASEPRITE_MCP_ALLOW_ABSOLUTE=1 to allow it."
-                )
+                ) from None
 
     full.parent.mkdir(parents=True, exist_ok=True)
     return full
