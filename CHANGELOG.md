@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-12
+
+### Added
+- **Workflow pack 2** — three more high-level generators, each returning a
+  `workflow_manifest.v1` that suggests a follow-up `validate_sprite_for_game_export` call:
+  `create_icon_set` and `create_rpg_item_sheet` (grid sheets with a placeholder + a named
+  slice per cell) and `make_8_direction_walk_template` (frames + one animation tag per
+  direction). `sprite_summary` now reports `slices`.
+- **Top-of-README showcase** — a three-tier gallery (Easy / Medium / Hard) demonstrating
+  the create → animate → validate → export pipeline, with media generated entirely via the
+  MCP tools (`docs/assets/showcase/`).
+
 ## [0.4.0] - 2026-06-12
 
 ### Added
@@ -83,6 +95,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.5.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.2.0
