@@ -85,7 +85,7 @@ def _params_table(schema: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def main() -> None:
+async def main(check: bool = False) -> int:
     name_to_mod = _build_name_to_module()
     tools = await mcp.list_tools()
     by_mod: dict[str, list] = {}
@@ -128,11 +128,34 @@ async def main() -> None:
             out.append(_params_table(t.inputSchema or {}))
             out.append("")
 
+    content = "\n".join(out)
     path = Path(__file__).resolve().parents[1] / "docs" / "TOOLS.md"
+
+    if check:
+        current = path.read_text(encoding="utf-8") if path.exists() else ""
+        if current == content:
+            print(f"docs/TOOLS.md is up to date ({len(tools)} tools).")
+            return 0
+        print(
+            "docs/TOOLS.md is OUT OF DATE. Run `uv run python scripts/gen_tool_docs.py` "
+            "to regenerate it."
+        )
+        return 1
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(out), encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
     print(f"Wrote {path} ({len(tools)} tools)")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate or verify docs/TOOLS.md.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Verify docs/TOOLS.md is up to date (exit 1 if not) instead of writing it.",
+    )
+    args = parser.parse_args()
+    raise SystemExit(asyncio.run(main(check=args.check)))

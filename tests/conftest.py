@@ -1,10 +1,16 @@
-"""Pytest configuration.
+"""Pytest configuration and the --run-aseprite gate.
 
-- Points the workspace at a temp dir and allows absolute paths so integration
-  tests can export to pytest's tmp_path.
-- Skips the Aseprite-dependent suites when Aseprite isn't installed, but always
-  runs the pure-Python unit tests (test_unit.py) so CI has real coverage without
-  an Aseprite license.
+Test tiers:
+  * Pure-Python unit tests (test_unit.py) ALWAYS run — no Aseprite needed. This is
+    what CI exercises for real on every push.
+  * Aseprite integration & golden-output tests run ONLY when `--run-aseprite` is
+    passed (and Aseprite is installed). They are the local/optional release gate:
+
+        uv run pytest                 # fast: unit tests only
+        uv run pytest --run-aseprite  # full: unit + integration + golden
+
+The workspace points at a temp dir, and absolute paths are allowed so integration
+tests can export into pytest's tmp_path.
 """
 
 import os
@@ -12,6 +18,15 @@ import os
 import pytest
 
 from aseprite_mcp import config as ase_config
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-aseprite",
+        action="store_true",
+        default=False,
+        help="Run integration/golden tests that drive a real Aseprite install.",
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -24,14 +39,19 @@ def _workspace(tmp_path_factory):
 
 
 def pytest_collection_modifyitems(config, items):
-    try:
-        ase_config.find_aseprite()
-        return  # Aseprite present: run everything.
-    except FileNotFoundError:
-        pass
-    skip = pytest.mark.skip(reason="Aseprite executable not found (set ASEPRITE_PATH).")
+    run_aseprite = config.getoption("--run-aseprite")
+    missing_reason = None
+    if run_aseprite:
+        try:
+            ase_config.find_aseprite()
+        except FileNotFoundError as exc:
+            missing_reason = f"--run-aseprite was given but Aseprite was not found: {exc}"
+
     for item in items:
-        # Pure-Python unit tests don't need Aseprite — always run them.
+        # Pure-Python unit tests always run.
         if "test_unit" in item.nodeid:
             continue
-        item.add_marker(skip)
+        if not run_aseprite:
+            item.add_marker(pytest.mark.skip(reason="needs --run-aseprite (Aseprite integration test)"))
+        elif missing_reason:
+            item.add_marker(pytest.mark.skip(reason=missing_reason))
