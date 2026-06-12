@@ -13,6 +13,7 @@ from .tools import (  # noqa: F401,E402
     export,
     frames,
     gui,
+    health,
     image,
     inspect,
     layers,

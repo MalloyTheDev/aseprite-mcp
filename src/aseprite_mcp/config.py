@@ -6,6 +6,8 @@ works on any machine:
     ASEPRITE_PATH            Absolute path to Aseprite.exe (or `aseprite` binary).
     ASEPRITE_MCP_WORKSPACE   Directory where relative sprite paths are resolved.
     ASEPRITE_MCP_TIMEOUT     Per-invocation timeout in seconds (default 90).
+    ASEPRITE_MCP_ALLOW_ABSOLUTE  Set to 1/true to permit absolute paths and paths
+                             that escape the workspace. Off by default (sandboxed).
 """
 
 from __future__ import annotations
@@ -73,14 +75,44 @@ def workspace() -> Path:
     return base
 
 
-def resolve(filename: str) -> Path:
-    """Resolve a user-supplied filename to an absolute path.
+def allow_absolute() -> bool:
+    """Whether absolute / workspace-escaping paths are permitted (off by default)."""
+    return os.environ.get("ASEPRITE_MCP_ALLOW_ABSOLUTE", "").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
 
-    Absolute paths are used as-is; relative paths are placed under the workspace.
+
+def resolve(filename: str) -> Path:
+    """Resolve a user-supplied filename to an absolute path, sandboxed to the workspace.
+
+    By default the file capability is scoped to the workspace: relative paths only,
+    and any path that escapes the workspace (absolute, or via ``..``) is rejected.
+    Set ASEPRITE_MCP_ALLOW_ABSOLUTE=1 to opt out and allow arbitrary paths.
+
     Parent directories are created so saves never fail on a missing folder.
     """
+    ws = workspace().resolve()
     p = Path(filename).expanduser()
-    full = p if p.is_absolute() else (workspace() / p)
+    permissive = allow_absolute()
+
+    if p.is_absolute():
+        if not permissive:
+            raise ValueError(
+                f"Absolute paths are disabled. Use a path relative to the workspace "
+                f"({ws}), or set ASEPRITE_MCP_ALLOW_ABSOLUTE=1 to allow absolute paths."
+            )
+        full = p
+    else:
+        full = (ws / p).resolve()
+        if not permissive:
+            try:
+                full.relative_to(ws)
+            except ValueError:
+                raise ValueError(
+                    f"Path '{filename}' escapes the workspace ({ws}). Remove '..' "
+                    f"segments, or set ASEPRITE_MCP_ALLOW_ABSOLUTE=1 to allow it."
+                )
+
     full.parent.mkdir(parents=True, exist_ok=True)
     return full
 

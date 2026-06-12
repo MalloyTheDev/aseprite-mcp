@@ -36,6 +36,7 @@ GROUPS = [
     ("export", "Export & import"),
     ("reference", "Reference / rotoscope"),
     ("gui", "GUI companion mode"),
+    ("health", "Health & self-test"),
 ]
 
 

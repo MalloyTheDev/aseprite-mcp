@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `health_check` self-test tool — reports whether Aseprite is found, its version, the
+  workspace, the registered tool count, and a real create-sprite + export-PNG round-trip.
+- Pure-Python unit tests (`parse_color`, `to_lua`, path sandbox) that run in CI **without**
+  an Aseprite install, giving real coverage even where the integration suite skips.
+
+### Changed
+- **Security: file access is now sandboxed to the workspace by default.** Relative paths
+  only; absolute paths and paths that escape the workspace via `..` are rejected unless
+  `ASEPRITE_MCP_ALLOW_ABSOLUTE=1` is set. (Previously absolute paths were always honoured.)
+
+### Docs
+- Promoted the slime animation + sprite to the README hero; added a Security section.
+
 ## [0.1.0] - 2026-06-12
 
 Initial release. **98 tools** driving Aseprite 1.3+ headlessly via batch Lua scripting

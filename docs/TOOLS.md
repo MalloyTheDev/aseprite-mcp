@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **98 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **99 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -24,6 +24,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Export & import](#export--import) (10)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [GUI companion mode](#gui-companion-mode) (2)
+- [Health & self-test](#health--self-test) (1)
 
 ## Sprite lifecycle
 
@@ -1540,4 +1541,17 @@ Open a sprite in the Aseprite GUI window (non-blocking) for live viewing.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
+
+
+## Health & self-test
+
+### `health_check`
+
+Run a self-test of the server and its Aseprite integration.
+
+    Returns whether Aseprite was found, its version, the resolved workspace, the
+    number of registered tools, and whether a real create-sprite + export-PNG
+    round-trip succeeds. `ok` is True only if the full round-trip works.
+
+_No parameters._
 

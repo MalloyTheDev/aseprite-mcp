@@ -5,6 +5,15 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-server-purple.svg)](https://modelcontextprotocol.io)
 
+<p align="center">
+  <img src="assets/slime.gif" width="170" alt="Animated slime made entirely via Aseprite MCP">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/slime.png" width="170" alt="Slime sprite made entirely via Aseprite MCP">
+</p>
+<p align="center">
+  <sub>This slime was drawn, shaded, outlined, and animated <strong>entirely through MCP tool calls</strong> — no manual pixel-pushing.</sub>
+</p>
+
 An extensive [Model Context Protocol](https://modelcontextprotocol.io) server that lets an
 AI agent (Claude Code, Claude Desktop, or any MCP client) **create and edit
 [Aseprite](https://www.aseprite.org/) sprites** — draw pixel art, build animations,
@@ -17,11 +26,14 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **98 tools** across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
+- **99 tools** across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
   tags, slices/9-patch, effects (gradients/outline/drop-shadow/colour adjustments), text
   rendering, tilemaps, image stamping, reference/rotoscope layers, transforms, rich
-  export (per-layer/per-tag, sprite sheets, onion-skin), and a GUI companion view.
+  export (per-layer/per-tag, sprite sheets, onion-skin), a GUI companion view, and a
+  `health_check` self-test.
+- **Sandboxed file access** — by default the file capability is scoped to the workspace
+  (relative paths only; absolute/`..` paths rejected unless you opt in).
 - **Structured results** — every tool returns JSON describing the updated sprite.
 - **`render_preview`** returns a PNG so the agent can *see* its work and self-correct.
 - **Deterministic, stateless, robust** — each call is an isolated, headless Aseprite run.
@@ -34,14 +46,12 @@ Everything below was produced **entirely through MCP tool calls** — no manual 
 exercising drawing, shading, outlines, animation, tilemaps, and palette generation.
 
 <p align="center">
-  <img src="assets/slime.gif" width="130" alt="Animated bouncing slime (4-frame GIF)">
-  &nbsp;&nbsp;&nbsp;
-  <img src="assets/skeleton.png" width="130" alt="Pixel-art skeleton">
-  &nbsp;&nbsp;&nbsp;
-  <img src="assets/tilemap_scene.png" width="250" alt="Tilemap scene: grass, dirt, water, stone">
+  <img src="assets/skeleton.png" width="140" alt="Pixel-art skeleton">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/tilemap_scene.png" width="270" alt="Tilemap scene: grass, dirt, water, stone">
 </p>
 <p align="center">
-  <sub>A bouncing slime (4-frame animation), a skeleton, and a tilemap scene built from 4 painted tiles.</sub>
+  <sub>A skeleton character, and a tilemap scene built from 4 painted tiles (grass, dirt, water, stone).</sub>
 </p>
 <p align="center">
   <img src="assets/ramp.png" width="300" alt="Hue-shifted shading ramp from generate_ramp">
@@ -82,6 +92,7 @@ Everything is configurable via environment variables (all optional):
 | `ASEPRITE_PATH` | Full path to `Aseprite.exe` / `aseprite`. | Auto-detected (Steam, standalone, PATH). |
 | `ASEPRITE_MCP_WORKSPACE` | Folder where **relative** sprite paths are resolved. | `<repo>/workspace` |
 | `ASEPRITE_MCP_TIMEOUT` | Per-operation timeout in seconds. | `90` |
+| `ASEPRITE_MCP_ALLOW_ABSOLUTE` | Allow absolute / workspace-escaping paths (`1`/`true` to enable). | off (sandboxed) |
 
 On this machine Aseprite was detected at
 `C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe`, so `ASEPRITE_PATH`
@@ -128,13 +139,15 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 98 tools will be available.
+Restart the client; the `aseprite` server and its 99 tools will be available. Ask the
+agent to run `health_check` to confirm Aseprite is wired up correctly.
 
 ---
 
 ## Tool catalogue
 
-Relative filenames resolve inside the workspace; absolute paths are honoured.
+Relative filenames resolve inside the workspace (absolute paths require
+`ASEPRITE_MCP_ALLOW_ABSOLUTE=1` — see [Security](#security)).
 Frames and palette-aware operations are **1-based** for frames, **0-based** for palette
 indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name
 (`black`, `white`, `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `transparent`, …).
@@ -280,6 +293,11 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `open_in_editor` | Open a sprite in the live Aseprite GUI window (non-blocking) to watch edits. |
 | `gui_available` | Report whether the Aseprite GUI can be launched. |
 
+### Health & self-test
+| Tool | Description |
+| --- | --- |
+| `health_check` | Self-test: Aseprite found?, version, workspace, tool count, and a real create+export round-trip. |
+
 ---
 
 ## Live viewing (GUI companion mode)
@@ -348,6 +366,21 @@ docs/TOOLS.md     full auto-generated tool reference
 scripts/          gen_tool_docs.py (regenerates docs/TOOLS.md)
 tests/            pytest suite (auto-skips without Aseprite)
 ```
+
+## Security
+
+This server hands an AI agent a **file capability**, so access is scoped by default:
+
+- **Workspace-sandboxed paths.** Relative filenames resolve under
+  `ASEPRITE_MCP_WORKSPACE` (default `<repo>/workspace`). Absolute paths and paths that
+  escape the workspace via `..` are **rejected** unless you set
+  `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
+- **No shell, no injection.** Aseprite is invoked with list-form arguments (never a
+  shell), and every user value is passed into generated Lua through an escaped `ARG`
+  table — user input is never concatenated into Lua source.
+- **Bring your own Aseprite.** The server only runs the Aseprite binary you point it at.
+
+Run `health_check` to confirm the configuration (Aseprite path, workspace, sandbox state).
 
 ## Notes & limitations
 
