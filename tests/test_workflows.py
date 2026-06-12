@@ -71,3 +71,28 @@ def test_export_game_asset_bundle():
         assert os.path.getsize(e["path"]) > 0
     for f in m["created_files"]:
         assert os.path.getsize(f["path"]) > 0  # manifest.json
+
+
+def test_validate_sprite_for_game_export():
+    workflow.create_character_sprite("w/val", 32, 32)
+    workflow.make_4_frame_idle_animation("w/val.aseprite")
+
+    ok = workflow.validate_sprite_for_game_export(
+        "w/val.aseprite",
+        expected_width=32, expected_height=32,
+        allowed_color_modes=["rgb"],
+        min_frames=4, required_tags=["idle"],
+    )
+    _assert_manifest(ok, "validation")
+    assert ok["validation"]["passed"] is True
+    assert ok["validation"]["errors"] == []
+
+    bad = workflow.validate_sprite_for_game_export(
+        "w/val.aseprite", expected_width=64, required_tags=["walk"]
+    )
+    assert bad["validation"]["passed"] is False
+    assert len(bad["validation"]["errors"]) >= 2  # wrong width + missing tag
+
+    missing = workflow.validate_sprite_for_game_export("w/does_not_exist.aseprite")
+    assert missing["validation"]["passed"] is False
+    assert any("no such file" in e for e in missing["validation"]["errors"])
