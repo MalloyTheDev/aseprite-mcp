@@ -36,6 +36,8 @@ Aseprite GUI.
   `health_check` self-test.
 - **Sandboxed file access** — by default the file capability is scoped to the workspace
   (relative paths only; absolute/`..` paths rejected unless you opt in).
+- **No-clobber by default** — output-writing tools refuse to overwrite an existing file;
+  pass `overwrite=True` to replace it intentionally.
 - **Structured results** — every tool returns JSON describing the updated sprite.
 - **`render_preview`** returns a PNG so the agent can *see* its work and self-correct.
 - **Deterministic, stateless, robust** — each call is an isolated, headless Aseprite run.
@@ -493,8 +495,12 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
 
 - **Workspace-sandboxed paths.** Relative filenames resolve under
   `ASEPRITE_MCP_WORKSPACE` (default `<repo>/workspace`). Absolute paths and paths that
-  escape the workspace via `..` are **rejected** unless you set
-  `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
+  escape the workspace via `..` (or a symlink that points outside it) are **rejected**
+  unless you set `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
+- **No-clobber by default.** Output-writing tools (`create_sprite`, `save_sprite_as`,
+  `export_*`, `export_game_asset_bundle`) refuse to overwrite an existing file; pass
+  `overwrite=True` to replace it on purpose. Multi-file exports validate every target up
+  front, so they fail before writing anything if any target already exists.
 - **No shell, no injection.** Aseprite is invoked with list-form arguments (never a
   shell), and every user value is passed into generated Lua through an escaped `ARG`
   table — user input is never concatenated into Lua source.

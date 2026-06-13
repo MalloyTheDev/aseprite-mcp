@@ -7,6 +7,8 @@ same workspace rules as everything else.
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.errors import ExportError
+from ..core.paths import ensure_output_path
 from ..core.runner import run_cli, run_lua
 from .common import lua_path, resolve_path
 
@@ -14,16 +16,19 @@ _SHEET_TYPES = {"horizontal", "vertical", "rows", "columns", "packed"}
 
 
 @mcp.tool()
-def export_png(filename: str, output: str, frame: int = 1, scale: int = 1) -> dict:
+def export_png(
+    filename: str, output: str, frame: int = 1, scale: int = 1, overwrite: bool = False
+) -> dict:
     """Export one frame as a flattened PNG.
 
     Args:
         output: Destination .png path.
         frame: Frame to export, 1-based (default 1).
         scale: Integer upscaling factor (default 1).
+        overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
     src = resolve_path(filename)
-    out = resolve_path(output)
+    out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     f0 = max(0, int(frame) - 1)
     run_cli([
         str(src),
@@ -35,10 +40,13 @@ def export_png(filename: str, output: str, frame: int = 1, scale: int = 1) -> di
 
 
 @mcp.tool()
-def export_gif(filename: str, output: str, scale: int = 1) -> dict:
-    """Export the full animation as an animated GIF (honours frame durations & tags)."""
+def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = False) -> dict:
+    """Export the full animation as an animated GIF (honours frame durations & tags).
+
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+    """
     src = resolve_path(filename)
-    out = resolve_path(output)
+    out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     run_cli([str(src), "--scale", str(max(1, int(scale))), "--save-as", str(out)])
     return {"ok": True, "output": str(out), "scale": int(scale)}
 
@@ -69,6 +77,7 @@ def export_spritesheet(
     ignore_layer: str | None = None,
     split_layers: bool = False,
     split_tags: bool = False,
+    overwrite: bool = False,
 ) -> dict:
     """Export frames into a single sprite-sheet image.
 
@@ -83,11 +92,19 @@ def export_spritesheet(
         ignore_layer: Exclude this layer (e.g. a "reference" layer).
         split_layers: Lay out each layer as separate cels in the sheet.
         split_tags: Treat each tag as a separate set in the sheet.
+        overwrite: Replace existing output(s) (default False = no-clobber). When
+            data_output is given, both files are checked before anything is written.
     """
     if sheet_type not in _SHEET_TYPES:
         raise ValueError(f"sheet_type must be one of {sorted(_SHEET_TYPES)}")
     src = resolve_path(filename)
-    out = resolve_path(output)
+    # Validate every target up front so a multi-file export fails before writing any file.
+    out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
+    data_path = (
+        ensure_output_path(data_output, overwrite=overwrite, error_type=ExportError)
+        if data_output
+        else None
+    )
     cli = [
         str(src),
         "--sheet", str(out),
@@ -105,8 +122,7 @@ def export_spritesheet(
     if split_tags:
         cli.append("--split-tags")
     result = {"ok": True, "output": str(out), "sheet_type": sheet_type}
-    if data_output:
-        data_path = resolve_path(data_output)
+    if data_path is not None:
         cli += ["--data", str(data_path), "--format", "json-array", "--list-tags", "--list-slices"]
         result["data_output"] = str(data_path)
     run_cli(cli)
