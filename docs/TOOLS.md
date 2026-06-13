@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **108 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **109 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -22,6 +22,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (10)
+- [Engine export presets](#engine-export-presets) (1)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (8)
 - [Batch operations](#batch-operations) (1)
@@ -1488,6 +1489,43 @@ Create an editable .aseprite sprite from a flat image (.png/.bmp/.jpg/...).
 | --- | --- | --- | --- |
 | `input_image` | string | yes |  |
 | `output` | string | yes |  |
+
+
+## Engine export presets
+
+### `export_godot_spriteframes`
+
+Export a sprite as a Godot 4 ``SpriteFrames`` resource (.tres) + a packed sheet.
+
+    Produces three files: a packed PNG sprite sheet, its JSON frame/tag metadata, and a
+    ``SpriteFrames`` .tres that references the sheet via ``AtlasTexture`` regions — one
+    Godot animation per Aseprite tag (or a single ``default`` animation if untagged), with
+    per-frame timing taken from Aseprite frame durations.
+
+    v1 emits ``SpriteFrames`` only (no pivot/origin/hitbox/9-slice). Aseprite tag direction
+    isn't represented (Godot animations only loop or not); ``default_loop`` is applied to all.
+
+    Args:
+        output: Destination .tres path (workspace-relative).
+        sheet_output: Sheet PNG path. Defaults to ``<output stem>.png`` beside the .tres.
+        scale: Integer upscaling factor for the sheet.
+        texture_res_path: The ``res://`` path of the sheet inside your Godot project (the
+            AtlasTexture atlas). Defaults to ``res://<sheet filename>`` (same-folder import).
+        default_loop: ``loop`` flag for every generated animation (default True).
+        overwrite: Replace existing outputs (default False = no-clobber). All three targets
+            are validated up front, so nothing is written if any already exists.
+
+    Returns a ``workflow_manifest.v1`` manifest (kind ``engine_preset``).
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `output` | string | yes |  |
+| `sheet_output` | string | null | no | None |
+| `scale` | integer | no | 1 |
+| `texture_res_path` | string | null | no | None |
+| `default_loop` | boolean | no | True |
+| `overwrite` | boolean | no | False |
 
 
 ## Reference / rotoscope

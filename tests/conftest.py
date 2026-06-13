@@ -23,6 +23,7 @@ from aseprite_mcp import config as ase_config
 PURE_PYTHON_TESTS = (
     "test_unit", "test_manifest", "test_validation", "test_errors", "test_models",
     "test_imports", "test_oplib", "test_output_paths", "test_limits", "test_properties",
+    "test_engine_godot",
 )
 
 

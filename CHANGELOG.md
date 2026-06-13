@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Godot export preset** — `export_godot_spriteframes` exports a sprite as a Godot 4
+  `SpriteFrames` resource (.tres) plus a packed sheet (+ JSON rects): one Godot animation
+  per Aseprite tag (or a single `default` animation when untagged), each frame an
+  `AtlasTexture` region, with per-frame timing derived from Aseprite frame durations. The
+  pure builder lives in `core/engines/godot.py`. v1 is SpriteFrames only — no
+  pivot/origin/hitbox/9-slice; tag direction isn't mapped (Godot animations only loop).
+  (109 tools.)
+
 ### Security
 - **Collection size limits (DoS guard).** Batch op-lists and explicit pixel/point/tile/
   colour lists are now capped; exceeding a cap raises `ValidationFailed` before any work

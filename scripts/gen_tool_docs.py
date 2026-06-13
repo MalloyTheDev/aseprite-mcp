@@ -34,6 +34,7 @@ GROUPS = [
     ("slices", "Slices"),
     ("transform", "Transforms"),
     ("export", "Export & import"),
+    ("export_presets", "Engine export presets"),
     ("reference", "Reference / rotoscope"),
     ("workflow", "Workflows (high-level scaffolding)"),
     ("batch", "Batch operations"),
