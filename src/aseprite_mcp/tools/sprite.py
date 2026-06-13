@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.paths import ensure_output_path
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -14,6 +15,7 @@ def create_sprite(
     height: int,
     color_mode: str = "rgb",
     background: str | None = None,
+    overwrite: bool = False,
 ) -> dict:
     """Create a new sprite file and save it.
 
@@ -24,12 +26,13 @@ def create_sprite(
         color_mode: "rgb" (default), "indexed", or "gray".
         background: Optional fill colour for the first layer (e.g. "#1d2b53").
             Omit for a transparent canvas.
+        overwrite: Replace `filename` if it already exists (default False = no-clobber).
 
     Returns the new sprite's structured info.
     """
     if not (1 <= width <= 65535) or not (1 <= height <= 65535):
         raise ValueError("width and height must be between 1 and 65535")
-    path = resolve_path(filename)
+    path = ensure_output_path(filename, overwrite=overwrite)
     args = {
         "path": lua_path(path),
         "width": int(width),
@@ -55,14 +58,18 @@ def create_sprite(
 
 
 @mcp.tool()
-def save_sprite_as(filename: str, new_filename: str, flatten: bool = False) -> dict:
+def save_sprite_as(
+    filename: str, new_filename: str, flatten: bool = False, overwrite: bool = False
+) -> dict:
     """Save a copy of a sprite under a new path (optionally flattened).
 
     The original file is left untouched. Useful for exporting an editable
     .aseprite to another .aseprite, or snapshotting a version.
+
+    overwrite: Replace `new_filename` if it already exists (default False = no-clobber).
     """
     src = resolve_path(filename)
-    dst = resolve_path(new_filename)
+    dst = ensure_output_path(new_filename, overwrite=overwrite)
     args = {"src": lua_path(src), "dst": lua_path(dst), "flatten": bool(flatten)}
     body = """
     local spr = open_sprite(ARG.src)

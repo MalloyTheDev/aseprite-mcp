@@ -16,8 +16,10 @@ from pathlib import Path
 
 from ..app import mcp
 from ..core import validation
+from ..core.errors import ExportError
 from ..core.manifest import export_entry, file_entry, sprite_summary, workflow_manifest
 from ..core.models import Rect
+from ..core.paths import ensure_output_path
 from ..core.runner import AsepriteError
 from . import (
     cels,
@@ -194,10 +196,16 @@ def export_game_asset_bundle(
     filename: str,
     bundle_name: str | None = None,
     scale: int = 1,
+    overwrite: bool = False,
 ) -> dict:
     """Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
     GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
     `manifest.json` describing everything.
+
+    Args:
+        overwrite: Replace existing bundle files (default False = no-clobber). Every
+            planned output is checked up front, so the bundle fails before writing any
+            file if a target already exists.
 
     Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
     disk as manifest.json inside the bundle).
@@ -209,19 +217,33 @@ def export_game_asset_bundle(
     def rel(p: str) -> str:
         return f"{bundle}/{p}"
 
+    png_rel = rel(f"{base}.png")
+    gif_rel = rel(f"{base}.gif")
+    sheet_rel = rel(f"{base}_sheet.png")
+    sheet_data_rel = rel(f"{base}_sheet.json")
+    tag_rels = [(t["name"], rel(f"{base}_{t['name']}.gif")) for t in info["tags"]]
+    manifest_rel = rel("manifest.json")
+
+    # Validate every planned output up front so the bundle fails before writing any
+    # file when a target already exists and overwrite is False.
+    for planned in (png_rel, gif_rel, sheet_rel, sheet_data_rel,
+                    *(p for _, p in tag_rels), manifest_rel):
+        ensure_output_path(planned, overwrite=overwrite, error_type=ExportError)
+
+    # Sub-exports use overwrite=True: the up-front pass already enforced the policy.
     exports = [
-        export_entry("png", export.export_png(filename, rel(f"{base}.png"), 1, scale)["output"], "png"),
-        export_entry("gif", export.export_gif(filename, rel(f"{base}.gif"), scale)["output"], "gif"),
+        export_entry("png", export.export_png(filename, png_rel, 1, scale, overwrite=True)["output"], "png"),
+        export_entry("gif", export.export_gif(filename, gif_rel, scale, overwrite=True)["output"], "gif"),
     ]
     sheet = export.export_spritesheet(
-        filename, rel(f"{base}_sheet.png"), "packed", scale, rel(f"{base}_sheet.json")
+        filename, sheet_rel, "packed", scale, sheet_data_rel, overwrite=True
     )
     exports.append(export_entry("spritesheet", sheet["output"], "png", metadata_path=sheet["data_output"]))
-    for tag in info["tags"]:
-        out = export.export_tag_gif(filename, tag["name"], rel(f"{base}_{tag['name']}.gif"), scale)
+    for tag_name, tag_rel in tag_rels:
+        out = export.export_tag_gif(filename, tag_name, tag_rel, scale)
         exports.append(export_entry("tag_gif", out["output"], "gif"))
 
-    manifest_path = resolve_path(rel("manifest.json"))
+    manifest_path = resolve_path(manifest_rel)
     manifest = workflow_manifest(
         "game_asset_bundle",
         sprite=sprite_summary(info),

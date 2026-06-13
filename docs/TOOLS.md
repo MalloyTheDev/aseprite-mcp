@@ -60,6 +60,7 @@ Create a new sprite file and save it.
         color_mode: "rgb" (default), "indexed", or "gray".
         background: Optional fill colour for the first layer (e.g. "#1d2b53").
             Omit for a transparent canvas.
+        overwrite: Replace `filename` if it already exists (default False = no-clobber).
 
     Returns the new sprite's structured info.
 
@@ -70,6 +71,7 @@ Create a new sprite file and save it.
 | `height` | integer | yes |  |
 | `color_mode` | string | no | rgb |
 | `background` | string | null | no | None |
+| `overwrite` | boolean | no | False |
 
 
 ### `crop_sprite`
@@ -116,11 +118,14 @@ Save a copy of a sprite under a new path (optionally flattened).
     The original file is left untouched. Useful for exporting an editable
     .aseprite to another .aseprite, or snapshotting a version.
 
+    overwrite: Replace `new_filename` if it already exists (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `new_filename` | string | yes |  |
 | `flatten` | boolean | no | False |
+| `overwrite` | boolean | no | False |
 
 
 ### `scale_sprite`
@@ -1331,11 +1336,14 @@ Export each frame to its own image file.
 
 Export the full animation as an animated GIF (honours frame durations & tags).
 
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output` | string | yes |  |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_layer`
@@ -1395,6 +1403,7 @@ Export one frame as a flattened PNG.
         output: Destination .png path.
         frame: Frame to export, 1-based (default 1).
         scale: Integer upscaling factor (default 1).
+        overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1402,6 +1411,7 @@ Export one frame as a flattened PNG.
 | `output` | string | yes |  |
 | `frame` | integer | no | 1 |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_spritesheet`
@@ -1419,6 +1429,8 @@ Export frames into a single sprite-sheet image.
         ignore_layer: Exclude this layer (e.g. a "reference" layer).
         split_layers: Lay out each layer as separate cels in the sheet.
         split_tags: Treat each tag as a separate set in the sheet.
+        overwrite: Replace existing output(s) (default False = no-clobber). When
+            data_output is given, both files are checked before anything is written.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1432,6 +1444,7 @@ Export frames into a single sprite-sheet image.
 | `ignore_layer` | string | null | no | None |
 | `split_layers` | boolean | no | False |
 | `split_tags` | boolean | no | False |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_tag_gif`
@@ -1595,6 +1608,11 @@ Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
     GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
     `manifest.json` describing everything.
 
+    Args:
+        overwrite: Replace existing bundle files (default False = no-clobber). Every
+            planned output is checked up front, so the bundle fails before writing any
+            file if a target already exists.
+
     Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
     disk as manifest.json inside the bundle).
 
@@ -1603,6 +1621,7 @@ Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
 | `filename` | string | yes |  |
 | `bundle_name` | string | null | no | None |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `make_4_frame_idle_animation`
