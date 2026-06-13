@@ -52,10 +52,15 @@ def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = Fal
 
 
 @mcp.tool()
-def export_tag_gif(filename: str, tag: str, output: str, scale: int = 1) -> dict:
-    """Export only the frames of a named animation tag as an animated GIF."""
+def export_tag_gif(
+    filename: str, tag: str, output: str, scale: int = 1, overwrite: bool = False
+) -> dict:
+    """Export only the frames of a named animation tag as an animated GIF.
+
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+    """
     src = resolve_path(filename)
-    out = resolve_path(output)
+    out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     run_cli([
         str(src),
         "--tag", tag,

@@ -240,7 +240,7 @@ def export_game_asset_bundle(
     )
     exports.append(export_entry("spritesheet", sheet["output"], "png", metadata_path=sheet["data_output"]))
     for tag_name, tag_rel in tag_rels:
-        out = export.export_tag_gif(filename, tag_name, tag_rel, scale)
+        out = export.export_tag_gif(filename, tag_name, tag_rel, scale, overwrite=True)
         exports.append(export_entry("tag_gif", out["output"], "gif"))
 
     manifest_path = resolve_path(manifest_rel)
