@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-13
+
+Safety hardening patch release. The default output behaviour is now no-clobber.
+
+### Security
+- **No-clobber output policy** — output-writing tools (`create_sprite`, `save_sprite_as`,
+  `export_png`, `export_gif`, `export_spritesheet`, `export_game_asset_bundle`) now refuse
+  to overwrite an existing file by default. Pass `overwrite=True` to replace one
+  intentionally. Multi-file exports (sprite sheet + JSON, asset bundle) validate **every**
+  planned output up front, so they fail before writing anything if any target already exists.
+  Sprite saves raise `WorkspaceError` on conflict; exports raise `ExportError`.
+- **CI least privilege** — the GitHub Actions workflow now runs with
+  `permissions: contents: read`.
+
+### Added
+- Regression coverage for workspace **symlink-escape** (pure-Python `tests/test_output_paths.py`,
+  always run; symlink cases skip where the OS can't create symlinks) and `--run-aseprite`
+  overwrite tests (`tests/test_overwrite.py`).
+
 ## [0.6.0] - 2026-06-12
 
 ### Added
@@ -115,6 +134,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.6.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.1
 [0.6.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.4.0
