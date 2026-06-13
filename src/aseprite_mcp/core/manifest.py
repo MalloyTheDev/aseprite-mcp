@@ -40,8 +40,9 @@ VALID_KINDS = (
     "rpg_item_sheet",
     "batch",
     "engine_preset",
+    "engine_metadata",
 )
-FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest", "engine_resource")
+FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest", "engine_resource", "metadata")
 EXPORT_ROLES = ("spritesheet", "gif", "png", "tag_gif", "frames")
 
 

@@ -15,7 +15,10 @@ from ..core.engines import godot
 from ..core.errors import ExportError
 from ..core.manifest import export_entry, file_entry, sprite_summary, workflow_manifest
 from ..core.paths import ensure_output_path
+from ..core.runner import run_lua
+from ..core.slice_metadata import build_slice_metadata
 from . import export, inspect
+from .common import lua_path, resolve_path
 
 
 @mcp.tool()
@@ -84,5 +87,77 @@ def export_godot_spriteframes(
             f"at '{res_path}' (override with texture_res_path if it lives elsewhere).",
             f"Assign the SpriteFrames to an AnimatedSprite2D — {anim_count} animation(s) ready.",
             "Re-run with overwrite=True to regenerate after editing the sprite.",
+        ],
+    )
+
+
+_SLICE_LUA = """
+local spr = open_sprite(ARG.src)
+local slices = {}
+for i, sl in ipairs(spr.slices) do
+  local s = {
+    name = sl.name,
+    bounds = { x = sl.bounds.x, y = sl.bounds.y, width = sl.bounds.width, height = sl.bounds.height },
+    color = color_hex(sl.color),
+    data = sl.data or "",
+  }
+  if sl.center ~= nil then
+    s.center = { x = sl.center.x, y = sl.center.y, width = sl.center.width, height = sl.center.height }
+  end
+  if sl.pivot ~= nil then s.pivot = { x = sl.pivot.x, y = sl.pivot.y } end
+  slices[i] = s
+end
+RESULT = { width = spr.width, height = spr.height, slices = slices }
+"""
+
+
+@mcp.tool()
+def export_slice_metadata(
+    filename: str,
+    output: str | None = None,
+    overwrite: bool = False,
+) -> dict:
+    """Export every slice as engine-agnostic JSON (``aseprite_mcp.slice_metadata.v1``).
+
+    Each slice becomes ``{name, type, id, bounds, pivot, nine_slice, color, data,
+    raw_data}``. **Type detection:** a slice's user-data JSON ``type`` wins; otherwise the
+    name convention ``<type>:<id>`` (recognized types: hitbox, hurtbox, collision, interact,
+    pivot, origin, attach, spawn, nine_slice — anything else becomes ``"custom"``, never an
+    error). ``id`` comes from the data ``id`` or the name's ``:<id>`` suffix. ``nine_slice``
+    (Aseprite's 9-patch center) and ``pivot`` are emitted whenever the slice has them. Slice
+    user-data that is valid JSON is parsed into ``data``; the raw string is kept in ``raw_data``.
+
+    Args:
+        output: Destination .json path. Defaults to ``<sprite>_slices.json`` beside the sprite.
+        overwrite: Replace an existing file (default False = no-clobber).
+
+    Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
+    """
+    src = resolve_path(filename)
+    out_rel = output or str(Path(filename).with_name(f"{Path(filename).stem}_slices.json"))
+    out_path = ensure_output_path(out_rel, overwrite=overwrite, error_type=ExportError)
+
+    raw = run_lua(_SLICE_LUA, {"src": lua_path(src)})
+    metadata = build_slice_metadata(
+        sprite=Path(filename).name,
+        width=raw["width"],
+        height=raw["height"],
+        slices=raw.get("slices") or [],
+    )
+    out_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+    info = inspect.get_sprite_info(filename)
+    n = len(metadata["slices"])
+    warnings = ["No slices found in the sprite."] if n == 0 else []
+    return workflow_manifest(
+        "engine_metadata",
+        sprite=sprite_summary(info),
+        created_files=[file_entry("metadata", str(out_path), "json")],
+        warnings=warnings,
+        suggested_next_actions=[
+            f"{n} slice(s) written to {out_path.name}; load it in your engine to place "
+            "hitboxes/hurtboxes/collision/attach points and 9-slice regions.",
+            'Tag slices by name (e.g. "hitbox", "attach:weapon") or a JSON data field '
+            '({"type":"hitbox","id":"body"}) to set type/id.',
         ],
     )
