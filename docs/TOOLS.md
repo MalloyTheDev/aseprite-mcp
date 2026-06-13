@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **109 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **110 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -22,7 +22,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (10)
-- [Engine export presets](#engine-export-presets) (1)
+- [Engine export presets](#engine-export-presets) (2)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (8)
 - [Batch operations](#batch-operations) (1)
@@ -1525,6 +1525,31 @@ Export a sprite as a Godot 4 ``SpriteFrames`` resource (.tres) + a packed sheet.
 | `scale` | integer | no | 1 |
 | `texture_res_path` | string | null | no | None |
 | `default_loop` | boolean | no | True |
+| `overwrite` | boolean | no | False |
+
+
+### `export_slice_metadata`
+
+Export every slice as engine-agnostic JSON (``aseprite_mcp.slice_metadata.v1``).
+
+    Each slice becomes ``{name, type, id, bounds, pivot, nine_slice, color, data,
+    raw_data}``. **Type detection:** a slice's user-data JSON ``type`` wins; otherwise the
+    name convention ``<type>:<id>`` (recognized types: hitbox, hurtbox, collision, interact,
+    pivot, origin, attach, spawn, nine_slice — anything else becomes ``"custom"``, never an
+    error). ``id`` comes from the data ``id`` or the name's ``:<id>`` suffix. ``nine_slice``
+    (Aseprite's 9-patch center) and ``pivot`` are emitted whenever the slice has them. Slice
+    user-data that is valid JSON is parsed into ``data``; the raw string is kept in ``raw_data``.
+
+    Args:
+        output: Destination .json path. Defaults to ``<sprite>_slices.json`` beside the sprite.
+        overwrite: Replace an existing file (default False = no-clobber).
+
+    Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `output` | string | null | no | None |
 | `overwrite` | boolean | no | False |
 
 

@@ -7,13 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Slice metadata export** — `export_slice_metadata` writes engine-agnostic
+  `<sprite>_slices.json` (schema `aseprite_mcp.slice_metadata.v1`): every slice as
+  `{name, type, id, bounds, pivot, nine_slice, color, data, raw_data}`. Type comes from a
+  slice's JSON `data` field (`{"type":...}`) or the `<type>:<id>` name convention (hitbox,
+  hurtbox, collision, interact, pivot, origin, attach, spawn, nine_slice; unknown → `custom`,
+  never an error). 9-slice center and pivot are emitted whenever present. Pure builder in
+  `core/slice_metadata.py`. (110 tools.)
 - **Godot export preset** — `export_godot_spriteframes` exports a sprite as a Godot 4
   `SpriteFrames` resource (.tres) plus a packed sheet (+ JSON rects): one Godot animation
   per Aseprite tag (or a single `default` animation when untagged), each frame an
   `AtlasTexture` region, with per-frame timing derived from Aseprite frame durations. The
   pure builder lives in `core/engines/godot.py`. v1 is SpriteFrames only — no
   pivot/origin/hitbox/9-slice; tag direction isn't mapped (Godot animations only loop).
-  (109 tools.)
 
 ### Security
 - **Collection size limits (DoS guard).** Batch op-lists and explicit pixel/point/tile/
