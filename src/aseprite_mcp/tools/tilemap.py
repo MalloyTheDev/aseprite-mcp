@@ -11,6 +11,7 @@ always the empty tile. Workflow:
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.limits import MAX_PIXEL_LIST_LENGTH, MAX_TILE_LIST_LENGTH, check_list_length
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -140,6 +141,7 @@ def paint_tile_pixels(
     """
     if not pixels:
         raise ValueError("pixels must be non-empty.")
+    check_list_length("pixels", pixels, MAX_PIXEL_LIST_LENGTH)
     default = parse_color(color) if color else None
     lua_pixels = []
     for p in pixels:
@@ -200,6 +202,7 @@ def set_tiles(filename: str, layer: str, tiles: list[dict], frame: int = 1) -> d
     """Place many tiles at once. tiles: list of {"column", "row", "index"}."""
     if not tiles:
         raise ValueError("tiles must be non-empty.")
+    check_list_length("tiles", tiles, MAX_TILE_LIST_LENGTH)
     lua_tiles = [
         {"col": int(t["column"]), "row": int(t["row"]), "index": int(t["index"])}
         for t in tiles

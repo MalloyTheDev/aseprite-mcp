@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.limits import MAX_COLOR_LIST_LENGTH, check_list_length
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -28,6 +29,7 @@ def set_palette(filename: str, colors: list[str]) -> dict:
     """
     if not colors:
         raise ValueError("colors must be a non-empty list.")
+    check_list_length("colors", colors, MAX_COLOR_LIST_LENGTH)
     parsed = [parse_color(c) for c in colors]
     args = {"src": lua_path(resolve_path(filename)), "colors": parsed}
     body = """

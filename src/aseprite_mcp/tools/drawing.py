@@ -8,6 +8,7 @@ coordinates are always predictable.
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.limits import MAX_PIXEL_LIST_LENGTH, check_list_length
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -52,6 +53,7 @@ def draw_pixels(
     """
     if not pixels:
         raise ValueError("pixels must be a non-empty list.")
+    check_list_length("pixels", pixels, MAX_PIXEL_LIST_LENGTH)
     default = parse_color(color) if color else None
     lua_pixels = []
     for p in pixels:
@@ -149,6 +151,7 @@ def draw_polyline(
     """
     if len(points) < 2:
         raise ValueError("Need at least 2 points.")
+    check_list_length("points", points, MAX_PIXEL_LIST_LENGTH)
     pts = [{"x": int(p["x"]), "y": int(p["y"])} for p in points]
     args = {
         "src": lua_path(resolve_path(filename)),

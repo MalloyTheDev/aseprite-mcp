@@ -4,6 +4,7 @@ import pytest
 
 from aseprite_mcp.core import oplib
 from aseprite_mcp.core.errors import ValidationFailed
+from aseprite_mcp.core.limits import MAX_BATCH_OPERATIONS
 
 
 def test_unknown_op_fails():
@@ -82,3 +83,16 @@ def test_summarize_is_a_string():
 def test_color_index_spec_normalizes():
     out = oplib.validate_operations([{"op": "fill_layer", "args": {"color": "index:3"}}])
     assert out[0]["args"]["color"] == {"index": 3}
+
+
+# ----------------------------------------------------------------- size limits
+def test_batch_at_limit_validates():
+    ops = [{"op": "add_layer", "args": {"name": "x"}}] * MAX_BATCH_OPERATIONS
+    out = oplib.validate_operations(ops)
+    assert len(out) == MAX_BATCH_OPERATIONS  # exactly the cap is allowed
+
+
+def test_batch_over_limit_fails_with_split_hint():
+    ops = [{"op": "add_layer", "args": {"name": "x"}}] * (MAX_BATCH_OPERATIONS + 1)
+    with pytest.raises(ValidationFailed, match=r"operations has \d+ items; maximum is 500"):
+        oplib.validate_operations(ops)

@@ -12,6 +12,7 @@ Validation happens before any Aseprite launch and is the basis of `dry_run`. It 
 from __future__ import annotations
 
 from .errors import ValidationFailed
+from .limits import MAX_BATCH_OPERATIONS, check_list_length
 from .models import ColorSpec
 
 # Arg kinds.
@@ -64,6 +65,10 @@ def validate_operations(operations) -> list[dict]:
     offending op index) on shape errors. Colours are parsed to dicts; ints coerced."""
     if not isinstance(operations, list) or not operations:
         raise ValidationFailed("operations must be a non-empty list.")
+    check_list_length(
+        "operations", operations, MAX_BATCH_OPERATIONS,
+        remedy="Split the edit into multiple batches.",
+    )
 
     normalized: list[dict] = []
     for i, op in enumerate(operations):

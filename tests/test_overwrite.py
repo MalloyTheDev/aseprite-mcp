@@ -40,6 +40,16 @@ def test_export_png_no_clobber():
     export.export_png("w/ov_png.aseprite", "w/ov.png", overwrite=True)
 
 
+# ----------------------------------------------------------------- export_tag_gif
+def test_export_tag_gif_no_clobber():
+    workflow.create_character_sprite("w/ov_tag", 16, 16)
+    workflow.make_4_frame_idle_animation("w/ov_tag.aseprite")  # adds the "idle" tag
+    export.export_tag_gif("w/ov_tag.aseprite", "idle", "w/idle.gif")
+    with pytest.raises(ExportError, match="already exists"):
+        export.export_tag_gif("w/ov_tag.aseprite", "idle", "w/idle.gif")
+    export.export_tag_gif("w/ov_tag.aseprite", "idle", "w/idle.gif", overwrite=True)
+
+
 # ---------------------------------------------------------- export_spritesheet
 def test_export_spritesheet_no_clobber_checks_data_output():
     sprite.create_sprite("w/ov_sheet.aseprite", 8, 8, background="#ffffff")

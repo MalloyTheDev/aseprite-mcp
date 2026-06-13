@@ -29,8 +29,11 @@ uv run pytest                 # fast: pure-Python unit tests only (no Aseprite n
 uv run pytest --run-aseprite  # full: unit + Aseprite integration + golden-output tests
 ```
 
-- **Unit tests** (`tests/test_unit.py`) cover colour parsing, Python→Lua serialization,
-  and the path sandbox. They always run — this is what CI exercises on every push.
+- **Pure-Python tests** (`tests/test_unit.py`, plus `test_properties.py`,
+  `test_limits.py`, `test_output_paths.py`, `test_oplib.py`, `test_manifest.py`, …) cover
+  colour parsing, Python→Lua serialization, the path sandbox, size limits, and the batch
+  registry — including Hypothesis property tests. They always run — this is what CI
+  exercises on every push. (The always-run set is listed in `tests/conftest.py`.)
 - **Integration & golden tests** drive a real Aseprite install and run only with
   `--run-aseprite` (and require Aseprite to be found). Golden tests assert exact
   dimensions, pixel colours, frame/layer counts, tag metadata, and exported geometry.
@@ -40,14 +43,25 @@ uv run pytest --run-aseprite  # full: unit + Aseprite integration + golden-outpu
 
 ## Local release gate
 
-Run all of these green before tagging a release:
+Run the whole gate with one command:
+
+```bash
+uv run python scripts/release_gate.py            # runs every step below, fail-fast
+```
+
+It runs each of these in order and stops at the first failure:
 
 ```bash
 uv run ruff check . --select F,E9               # lint (no unused imports / undefined names)
-uv run pytest                                   # unit tests
+uv run pytest                                   # pure-Python tests
 uv run pytest --run-aseprite                    # full integration + golden tests
 uv run python scripts/gen_tool_docs.py --check  # docs/TOOLS.md is in sync with the registry
+uv build                                        # wheel + sdist build
 ```
+
+> CI runs the pure/headless steps on every push (it has no Aseprite). The
+> `--run-aseprite` step is local-only. Pass `--skip-aseprite` to `release_gate.py` to
+> mirror CI when Aseprite isn't installed.
 
 ## Architecture (how a tool works)
 
@@ -61,14 +75,19 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
                               runner parses sentinel → dict
 ```
 
-- [`src/aseprite_mcp/luagen.py`](src/aseprite_mcp/luagen.py) — the Python→Lua value
-  serializer and the shared Lua **PRELUDE** (JSON encoder, colour/pixel helpers,
-  deterministic drawing primitives, AA/pixel-perfect helpers, `sprite_info`).
-- [`src/aseprite_mcp/runner.py`](src/aseprite_mcp/runner.py) — `run_lua()` and
+- [`src/aseprite_mcp/core/luagen.py`](src/aseprite_mcp/core/luagen.py) — the Python→Lua
+  value serializer (`to_lua`) and the shared Lua **PRELUDE** (JSON encoder, colour/pixel
+  helpers, deterministic drawing primitives, AA/pixel-perfect helpers, `sprite_info`).
+- [`src/aseprite_mcp/core/runner.py`](src/aseprite_mcp/core/runner.py) — `run_lua()` and
   `run_cli()`; parses the result/error sentinels.
-- [`src/aseprite_mcp/config.py`](src/aseprite_mcp/config.py) — locating Aseprite, the
-  workspace, path resolution.
-- [`src/aseprite_mcp/tools/`](src/aseprite_mcp/tools/) — one module per domain.
+- [`src/aseprite_mcp/core/config.py`](src/aseprite_mcp/core/config.py) — locating Aseprite,
+  the workspace, path resolution.
+- [`src/aseprite_mcp/core/`](src/aseprite_mcp/core/) — reusable, Aseprite-/MCP-free logic
+  (also `errors`, `models`, `manifest`, `oplib`, `validation`, `limits`, `paths`); importable
+  without the FastMCP app. Backwards-compatible top-level shims (`luagen`/`runner`/`config`/
+  `errors`) are preserved.
+- [`src/aseprite_mcp/tools/`](src/aseprite_mcp/tools/) — one module per domain (the
+  `@mcp.tool()` layer).
 
 ## Adding a tool
 
@@ -102,9 +121,9 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
   compatibility (`from aseprite_mcp.runner import AsepriteError` still works and still
   catches every aseprite-mcp error).
 - **Workflow tools** (high-level scaffolding in `tools/workflow.py`) must return a
-  `workflow_manifest.v1` object built with the helpers in `tools/manifest.py`
+  `workflow_manifest.v1` object built with the helpers in `core/manifest.py`
   (`workflow_manifest`, `file_entry`, `export_entry`, `sprite_summary`) — don't hand-roll
-  a bespoke result dict. Add the `kind`/roles to `manifest.py` if you need new ones.
+  a bespoke result dict. Add the `kind`/roles to `core/manifest.py` if you need new ones.
 
 ## Pull requests
 

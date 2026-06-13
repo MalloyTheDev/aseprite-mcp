@@ -1451,12 +1451,15 @@ Export frames into a single sprite-sheet image.
 
 Export only the frames of a named animation tag as an animated GIF.
 
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `tag` | string | yes |  |
 | `output` | string | yes |  |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_tags`
