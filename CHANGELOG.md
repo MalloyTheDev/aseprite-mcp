@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+- **Collection size limits (DoS guard).** Batch op-lists and explicit pixel/point/tile/
+  colour lists are now capped; exceeding a cap raises `ValidationFailed` before any work
+  begins, with a message saying how to split the request. Caps: 500 batch operations,
+  65,536 pixels/points, 65,536 tiles, 256 palette colours (`core/limits.py`). No env
+  override yet.
+- Added `SECURITY.md` documenting the threat model, protections, and how to report issues.
+
+### Added
+- **Hypothesis property tests** for the security-critical pure boundaries: `to_lua`
+  (no break-out of Lua string literals), colour parsing (valid normalize, arbitrary text
+  never crashes, channels stay 0–255), and the path sandbox (relative paths never escape;
+  absolutes rejected). `hypothesis` added as a dev-only dependency.
+- `scripts/release_gate.py` — one command runs the whole local gate (lint → pure tests →
+  integration → docs-sync → build), fail-fast, with `--skip-aseprite` to mirror CI.
+
+### Changed
+- **CI** now builds the wheel + sdist and tests on Python 3.10/3.11/3.12/3.13.
+- Fixed post-core-split file paths in `README.md` / `CONTRIBUTING.md` (the `core/` layout).
+
 ## [0.6.1] - 2026-06-13
 
 Safety hardening patch release. The default output behaviour is now no-clobber.

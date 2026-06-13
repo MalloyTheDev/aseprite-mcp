@@ -214,7 +214,7 @@ scaffolding, no AI generation.
 ### Workflow manifest contract
 
 Every workflow tool returns a standardized **`workflow_manifest.v1`** object (defined in
-[`tools/manifest.py`](src/aseprite_mcp/tools/manifest.py)) so the asset layer stays
+[`core/manifest.py`](src/aseprite_mcp/core/manifest.py)) so the asset layer stays
 consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created_files[]`,
 `suggested_next_actions[]`, `warnings[]`. Included when relevant: `sprite{}`, `exports[]`,
 `palette{}`, `animation{}`, `tilemap{}`. File/export entries are

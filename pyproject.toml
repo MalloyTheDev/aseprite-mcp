@@ -28,7 +28,7 @@ Issues = "https://github.com/MalloyTheDev/aseprite-mcp/issues"
 aseprite-mcp = "aseprite_mcp.server:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "hypothesis>=6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

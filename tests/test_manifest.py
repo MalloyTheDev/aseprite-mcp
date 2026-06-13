@@ -109,3 +109,32 @@ def test_batch_operations_and_dry_run_fields():
     assert m["operations"] == ops and m["dry_run"] is True
     m2 = M.workflow_manifest("batch", operations=[])
     assert m2["operations"] == [] and "dry_run" not in m2  # dry_run omitted when False
+
+
+def test_every_manifest_kind_serializes():
+    """Every VALID_KIND, populated with all optional sections, round-trips through JSON.
+
+    Guards against a latent kind/section combination that can't be serialized.
+    """
+    sprite = M.sprite_summary({
+        "path": "x.aseprite", "width": 16, "height": 16, "colorMode": "rgb",
+        "frameCount": 2, "layers": [{"name": "body"}],
+        "tags": [{"name": "idle", "from": 1, "to": 2, "aniDir": "forward"}],
+        "slices": [{"name": "s", "bounds": {"x": 0, "y": 0, "width": 8, "height": 8}}],
+    })
+    for kind in M.VALID_KINDS:
+        m = M.workflow_manifest(
+            kind,
+            sprite=sprite,
+            created_files=[M.file_entry("source_sprite", "x.aseprite", "aseprite")],
+            exports=[M.export_entry("spritesheet", "x.png", "png", metadata_path="x.json")],
+            palette={"colors": ["#000000"], "count": 1},
+            animation={"tag": "idle", "frames": [1, 2], "duration_ms": 120},
+            tilemap={"layer": "tiles", "tile_width": 16, "tile_height": 16, "tiles": []},
+            validation={"passed": True, "checks": [], "errors": [], "warnings": []},
+            operations=[{"index": 0, "op": "add_layer", "status": "applied"}],
+            dry_run=True,
+            suggested_next_actions=["next"],
+            warnings=["w"],
+        )
+        assert json.loads(json.dumps(m))["kind"] == kind
