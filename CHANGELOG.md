@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Declarative asset spec** (`aseprite_mcp.asset_spec.v1`) — describe an asset in one
+  document instead of orchestrating dozens of calls. Three tools: `validate_asset_spec`
+  (is the spec valid?), `plan_asset_spec` (pure dry-run — the ordered steps a build would
+  run, no Aseprite launched), and `build_asset_from_spec` (executes the plan via existing
+  workflow/batch/export tools). Build is **structure only** — canvas, layers, frames, tags,
+  slices, palette, and exports; it never draws pixels and hands the art back to the agent.
+  Kinds: character, enemy, item_sheet, icon_set, tileset, walk_8dir. Pure schema/planner in
+  `core/asset_spec.py`. (113 tools.)
+
 ### Security
 - **Supply-chain hardening of CI** — GitHub Actions are now pinned to commit SHAs
   (`actions/checkout`, `astral-sh/setup-uv`) instead of mutable tags, and a

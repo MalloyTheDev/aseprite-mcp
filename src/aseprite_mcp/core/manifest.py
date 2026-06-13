@@ -41,6 +41,7 @@ VALID_KINDS = (
     "batch",
     "engine_preset",
     "engine_metadata",
+    "asset_spec",
 )
 FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest", "engine_resource", "metadata")
 EXPORT_ROLES = ("spritesheet", "gif", "png", "tag_gif", "frames")
@@ -65,6 +66,7 @@ class WorkflowManifest(TypedDict, total=False):
     tilemap: dict
     validation: dict
     operations: list
+    plan: list
     dry_run: bool
     suggested_next_actions: list
     warnings: list
@@ -124,6 +126,7 @@ def workflow_manifest(
     tilemap: dict | None = None,
     validation: dict | None = None,
     operations: list | None = None,
+    plan: list | None = None,
     dry_run: bool = False,
     suggested_next_actions: Any = None,
     warnings: list | None = None,
@@ -158,6 +161,8 @@ def workflow_manifest(
         manifest["validation"] = validation
     if operations is not None:
         manifest["operations"] = operations
+    if plan is not None:
+        manifest["plan"] = plan
     if dry_run:
         manifest["dry_run"] = True
     return manifest
