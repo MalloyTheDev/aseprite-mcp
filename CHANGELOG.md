@@ -6,20 +6,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-13
+
+First engine-ready export layer: take a sprite all the way to game-engine resources.
+
 ### Added
+- **Godot 4 export preset** — `export_godot_spriteframes` exports a sprite as a Godot 4
+  `SpriteFrames` resource (.tres) plus a packed sheet (+ JSON rects): one Godot animation
+  per Aseprite tag (or a single `default` animation when untagged), each frame an
+  `AtlasTexture` region, with per-frame timing derived from Aseprite frame durations. The
+  pure builder lives in `core/engines/godot.py`. v1 is SpriteFrames only — no
+  pivot/origin/hitbox/9-slice; tag direction isn't mapped (Godot animations only loop).
 - **Slice metadata export** — `export_slice_metadata` writes engine-agnostic
   `<sprite>_slices.json` (schema `aseprite_mcp.slice_metadata.v1`): every slice as
   `{name, type, id, bounds, pivot, nine_slice, color, data, raw_data}`. Type comes from a
   slice's JSON `data` field (`{"type":...}`) or the `<type>:<id>` name convention (hitbox,
   hurtbox, collision, interact, pivot, origin, attach, spawn, nine_slice; unknown → `custom`,
   never an error). 9-slice center and pivot are emitted whenever present. Pure builder in
-  `core/slice_metadata.py`. (110 tools.)
-- **Godot export preset** — `export_godot_spriteframes` exports a sprite as a Godot 4
-  `SpriteFrames` resource (.tres) plus a packed sheet (+ JSON rects): one Godot animation
-  per Aseprite tag (or a single `default` animation when untagged), each frame an
-  `AtlasTexture` region, with per-frame timing derived from Aseprite frame durations. The
-  pure builder lives in `core/engines/godot.py`. v1 is SpriteFrames only — no
-  pivot/origin/hitbox/9-slice; tag direction isn't mapped (Godot animations only loop).
+  `core/slice_metadata.py`. (Now 110 tools.)
+- **Hypothesis property tests** for the security-critical pure boundaries: `to_lua`
+  (no break-out of Lua string literals), colour parsing (valid normalize, arbitrary text
+  never crashes, channels stay 0–255), and the path sandbox (relative paths never escape;
+  absolutes rejected). `hypothesis` added as a dev-only dependency.
+- `scripts/release_gate.py` — one command runs the whole local gate (lint → pure tests →
+  integration → docs-sync → build), fail-fast, with `--skip-aseprite` to mirror CI.
 
 ### Security
 - **Collection size limits (DoS guard).** Batch op-lists and explicit pixel/point/tile/
@@ -28,14 +38,6 @@ All notable changes to this project are documented here. The format is based on
   65,536 pixels/points, 65,536 tiles, 256 palette colours (`core/limits.py`). No env
   override yet.
 - Added `SECURITY.md` documenting the threat model, protections, and how to report issues.
-
-### Added
-- **Hypothesis property tests** for the security-critical pure boundaries: `to_lua`
-  (no break-out of Lua string literals), colour parsing (valid normalize, arbitrary text
-  never crashes, channels stay 0–255), and the path sandbox (relative paths never escape;
-  absolutes rejected). `hypothesis` added as a dev-only dependency.
-- `scripts/release_gate.py` — one command runs the whole local gate (lint → pure tests →
-  integration → docs-sync → build), fail-fast, with `--skip-aseprite` to mirror CI.
 
 ### Changed
 - **CI** now builds the wheel + sdist and tests on Python 3.10/3.11/3.12/3.13.
@@ -169,6 +171,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.7.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.7.0
 [0.6.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.1
 [0.6.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.5.0
