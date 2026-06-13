@@ -54,16 +54,16 @@ Convert a normal layer into the sprite's opaque Background layer.
 
 Create a new sprite file and save it.
 
-    Args:
-        filename: Output path. Relative paths go in the workspace. Use a
-            .aseprite/.ase extension to keep layers & frames editable.
-        width, height: Canvas size in pixels (1-65535).
-        color_mode: "rgb" (default), "indexed", or "gray".
-        background: Optional fill colour for the first layer (e.g. "#1d2b53").
-            Omit for a transparent canvas.
-        overwrite: Replace `filename` if it already exists (default False = no-clobber).
+Args:
+    filename: Output path. Relative paths go in the workspace. Use a
+        .aseprite/.ase extension to keep layers & frames editable.
+    width, height: Canvas size in pixels (1-65535).
+    color_mode: "rgb" (default), "indexed", or "gray".
+    background: Optional fill colour for the first layer (e.g. "#1d2b53").
+        Omit for a transparent canvas.
+    overwrite: Replace `filename` if it already exists (default False = no-clobber).
 
-    Returns the new sprite's structured info.
+Returns the new sprite's structured info.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -101,8 +101,8 @@ Flatten all layers into a single layer (in place).
 
 Resize the canvas WITHOUT scaling the artwork (adds or trims space).
 
-    anchor controls where existing content sits in the new canvas:
-    "top_left" (default) or "center".
+anchor controls where existing content sits in the new canvas:
+"top_left" (default) or "center".
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -116,10 +116,10 @@ Resize the canvas WITHOUT scaling the artwork (adds or trims space).
 
 Save a copy of a sprite under a new path (optionally flattened).
 
-    The original file is left untouched. Useful for exporting an editable
-    .aseprite to another .aseprite, or snapshotting a version.
+The original file is left untouched. Useful for exporting an editable
+.aseprite to another .aseprite, or snapshotting a version.
 
-    overwrite: Replace `new_filename` if it already exists (default False = no-clobber).
+overwrite: Replace `new_filename` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -133,8 +133,8 @@ Save a copy of a sprite under a new path (optionally flattened).
 
 Scale the whole sprite (artwork included).
 
-    Provide either `factor` (e.g. 2.0 to double) OR explicit `width`/`height`.
-    method: "nearest" (crisp pixels, default) or "bilinear" (smooth).
+Provide either `factor` (e.g. 2.0 to double) OR explicit `width`/`height`.
+method: "nearest" (crisp pixels, default) or "bilinear" (smooth).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -149,8 +149,8 @@ Scale the whole sprite (artwork included).
 
 Convert a sprite between colour modes ("rgb", "indexed", "gray").
 
-    When converting to "indexed", dithering can be "none", "ordered", or
-    "old" to control how RGB colours are mapped to the palette.
+When converting to "indexed", dithering can be "none", "ordered", or
+"old" to control how RGB colours are mapped to the palette.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -162,7 +162,7 @@ Convert a sprite between colour modes ("rgb", "indexed", "gray").
 ### `trim_sprite`
 
 Auto-crop the canvas to the bounding box of all non-transparent content
-    (across every frame).
+(across every frame).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -175,8 +175,8 @@ Auto-crop the canvas to the bounding box of all non-transparent content
 
 Read the composited (all visible layers) pixel colours of a region.
 
-    Returns rows of "#RRGGBBAA" hex strings. The region is capped at 64x64
-    (4096 pixels) per call to keep responses small — read in tiles for bigger areas.
+Returns rows of "#RRGGBBAA" hex strings. The region is capped at 64x64
+(4096 pixels) per call to keep responses small — read in tiles for bigger areas.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -191,8 +191,8 @@ Read the composited (all visible layers) pixel colours of a region.
 ### `get_sprite_info`
 
 Return structured info about a sprite: size, colour mode, frames (with
-    durations), the full layer tree (names, opacity, blend mode, visibility),
-    animation tags, and palette size.
+durations), the full layer tree (names, opacity, blend mode, visibility),
+animation tags, and palette size.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -210,8 +210,8 @@ _No parameters._
 
 Render a single frame to a PNG and return it as an image you can view.
 
-    Use this to *see* your work. frame is 1-based; scale enlarges small sprites
-    (default 8x) so individual pixels are visible.
+Use this to *see* your work. frame is 1-based; scale enlarges small sprites
+(default 8x) so individual pixels are visible.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -225,7 +225,7 @@ Render a single frame to a PNG and return it as an image you can view.
 ### `add_group_layer`
 
 Add a new (empty) group layer on top of the stack. Nest layers into it
-    with add_layer(group=...) or move_layer(group=...).
+with add_layer(group=...) or move_layer(group=...).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -237,14 +237,14 @@ Add a new (empty) group layer on top of the stack. Nest layers into it
 
 Add a new (empty) normal layer on top of the stack.
 
-    Args:
-        name: Layer name.
-        group: Optional name of an existing group layer to nest the new layer in.
-        opacity: 0-255.
-        blend_mode: normal, multiply, screen, overlay, darken, lighten,
-            color_dodge, color_burn, hard_light, soft_light, difference,
-            exclusion, hue, saturation, color, luminosity, addition, subtract, divide.
-        visible: Initial visibility.
+Args:
+    name: Layer name.
+    group: Optional name of an existing group layer to nest the new layer in.
+    opacity: 0-255.
+    blend_mode: normal, multiply, screen, overlay, darken, lighten,
+        color_dodge, color_burn, hard_light, soft_light, difference,
+        exclusion, hue, saturation, color, luminosity, addition, subtract, divide.
+    visible: Initial visibility.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -280,7 +280,7 @@ Merge a layer down into the layer directly beneath it.
 
 Reorder a layer to a new 1-based stack index (1 = bottom-most).
 
-    Note: moves within the layer's current parent group.
+Note: moves within the layer's current parent group.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -331,12 +331,12 @@ Update one or more layer properties. Only the arguments you pass are changed.
 
 Append a new frame to the animation.
 
-    Args:
-        duration_ms: Frame duration in milliseconds (default 100).
-        copy_from: If given (1-based), duplicate the content of that frame;
-            otherwise the new frame is empty.
+Args:
+    duration_ms: Frame duration in milliseconds (default 100).
+    copy_from: If given (1-based), duplicate the content of that frame;
+        otherwise the new frame is empty.
 
-    Returns the new frame number and updated frame count.
+Returns the new frame number and updated frame count.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -392,8 +392,8 @@ Set a single frame's duration in milliseconds (1-based frame).
 
 Create an animation tag spanning frames [from_frame, to_frame] (1-based).
 
-    direction: "forward" (default), "reverse", "pingpong", or "pingpong_reverse".
-    color: optional tag colour (shown in the timeline).
+direction: "forward" (default), "reverse", "pingpong", or "pingpong_reverse".
+color: optional tag colour (shown in the timeline).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -419,8 +419,8 @@ Delete an animation tag by name.
 
 Update an existing tag. Only the arguments you pass are changed.
 
-    Note: changing from_frame/to_frame recreates the tag in place to update its
-    range reliably across Aseprite versions.
+Note: changing from_frame/to_frame recreates the tag in place to update its
+range reliably across Aseprite versions.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -510,7 +510,7 @@ Erase the target layer/frame cel to full transparency.
 ### `draw_curve`
 
 Draw a quadratic Bézier curve from (x0,y0) to (x1,y1) bending toward the
-    control point (control_x, control_y). `steps` controls smoothness.
+control point (control_x, control_y). `steps` controls smoothness.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -531,9 +531,9 @@ Draw a quadratic Bézier curve from (x0,y0) to (x1,y1) bending toward the
 
 Draw an ellipse centred at (center_x, center_y) with the given radii.
 
-    For a circle, use the same value for radius_x and radius_y. filled=False
-    draws a 1px outline. antialias smooths a *filled* ellipse with sub-pixel
-    coverage (RGB sprites only; ignored otherwise).
+For a circle, use the same value for radius_x and radius_y. filled=False
+draws a 1px outline. antialias smooths a *filled* ellipse with sub-pixel
+coverage (RGB sprites only; ignored otherwise).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -553,10 +553,10 @@ Draw an ellipse centred at (center_x, center_y) with the given radii.
 
 Draw a straight line from (x1,y1) to (x2,y2).
 
-    Args:
-        pixel_perfect: Remove L-shaped corner pixels for a clean 1px pixel-art line.
-        antialias: Smooth (Xiaolin Wu) line with alpha blending — RGB sprites only;
-            ignored on indexed/gray. Takes precedence over pixel_perfect.
+Args:
+    pixel_perfect: Remove L-shaped corner pixels for a clean 1px pixel-art line.
+    antialias: Smooth (Xiaolin Wu) line with alpha blending — RGB sprites only;
+        ignored on indexed/gray. Takes precedence over pixel_perfect.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -576,12 +576,12 @@ Draw a straight line from (x1,y1) to (x2,y2).
 
 Plot individual pixels.
 
-    Args:
-        pixels: List of {"x": int, "y": int, "color": "#hex"?}. If a pixel omits
-            "color", the shared `color` argument is used.
-        color: Default colour for pixels that don't specify their own.
-        layer: Target layer name or 1-based index (default: top layer).
-        frame: Target frame, 1-based (default 1).
+Args:
+    pixels: List of {"x": int, "y": int, "color": "#hex"?}. If a pixel omits
+        "color", the shared `color` argument is used.
+    color: Default colour for pixels that don't specify their own.
+    layer: Target layer name or 1-based index (default: top layer).
+    frame: Target frame, 1-based (default 1).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -596,9 +596,9 @@ Plot individual pixels.
 
 Draw connected line segments through a list of points.
 
-    points: list of {"x": int, "y": int}. Set closed=True to connect the last
-    point back to the first (outline a polygon). pixel_perfect removes L-corner
-    pixels across the whole path for a clean pixel-art outline.
+points: list of {"x": int, "y": int}. Set closed=True to connect the last
+point back to the first (outline a polygon). pixel_perfect removes L-corner
+pixels across the whole path for a clean pixel-art outline.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -631,7 +631,7 @@ Draw a rectangle. filled=False draws a 1px outline, True fills it.
 ### `fill_area`
 
 Flood fill (paint bucket): replace the contiguous region of matching
-    colour starting at (x,y) on the target layer with `color`.
+colour starting at (x,y) on the target layer with `color`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -661,12 +661,12 @@ Fill the entire target layer/frame cel with a solid colour.
 
 Stamp a custom brush shape at a list of points.
 
-    Args:
-        brush: The brush as rows of characters. Any character other than space,
-            '.', or '0' is a filled cell. e.g. a plus brush: ["010", "111", "010"].
-        points: Positions to stamp at, list of {"x": int, "y": int}.
-        color: Colour to stamp the brush in.
-        anchor: "center" (default) or "topleft" — where each point sits in the brush.
+Args:
+    brush: The brush as rows of characters. Any character other than space,
+        '.', or '0' is a filled cell. e.g. a plus brush: ["010", "111", "010"].
+    points: Positions to stamp at, list of {"x": int, "y": int}.
+    color: Colour to stamp the brush in.
+    anchor: "center" (default) or "topleft" — where each point sits in the brush.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -683,8 +683,8 @@ Stamp a custom brush shape at a list of points.
 
 Plot pixels together with their mirror image(s).
 
-    mode: "horizontal" (mirror across vertical axis_x), "vertical" (across axis_y),
-    or "both" (4-way radial symmetry). Axes default to the canvas centre.
+mode: "horizontal" (mirror across vertical axis_x), "vertical" (across axis_y),
+or "both" (4-way radial symmetry). Axes default to the canvas centre.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -702,10 +702,10 @@ Plot pixels together with their mirror image(s).
 
 Mirror one half of a layer onto the other (build symmetric artwork).
 
-    Args:
-        direction: "horizontal" (reflect left<->right) or "vertical" (top<->bottom).
-        source_side: which half is copied: "first" (left/top) or "second" (right/bottom).
-        axis: mirror line position (x for horizontal, y for vertical); default = centre.
+Args:
+    direction: "horizontal" (reflect left<->right) or "vertical" (top<->bottom).
+    source_side: which half is copied: "first" (left/top) or "second" (right/bottom).
+    axis: mirror line position (x for horizontal, y for vertical); default = centre.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -721,11 +721,11 @@ Mirror one half of a layer onto the other (build symmetric artwork).
 
 Tile an image/sprite across a region to fill it with a repeating pattern.
 
-    Args:
-        source: Image/sprite to tile.
-        x, y, width, height: Region to fill (defaults to the whole canvas).
-        spacing_x, spacing_y: Gap between tiles.
-        opacity, blend_mode: Compositing of each tile.
+Args:
+    source: Image/sprite to tile.
+    x, y, width, height: Region to fill (defaults to the whole canvas).
+    spacing_x, spacing_y: Gap between tiles.
+    opacity, blend_mode: Compositing of each tile.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -749,12 +749,12 @@ Tile an image/sprite across a region to fill it with a repeating pattern.
 
 Add a hard drop shadow for a layer's artwork on a new layer placed beneath it.
 
-    Args:
-        layer: The layer casting the shadow.
-        offset_x, offset_y: Shadow offset in pixels.
-        color: Shadow colour (often semi-transparent black, the default).
-        opacity: Opacity (0-255) of the shadow layer.
-        frame: Frame to build the shadow for.
+Args:
+    layer: The layer casting the shadow.
+    offset_x, offset_y: Shadow offset in pixels.
+    color: Shadow colour (often semi-transparent black, the default).
+    opacity: Opacity (0-255) of the shadow layer.
+    frame: Frame to build the shadow for.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -771,12 +771,12 @@ Add a hard drop shadow for a layer's artwork on a new layer placed beneath it.
 
 Add a pixel outline around the artwork on a layer.
 
-    Args:
-        color: Outline colour.
-        thickness: Outline width in pixels (default 1).
-        connectivity: 4 (orthogonal only) or 8 (includes diagonals, default).
-        where: "outside" (grow into transparency, default) or "inside"
-            (recolour the shape's border pixels).
+Args:
+    color: Outline colour.
+    thickness: Outline width in pixels (default 1).
+    connectivity: 4 (orthogonal only) or 8 (includes diagonals, default).
+    where: "outside" (grow into transparency, default) or "inside"
+        (recolour the shape's border pixels).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -850,14 +850,14 @@ Fill a region with a 2-colour checkerboard of `size`-pixel squares.
 
 Fill a region with a gradient.
 
-    Args:
-        colors: 2+ colour stops, e.g. ["#000000", "#ff004d", "#ffec27"], spread
-            evenly. For dither=True, provide exactly 2 colours.
-        gradient_type: "linear" or "radial".
-        angle: Direction in degrees for linear gradients (0 = left->right).
-        dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
-            interpolation — great for limited palettes / retro looks.
-        x, y, width, height: Region (defaults to the whole canvas).
+Args:
+    colors: 2+ colour stops, e.g. ["#000000", "#ff004d", "#ffec27"], spread
+        evenly. For dither=True, provide exactly 2 colours.
+    gradient_type: "linear" or "radial".
+    angle: Direction in degrees for linear gradients (0 = left->right).
+    dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
+        interpolation — great for limited palettes / retro looks.
+    x, y, width, height: Region (defaults to the whole canvas).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -888,7 +888,7 @@ Invert the RGB colours of a layer's pixels (alpha preserved).
 ### `replace_color`
 
 Replace every pixel matching `from_color` (within `tolerance` per channel)
-    with `to_color`, on the chosen layer + frame.
+with `to_color`, on the chosen layer + frame.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -906,19 +906,19 @@ Replace every pixel matching `from_color` (within `tolerance` per channel)
 
 Draw text onto a layer at (x, y) in a single colour.
 
-    Args:
-        text: The string (supports "\n" for multiple lines).
-        x, y: Top-left position of the text.
-        color: Text colour.
-        scale: Integer pixel-scaling of the rendered glyphs (default 1).
-        font_path: Optional path to a .ttf/.otf font. If omitted, a built-in
-            bitmap font is used (best for tiny pixel text).
-        font_size: Point size when a TrueType font_path is given.
-        spacing: Extra pixels between lines.
-        threshold: 0-255 cutoff; pixels brighter than this are drawn (lower =
-            heavier text). Keeps glyphs crisp (no anti-aliasing artefacts).
+Args:
+    text: The string (supports "\n" for multiple lines).
+    x, y: Top-left position of the text.
+    color: Text colour.
+    scale: Integer pixel-scaling of the rendered glyphs (default 1).
+    font_path: Optional path to a .ttf/.otf font. If omitted, a built-in
+        bitmap font is used (best for tiny pixel text).
+    font_size: Point size when a TrueType font_path is given.
+    spacing: Extra pixels between lines.
+    threshold: 0-255 cutoff; pixels brighter than this are drawn (lower =
+        heavier text). Keeps glyphs crisp (no anti-aliasing artefacts).
 
-    Returns the standard draw result plus the rendered text's pixel size.
+Returns the standard draw result plus the rendered text's pixel size.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -941,7 +941,7 @@ Draw text onto a layer at (x, y) in a single colour.
 ### `add_tile`
 
 Add a new tile to the layer's tileset (optionally filled with a solid colour).
-    Returns the new tile's index.
+Returns the new tile's index.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -955,10 +955,10 @@ Add a new tile to the layer's tileset (optionally filled with a solid colour).
 
 Create a tilemap layer with an empty grid.
 
-    Args:
-        name: Layer name.
-        tile_width, tile_height: Tile size in pixels (sets the sprite grid).
-        columns, rows: Grid size in tiles (default: enough to cover the canvas).
+Args:
+    name: Layer name.
+    tile_width, tile_height: Tile size in pixels (sets the sprite grid).
+    columns, rows: Grid size in tiles (default: enough to cover the canvas).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1011,7 +1011,7 @@ Read the tilemap as a 2D grid of tile indices, plus tile size and count.
 
 Draw individual pixels into a tile's artwork (tile-local coordinates).
 
-    pixels: list of {"x", "y", "color"?}; falls back to the shared `color`.
+pixels: list of {"x", "y", "color"?}; falls back to the shared `color`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1055,8 +1055,8 @@ Place many tiles at once. tiles: list of {"column", "row", "index"}.
 
 Composite an inline base64-encoded PNG (or other image) onto a layer at (x, y).
 
-    Useful for pasting externally generated artwork. `image_base64` may include a
-    `data:image/png;base64,` prefix.
+Useful for pasting externally generated artwork. `image_base64` may include a
+`data:image/png;base64,` prefix.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1074,12 +1074,12 @@ Composite an inline base64-encoded PNG (or other image) onto a layer at (x, y).
 
 Composite another image/sprite file onto a layer at (x, y).
 
-    Args:
-        source: Path to a .aseprite/.png/.bmp/... to stamp in.
-        x, y: Top-left placement on the target canvas.
-        source_frame: Which frame of the source to use (1-based).
-        opacity: 0-255.
-        blend_mode: Blend mode for compositing (normal, multiply, …).
+Args:
+    source: Path to a .aseprite/.png/.bmp/... to stamp in.
+    x, y: Top-left placement on the target canvas.
+    source_frame: Which frame of the source to use (1-based).
+    opacity: 0-255.
+    blend_mode: Blend mode for compositing (normal, multiply, …).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1110,13 +1110,13 @@ Append a colour to the end of the palette.
 
 Extract the unique colours used in a sprite (or another image).
 
-    Args:
-        from_image: Optional image/sprite to scan instead of `filename`.
-        set_as_palette: Apply the extracted colours as `filename`'s palette.
-        include_alpha: Treat differing alpha as distinct colours (default off).
-        max_colors: Error out if more unique colours than this are found.
+Args:
+    from_image: Optional image/sprite to scan instead of `filename`.
+    set_as_palette: Apply the extracted colours as `filename`'s palette.
+    include_alpha: Treat differing alpha as distinct colours (default off).
+    max_colors: Error out if more unique colours than this are found.
 
-    Returns the list of "#RRGGBBAA" colours found.
+Returns the list of "#RRGGBBAA" colours found.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1131,16 +1131,16 @@ Extract the unique colours used in a sprite (or another image).
 
 Generate a shading ramp from a base colour (dark -> light).
 
-    Produces `steps` colours by varying lightness across `light_range`, optionally
-    rotating hue by `hue_shift` total degrees across the ramp (classic pixel-art
-    hue shifting: cool shadows / warm highlights) and scaling saturation by
-    `saturation_shift` percent across the ramp.
+Produces `steps` colours by varying lightness across `light_range`, optionally
+rotating hue by `hue_shift` total degrees across the ramp (classic pixel-art
+hue shifting: cool shadows / warm highlights) and scaling saturation by
+`saturation_shift` percent across the ramp.
 
-    Args:
-        filename: If set with apply, write the ramp into that sprite's palette.
-        apply: "none" (just return), "append" (add to palette), or "replace".
+Args:
+    filename: If set with apply, write the ramp into that sprite's palette.
+    apply: "none" (just return), "append" (add to palette), or "replace".
 
-    Returns the ramp as a list of "#RRGGBB" colours (darkest first).
+Returns the ramp as a list of "#RRGGBB" colours (darkest first).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1186,7 +1186,7 @@ Resize the palette to `size` entries (new entries are black).
 
 Replace the entire palette with the given list of colours.
 
-    colors: list of colour strings, e.g. ["#000000", "#ffffff", "255,0,0"].
+colors: list of colour strings, e.g. ["#000000", "#ffffff", "255,0,0"].
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1219,7 +1219,7 @@ Set which palette index is treated as transparent (indexed sprites only).
 
 Sort the palette by "hue", "luminance" (default), "saturation", or "value".
 
-    For indexed sprites the pixel indices are remapped so the image looks identical.
+For indexed sprites the pixel indices are remapped so the image looks identical.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1234,12 +1234,12 @@ Sort the palette by "hue", "luminance" (default), "saturation", or "value".
 
 Create a slice (named region) at (x, y, width, height).
 
-    Args:
-        center_*: Optional 9-patch center rectangle, **relative to the slice's
-            top-left**. Provide all four to mark the stretchable middle.
-        pivot_*: Optional pivot point (relative to the slice).
-        color: Optional slice colour shown in the editor.
-        data: Optional user data string.
+Args:
+    center_*: Optional 9-patch center rectangle, **relative to the slice's
+        top-left**. Provide all four to mark the stretchable middle.
+    pivot_*: Optional pivot point (relative to the slice).
+    color: Optional slice colour shown in the editor.
+    data: Optional user data string.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1323,8 +1323,8 @@ Rotate the entire sprite by 90, 180, or 270 degrees (clockwise).
 
 Export each frame to its own image file.
 
-    output_pattern must contain "{frame}" (and optionally "{tag}", "{layer}"),
-    e.g. "frames/walk_{frame}.png". Aseprite substitutes the values.
+output_pattern must contain "{frame}" (and optionally "{tag}", "{layer}"),
+e.g. "frames/walk_{frame}.png". Aseprite substitutes the values.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1337,7 +1337,7 @@ Export each frame to its own image file.
 
 Export the full animation as an animated GIF (honours frame durations & tags).
 
-    overwrite: Replace `output` if it already exists (default False = no-clobber).
+overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1364,8 +1364,8 @@ Export a single layer of one frame as a PNG (others excluded).
 
 Export each layer to its own image file.
 
-    output_pattern must contain "{layer}" (e.g. "layers/{layer}.png"); add
-    "{frame}" too for animations. include_hidden also exports hidden layers.
+output_pattern must contain "{layer}" (e.g. "layers/{layer}.png"); add
+"{frame}" too for animations. include_hidden also exports hidden layers.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1379,11 +1379,11 @@ Export each layer to its own image file.
 
 Export a frame with neighbouring frames ghosted behind it (onion skin).
 
-    Args:
-        frame: The in-focus frame (drawn fully opaque), 1-based.
-        previous, next: How many earlier/later frames to ghost.
-        ghost_opacity: Max opacity (0-255) of the nearest ghost; further frames fade.
-        scale: Integer upscaling factor for the output PNG.
+Args:
+    frame: The in-focus frame (drawn fully opaque), 1-based.
+    previous, next: How many earlier/later frames to ghost.
+    ghost_opacity: Max opacity (0-255) of the nearest ghost; further frames fade.
+    scale: Integer upscaling factor for the output PNG.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1400,11 +1400,11 @@ Export a frame with neighbouring frames ghosted behind it (onion skin).
 
 Export one frame as a flattened PNG.
 
-    Args:
-        output: Destination .png path.
-        frame: Frame to export, 1-based (default 1).
-        scale: Integer upscaling factor (default 1).
-        overwrite: Replace `output` if it already exists (default False = no-clobber).
+Args:
+    output: Destination .png path.
+    frame: Frame to export, 1-based (default 1).
+    scale: Integer upscaling factor (default 1).
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1419,19 +1419,19 @@ Export one frame as a flattened PNG.
 
 Export frames into a single sprite-sheet image.
 
-    Args:
-        output: Destination sheet image (.png).
-        sheet_type: one of horizontal, vertical, rows, columns, packed.
-        scale: Integer upscaling factor.
-        data_output: Optional .json path to also write frame/tag/slice metadata
-            (JSON-array format) describing each frame's rectangle in the sheet.
-        padding: Pixels of padding around/between frames.
-        layer: Only include this layer.
-        ignore_layer: Exclude this layer (e.g. a "reference" layer).
-        split_layers: Lay out each layer as separate cels in the sheet.
-        split_tags: Treat each tag as a separate set in the sheet.
-        overwrite: Replace existing output(s) (default False = no-clobber). When
-            data_output is given, both files are checked before anything is written.
+Args:
+    output: Destination sheet image (.png).
+    sheet_type: one of horizontal, vertical, rows, columns, packed.
+    scale: Integer upscaling factor.
+    data_output: Optional .json path to also write frame/tag/slice metadata
+        (JSON-array format) describing each frame's rectangle in the sheet.
+    padding: Pixels of padding around/between frames.
+    layer: Only include this layer.
+    ignore_layer: Exclude this layer (e.g. a "reference" layer).
+    split_layers: Lay out each layer as separate cels in the sheet.
+    split_tags: Treat each tag as a separate set in the sheet.
+    overwrite: Replace existing output(s) (default False = no-clobber). When
+        data_output is given, both files are checked before anything is written.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1452,7 +1452,7 @@ Export frames into a single sprite-sheet image.
 
 Export only the frames of a named animation tag as an animated GIF.
 
-    overwrite: Replace `output` if it already exists (default False = no-clobber).
+overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1467,8 +1467,8 @@ Export only the frames of a named animation tag as an animated GIF.
 
 Export each animation tag's frames to their own files.
 
-    output_pattern must contain "{tag}" (and usually "{frame}"),
-    e.g. "anim/{tag}_{frame}.png".
+output_pattern must contain "{tag}" (and usually "{frame}"),
+e.g. "anim/{tag}_{frame}.png".
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1481,9 +1481,9 @@ Export each animation tag's frames to their own files.
 
 Create an editable .aseprite sprite from a flat image (.png/.bmp/.jpg/...).
 
-    Args:
-        input_image: Source raster image.
-        output: Destination .aseprite path.
+Args:
+    input_image: Source raster image.
+    output: Destination .aseprite path.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1497,25 +1497,25 @@ Create an editable .aseprite sprite from a flat image (.png/.bmp/.jpg/...).
 
 Export a sprite as a Godot 4 ``SpriteFrames`` resource (.tres) + a packed sheet.
 
-    Produces three files: a packed PNG sprite sheet, its JSON frame/tag metadata, and a
-    ``SpriteFrames`` .tres that references the sheet via ``AtlasTexture`` regions — one
-    Godot animation per Aseprite tag (or a single ``default`` animation if untagged), with
-    per-frame timing taken from Aseprite frame durations.
+Produces three files: a packed PNG sprite sheet, its JSON frame/tag metadata, and a
+``SpriteFrames`` .tres that references the sheet via ``AtlasTexture`` regions — one
+Godot animation per Aseprite tag (or a single ``default`` animation if untagged), with
+per-frame timing taken from Aseprite frame durations.
 
-    v1 emits ``SpriteFrames`` only (no pivot/origin/hitbox/9-slice). Aseprite tag direction
-    isn't represented (Godot animations only loop or not); ``default_loop`` is applied to all.
+v1 emits ``SpriteFrames`` only (no pivot/origin/hitbox/9-slice). Aseprite tag direction
+isn't represented (Godot animations only loop or not); ``default_loop`` is applied to all.
 
-    Args:
-        output: Destination .tres path (workspace-relative).
-        sheet_output: Sheet PNG path. Defaults to ``<output stem>.png`` beside the .tres.
-        scale: Integer upscaling factor for the sheet.
-        texture_res_path: The ``res://`` path of the sheet inside your Godot project (the
-            AtlasTexture atlas). Defaults to ``res://<sheet filename>`` (same-folder import).
-        default_loop: ``loop`` flag for every generated animation (default True).
-        overwrite: Replace existing outputs (default False = no-clobber). All three targets
-            are validated up front, so nothing is written if any already exists.
+Args:
+    output: Destination .tres path (workspace-relative).
+    sheet_output: Sheet PNG path. Defaults to ``<output stem>.png`` beside the .tres.
+    scale: Integer upscaling factor for the sheet.
+    texture_res_path: The ``res://`` path of the sheet inside your Godot project (the
+        AtlasTexture atlas). Defaults to ``res://<sheet filename>`` (same-folder import).
+    default_loop: ``loop`` flag for every generated animation (default True).
+    overwrite: Replace existing outputs (default False = no-clobber). All three targets
+        are validated up front, so nothing is written if any already exists.
 
-    Returns a ``workflow_manifest.v1`` manifest (kind ``engine_preset``).
+Returns a ``workflow_manifest.v1`` manifest (kind ``engine_preset``).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1532,19 +1532,19 @@ Export a sprite as a Godot 4 ``SpriteFrames`` resource (.tres) + a packed sheet.
 
 Export every slice as engine-agnostic JSON (``aseprite_mcp.slice_metadata.v1``).
 
-    Each slice becomes ``{name, type, id, bounds, pivot, nine_slice, color, data,
-    raw_data}``. **Type detection:** a slice's user-data JSON ``type`` wins; otherwise the
-    name convention ``<type>:<id>`` (recognized types: hitbox, hurtbox, collision, interact,
-    pivot, origin, attach, spawn, nine_slice — anything else becomes ``"custom"``, never an
-    error). ``id`` comes from the data ``id`` or the name's ``:<id>`` suffix. ``nine_slice``
-    (Aseprite's 9-patch center) and ``pivot`` are emitted whenever the slice has them. Slice
-    user-data that is valid JSON is parsed into ``data``; the raw string is kept in ``raw_data``.
+Each slice becomes ``{name, type, id, bounds, pivot, nine_slice, color, data,
+raw_data}``. **Type detection:** a slice's user-data JSON ``type`` wins; otherwise the
+name convention ``<type>:<id>`` (recognized types: hitbox, hurtbox, collision, interact,
+pivot, origin, attach, spawn, nine_slice — anything else becomes ``"custom"``, never an
+error). ``id`` comes from the data ``id`` or the name's ``:<id>`` suffix. ``nine_slice``
+(Aseprite's 9-patch center) and ``pivot`` are emitted whenever the slice has them. Slice
+user-data that is valid JSON is parsed into ``data``; the raw string is kept in ``raw_data``.
 
-    Args:
-        output: Destination .json path. Defaults to ``<sprite>_slices.json`` beside the sprite.
-        overwrite: Replace an existing file (default False = no-clobber).
+Args:
+    output: Destination .json path. Defaults to ``<sprite>_slices.json`` beside the sprite.
+    overwrite: Replace an existing file (default False = no-clobber).
 
-    Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
+Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1559,14 +1559,14 @@ Export every slice as engine-agnostic JSON (``aseprite_mcp.slice_metadata.v1``).
 
 Add a dimmed, locked layer holding a reference image to trace over.
 
-    Args:
-        image_file: The reference image/sprite.
-        layer_name: Name for the new layer (default "reference").
-        opacity: Layer opacity (0-255); dim it so your art stands out.
-        scale_to_fit: Resize the reference to the canvas size (smooth).
-        x, y: Placement when not scaling to fit.
+Args:
+    image_file: The reference image/sprite.
+    layer_name: Name for the new layer (default "reference").
+    opacity: Layer opacity (0-255); dim it so your art stands out.
+    scale_to_fit: Resize the reference to the canvas size (smooth).
+    x, y: Placement when not scaling to fit.
 
-    Exclude this layer from exports with ignore_layer="<layer_name>".
+Exclude this layer from exports with ignore_layer="<layer_name>".
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1584,9 +1584,9 @@ Add a dimmed, locked layer holding a reference image to trace over.
 
 Import a sequence of images as per-frame references for rotoscoping.
 
-    Each image is placed on its own frame in a single dimmed, locked layer
-    (frames are created as needed). Draw your animation on a layer above, then
-    exclude this layer at export with ignore_layer="<layer_name>".
+Each image is placed on its own frame in a single dimmed, locked layer
+(frames are created as needed). Draw your animation on a layer above, then
+exclude this layer at export with ignore_layer="<layer_name>".
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1603,11 +1603,11 @@ Import a sequence of images as per-frame references for rotoscoping.
 ### `create_character_sprite`
 
 Scaffold a character sprite project: a transparent canvas with a tidy layer
-    stack (body + details), an auto-generated shading palette ramp from `base_color`,
-    and (optionally) an outlined placeholder body to draw over.
+stack (body + details), an auto-generated shading palette ramp from `base_color`,
+and (optionally) an outlined placeholder body to draw over.
 
-    Returns a ``workflow_manifest.v1`` manifest (sprite summary, created files,
-    palette, and suggested next actions).
+Returns a ``workflow_manifest.v1`` manifest (sprite summary, created files,
+palette, and suggested next actions).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1621,10 +1621,10 @@ Scaffold a character sprite project: a transparent canvas with a tidy layer
 ### `create_icon_set`
 
 Scaffold an icon set: a grid sheet with `count` icon cells, each a placeholder
-    inside a named slice (`icon_0`, `icon_1`, …) for easy atlas export.
+inside a named slice (`icon_0`, `icon_1`, …) for easy atlas export.
 
-    Returns a ``workflow_manifest.v1`` manifest (kind "icon_set"); the per-icon regions
-    appear as slices under `sprite.slices`.
+Returns a ``workflow_manifest.v1`` manifest (kind "icon_set"); the per-icon regions
+appear as slices under `sprite.slices`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1637,10 +1637,10 @@ Scaffold an icon set: a grid sheet with `count` icon cells, each a placeholder
 ### `create_rpg_item_sheet`
 
 Scaffold an RPG item sheet: a grid sheet with one named slice per item
-    (default sword/shield/potion/coin/key/gem), each with a placeholder.
+(default sword/shield/potion/coin/key/gem), each with a placeholder.
 
-    Returns a ``workflow_manifest.v1`` manifest (kind "rpg_item_sheet"); item regions
-    appear as slices (named after each item) under `sprite.slices`.
+Returns a ``workflow_manifest.v1`` manifest (kind "rpg_item_sheet"); item regions
+appear as slices (named after each item) under `sprite.slices`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1653,11 +1653,11 @@ Scaffold an RPG item sheet: a grid sheet with one named slice per item
 ### `create_tileset_project`
 
 Scaffold a tilemap project: a canvas sized columns×rows tiles, a tilemap layer,
-    and a starter tileset (grass/dirt/water/stone by default, or your own
-    [{"name","color"}] list). The grid is filled with the first tile to start.
+and a starter tileset (grass/dirt/water/stone by default, or your own
+[{"name","color"}] list). The grid is filled with the first tile to start.
 
-    Returns a ``workflow_manifest.v1`` manifest with a tilemap block mapping tile
-    names to their tileset indices.
+Returns a ``workflow_manifest.v1`` manifest with a tilemap block mapping tile
+names to their tileset indices.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1671,16 +1671,16 @@ Scaffold a tilemap project: a canvas sized columns×rows tiles, a tilemap layer,
 ### `export_game_asset_bundle`
 
 Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
-    GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
-    `manifest.json` describing everything.
+GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
+`manifest.json` describing everything.
 
-    Args:
-        overwrite: Replace existing bundle files (default False = no-clobber). Every
-            planned output is checked up front, so the bundle fails before writing any
-            file if a target already exists.
+Args:
+    overwrite: Replace existing bundle files (default False = no-clobber). Every
+        planned output is checked up front, so the bundle fails before writing any
+        file if a target already exists.
 
-    Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
-    disk as manifest.json inside the bundle).
+Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
+disk as manifest.json inside the bundle).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1694,10 +1694,10 @@ Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
 
 Turn a single-frame sprite into a 4-frame idle "bob" loop.
 
-    Duplicates frame 1 to 4 frames, nudges `layer` down by `bob_pixels` on frames 2
-    and 4 for a subtle bob, sets uniform durations, and adds a looping tag.
+Duplicates frame 1 to 4 frames, nudges `layer` down by `bob_pixels` on frames 2
+and 4 for a subtle bob, sets uniform durations, and adds a looping tag.
 
-    Returns a ``workflow_manifest.v1`` manifest (sprite summary + animation block).
+Returns a ``workflow_manifest.v1`` manifest (sprite summary + animation block).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1711,11 +1711,11 @@ Turn a single-frame sprite into a 4-frame idle "bob" loop.
 ### `make_8_direction_walk_template`
 
 Scaffold an 8-direction walk-cycle template on an existing sprite: enough frames
-    for `frames_per_direction` per direction, with one animation tag per direction
-    (N, NE, E, SE, S, SW, W, NW by default).
+for `frames_per_direction` per direction, with one animation tag per direction
+(N, NE, E, SE, S, SW, W, NW by default).
 
-    Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifest
-    (kind "walk_template") with an animation block listing the directions/tags.
+Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifest
+(kind "walk_template") with an animation block listing the directions/tags.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1729,16 +1729,16 @@ Scaffold an 8-direction walk-cycle template on an existing sprite: enough frames
 
 Check whether a sprite is game-ready against the criteria you specify.
 
-    Runs a series of checks — does the file open, do dimensions match (exactly or as
-    a tile multiple), is the colour mode allowed, are frame counts / required animation
-    tags present, is the background transparent, is the palette within budget, do
-    expected export files exist, and is sprite-sheet metadata readable — plus soft
-    warnings for oversized canvases, missing tags, and default/blank layer names.
+Runs a series of checks — does the file open, do dimensions match (exactly or as
+a tile multiple), is the colour mode allowed, are frame counts / required animation
+tags present, is the background transparent, is the palette within budget, do
+expected export files exist, and is sprite-sheet metadata readable — plus soft
+warnings for oversized canvases, missing tags, and default/blank layer names.
 
-    All criteria are optional; only the ones you pass are enforced. Returns a
-    ``workflow_manifest.v1`` manifest (kind "validation") with a `validation` section
-    `{passed, checks[], errors[], warnings[]}`. `validation.passed` is the verdict;
-    `ok` just means the check ran.
+All criteria are optional; only the ones you pass are enforced. Returns a
+``workflow_manifest.v1`` manifest (kind "validation") with a `validation` section
+`{passed, checks[], errors[], warnings[]}`. `validation.passed` is the verdict;
+`ok` just means the check ran.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1762,19 +1762,19 @@ Check whether a sprite is game-ready against the criteria you specify.
 
 Apply a list of edit operations to a sprite in one atomic, single-process batch.
 
-    Each operation is `{"op": "<name>", "args": {...}}`. Supported ops (v1):
-    add_layer, rename_layer, set_layer_visible, set_layer_opacity, remove_layer,
-    add_frame, duplicate_frame, set_frame_duration, add_tag, remove_tag, set_pixel,
-    draw_line, draw_rectangle, fill_rectangle, draw_ellipse, fill_ellipse, fill_layer,
-    clear_layer, add_slice, remove_slice, replace_color. Ops run **in order against the
-    same open sprite**, so later ops see earlier ones (e.g. add a layer then draw on it).
+Each operation is `{"op": "<name>", "args": {...}}`. Supported ops (v1):
+add_layer, rename_layer, set_layer_visible, set_layer_opacity, remove_layer,
+add_frame, duplicate_frame, set_frame_duration, add_tag, remove_tag, set_pixel,
+draw_line, draw_rectangle, fill_rectangle, draw_ellipse, fill_ellipse, fill_layer,
+clear_layer, add_slice, remove_slice, replace_color. Ops run **in order against the
+same open sprite**, so later ops see earlier ones (e.g. add a layer then draw on it).
 
-    Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
-    error names the failing op index. `dry_run=True` validates the op list and returns
-    the plan **without launching Aseprite** (shape checks only — runtime issues like a
-    missing layer surface on a real run).
+Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
+error names the failing op index. `dry_run=True` validates the op list and returns
+the plan **without launching Aseprite** (shape checks only — runtime issues like a
+missing layer surface on a real run).
 
-    Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
+Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1796,13 +1796,13 @@ _No parameters._
 
 Open a sprite in the Aseprite GUI window (non-blocking) for live viewing.
 
-    The window stays open and runs independently of this server. Keep editing the
-    file with the other tools — Aseprite detects the on-disk change and prompts to
-    reload (or reloads automatically, depending on your Aseprite preferences), so
-    you can watch edits land without re-opening.
+The window stays open and runs independently of this server. Keep editing the
+file with the other tools — Aseprite detects the on-disk change and prompts to
+reload (or reloads automatically, depending on your Aseprite preferences), so
+you can watch edits land without re-opening.
 
-    Returns the launched process id. To stop watching, just close the Aseprite
-    window yourself.
+Returns the launched process id. To stop watching, just close the Aseprite
+window yourself.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1815,9 +1815,9 @@ Open a sprite in the Aseprite GUI window (non-blocking) for live viewing.
 
 Run a self-test of the server and its Aseprite integration.
 
-    Returns whether Aseprite was found, its version, the resolved workspace, the
-    number of registered tools, and whether a real create-sprite + export-PNG
-    round-trip succeeds. `ok` is True only if the full round-trip works.
+Returns whether Aseprite was found, its version, the resolved workspace, the
+number of registered tools, and whether a real create-sprite + export-PNG
+round-trip succeeds. `ok` is True only if the full round-trip works.
 
 _No parameters._
 
