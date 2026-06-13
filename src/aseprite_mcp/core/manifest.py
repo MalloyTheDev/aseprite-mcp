@@ -39,8 +39,9 @@ VALID_KINDS = (
     "walk_template",
     "rpg_item_sheet",
     "batch",
+    "engine_preset",
 )
-FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest")
+FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest", "engine_resource")
 EXPORT_ROLES = ("spritesheet", "gif", "png", "tag_gif", "frames")
 
 

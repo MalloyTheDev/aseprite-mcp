@@ -201,6 +201,7 @@ scaffolding, no AI generation.
 | `create_rpg_item_sheet` | Grid sheet with a named slice per item (sword/shield/potion/…). |
 | `make_8_direction_walk_template` | 8-direction walk template — frames + one tag per direction (N/NE/E/…). |
 | `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. |
+| `export_godot_spriteframes` | Godot 4 `SpriteFrames` resource (.tres) + packed sheet — one animation per tag, timed from frame durations. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
 
 > "Make me an idle-animated hero and a game-ready bundle."
