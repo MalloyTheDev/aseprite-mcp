@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **110 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **113 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -25,6 +25,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Engine export presets](#engine-export-presets) (2)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (8)
+- [Asset spec (declarative build)](#asset-spec-declarative-build) (3)
 - [Batch operations](#batch-operations) (1)
 - [GUI companion mode](#gui-companion-mode) (2)
 - [Health & self-test](#health--self-test) (1)
@@ -1754,6 +1755,60 @@ All criteria are optional; only the ones you pass are enforced. Returns a
 | `max_palette_size` | integer | null | no | None |
 | `expected_exports` | array | null | no | None |
 | `spritesheet_data` | string | null | no | None |
+
+
+## Asset spec (declarative build)
+
+### `build_asset_from_spec`
+
+Build the asset described by an ``aseprite_mcp.asset_spec.v1`` document.
+
+Executes the (validated) plan by dispatching each step to an existing tool: scaffolds
+the sprite for its `kind`, applies palette / extra layers / animation frames+tags /
+slices, and runs the requested exports. **Structure only — no pixels are drawn;** the
+returned manifest's `suggested_next_actions` hand the actual art back to you.
+
+Args:
+    overwrite: Passed to the export steps (replace existing export files). The sprite
+        itself is created no-clobber, so building over an existing ``<name>.aseprite``
+        raises — build to a new name or remove the old file.
+
+Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with the created files, the
+executed `plan`, and next actions. Raises ``ValidationFailed`` if the spec is invalid.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `spec` | object | yes |  |
+| `overwrite` | boolean | no | False |
+
+
+### `plan_asset_spec`
+
+Return the ordered build steps for an asset spec **without launching Aseprite**.
+
+The pure dry-run: each step is ``{tool, args, purpose}`` naming the existing tool that
+`build_asset_from_spec` would call. Returns a ``workflow_manifest.v1`` (kind
+``asset_spec``) with the steps under `plan` and `dry_run=true`. If the spec is invalid,
+returns the validation report instead.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `spec` | object | yes |  |
+
+
+### `validate_asset_spec`
+
+Validate an ``aseprite_mcp.asset_spec.v1`` document (does the *spec* make sense?).
+
+Checks the schema, kind, canvas, per-kind fields, palette, layers, animations
+(`frame_count`, not `frames`), slices, and export formats. Returns a
+``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
+`{passed, checks, errors, warnings}`. This does **not** check a finished sprite against
+the spec — that's a separate future tool.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `spec` | object | yes |  |
 
 
 ## Batch operations

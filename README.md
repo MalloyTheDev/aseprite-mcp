@@ -204,6 +204,7 @@ scaffolding, no AI generation.
 | `export_godot_spriteframes` | Godot 4 `SpriteFrames` resource (.tres) + packed sheet — one animation per tag, timed from frame durations. |
 | `export_slice_metadata` | Engine-agnostic `<sprite>_slices.json` — hitbox/hurtbox/collision/attach/9-slice/pivot from slice names or JSON data. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
+| `validate_asset_spec` / `plan_asset_spec` / `build_asset_from_spec` | Describe an asset once (`aseprite_mcp.asset_spec.v1`), then validate it, dry-run the plan, or build it (structure only — canvas/layers/frames/tags/slices/palette + exports; you draw the art). |
 
 > "Make me an idle-animated hero and a game-ready bundle."
 

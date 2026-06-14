@@ -37,6 +37,7 @@ GROUPS = [
     ("export_presets", "Engine export presets"),
     ("reference", "Reference / rotoscope"),
     ("workflow", "Workflows (high-level scaffolding)"),
+    ("asset_spec", "Asset spec (declarative build)"),
     ("batch", "Batch operations"),
     ("gui", "GUI companion mode"),
     ("health", "Health & self-test"),
