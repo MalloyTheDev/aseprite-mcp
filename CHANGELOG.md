@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+- **Supply-chain hardening of CI** — GitHub Actions are now pinned to commit SHAs
+  (`actions/checkout`, `astral-sh/setup-uv`) instead of mutable tags, and a
+  `.github/dependabot.yml` keeps actions and Python deps (uv ecosystem) current via
+  reviewed PRs (with version annotations). Future bumps are Dependabot PRs, not a manual
+  floating-tag chore.
+
 ## [0.7.0] - 2026-06-13
 
 First engine-ready export layer: take a sprite all the way to game-engine resources.
