@@ -126,7 +126,9 @@ async def main(check: bool = False) -> int:
             out.append(f"### `{t.name}`")
             out.append("")
             if t.description:
-                out.append(t.description.strip())
+                # cleandoc (not strip) so output is stable across Python versions:
+                # 3.13 auto-dedents docstrings at compile time, ≤3.12 does not.
+                out.append(inspect.cleandoc(t.description))
                 out.append("")
             out.append(_params_table(t.inputSchema or {}))
             out.append("")

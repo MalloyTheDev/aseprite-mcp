@@ -15,10 +15,16 @@ from aseprite_mcp.core.paths import ensure_output_path
 
 @pytest.fixture
 def ws(tmp_path, monkeypatch):
-    """A sandboxed workspace with absolute paths disabled (overrides conftest)."""
-    monkeypatch.setenv("ASEPRITE_MCP_WORKSPACE", str(tmp_path))
+    """A sandboxed workspace with absolute paths disabled (overrides conftest).
+
+    The workspace is a *subdirectory* of tmp_path so that ``tmp_path / "outside"`` is
+    genuinely outside the workspace (needed for the symlink-escape test).
+    """
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setenv("ASEPRITE_MCP_WORKSPACE", str(workspace))
     monkeypatch.delenv("ASEPRITE_MCP_ALLOW_ABSOLUTE", raising=False)
-    return tmp_path
+    return workspace
 
 
 # ---------------------------------------------------------------- no-clobber
