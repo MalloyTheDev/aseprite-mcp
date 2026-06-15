@@ -1240,7 +1240,8 @@ Args:
         top-left**. Provide all four to mark the stretchable middle.
     pivot_*: Optional pivot point (relative to the slice).
     color: Optional slice colour shown in the editor.
-    data: Optional user data string.
+    data: Optional user data. A string is stored as-is; a dict/list is JSON-encoded
+        (so e.g. {"type": "hitbox"} round-trips through export_slice_metadata).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1257,7 +1258,7 @@ Args:
 | `pivot_x` | integer | null | no | None |
 | `pivot_y` | integer | null | no | None |
 | `color` | string | null | no | None |
-| `data` | string | null | no | None |
+| `data` | string | object | array | null | no | None |
 
 
 ### `list_slices`
@@ -1283,6 +1284,9 @@ Delete a slice by name.
 
 Update an existing slice's bounds, name, colour, or data.
 
+data: a string is stored as-is; a dict/list is JSON-encoded (round-trips through
+export_slice_metadata).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -1293,7 +1297,7 @@ Update an existing slice's bounds, name, colour, or data.
 | `height` | integer | null | no | None |
 | `new_name` | string | null | no | None |
 | `color` | string | null | no | None |
-| `data` | string | null | no | None |
+| `data` | string | object | array | null | no | None |
 
 
 ## Transforms

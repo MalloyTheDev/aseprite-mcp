@@ -16,6 +16,13 @@ All notable changes to this project are documented here. The format is based on
   Kinds: character, enemy, item_sheet, icon_set, tileset, walk_8dir. Pure schema/planner in
   `core/asset_spec.py`. (113 tools.)
 
+### Fixed
+- `add_slice` / `set_slice` now accept a **dict or list** for `data` (JSON-encoded
+  automatically), not just a string. Structured slice user-data such as
+  `{"type": "hitbox", "id": "body"}` now round-trips through `export_slice_metadata`
+  (deriving `type`/`id`) instead of being rejected ("expected string, got dict") or stored
+  as garbled, over-escaped text by MCP clients that serialize JSON-looking arguments as objects.
+
 ### Security
 - **Supply-chain hardening of CI** — GitHub Actions are now pinned to commit SHAs
   (`actions/checkout`, `astral-sh/setup-uv`) instead of mutable tags, and a

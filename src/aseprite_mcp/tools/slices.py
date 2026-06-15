@@ -6,9 +6,27 @@ Slices are exported in sprite-sheet JSON data and are handy for UI atlases,
 
 from __future__ import annotations
 
+import json
+
 from ..app import mcp
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
+
+
+def _coerce_slice_data(data: str | dict | list | None) -> str | None:
+    """Normalize slice user-data to a string for Aseprite's ``Slice.data``.
+
+    A ``dict``/``list`` is JSON-encoded so structured user-data (e.g.
+    ``{"type": "hitbox", "id": "body"}``) round-trips cleanly through
+    ``export_slice_metadata`` (which parses valid-JSON data back into ``data`` and derives
+    ``type``/``id`` from it). A string passes through unchanged. Accepting both shields
+    against MCP clients that serialize a JSON-looking string argument as an object.
+    """
+    if data is None:
+        return None
+    if isinstance(data, (dict, list)):
+        return json.dumps(data)
+    return str(data)
 
 
 @mcp.tool()
@@ -26,7 +44,7 @@ def add_slice(
     pivot_x: int | None = None,
     pivot_y: int | None = None,
     color: str | None = None,
-    data: str | None = None,
+    data: str | dict | list | None = None,
 ) -> dict:
     """Create a slice (named region) at (x, y, width, height).
 
@@ -35,7 +53,8 @@ def add_slice(
             top-left**. Provide all four to mark the stretchable middle.
         pivot_*: Optional pivot point (relative to the slice).
         color: Optional slice colour shown in the editor.
-        data: Optional user data string.
+        data: Optional user data. A string is stored as-is; a dict/list is JSON-encoded
+            (so e.g. {"type": "hitbox"} round-trips through export_slice_metadata).
     """
     center = None
     if None not in (center_x, center_y, center_width, center_height):
@@ -50,7 +69,7 @@ def add_slice(
         "x": int(x), "y": int(y), "width": int(width), "height": int(height),
         "center": center, "pivot": pivot,
         "color": parse_color(color) if color else None,
-        "data": data,
+        "data": _coerce_slice_data(data),
     }
     body = """
     local spr = open_sprite(ARG.src)
@@ -78,16 +97,20 @@ def set_slice(
     height: int | None = None,
     new_name: str | None = None,
     color: str | None = None,
-    data: str | None = None,
+    data: str | dict | list | None = None,
 ) -> dict:
-    """Update an existing slice's bounds, name, colour, or data."""
+    """Update an existing slice's bounds, name, colour, or data.
+
+    data: a string is stored as-is; a dict/list is JSON-encoded (round-trips through
+    export_slice_metadata).
+    """
     bounds = None
     if None not in (x, y, width, height):
         bounds = {"x": int(x), "y": int(y), "width": int(width), "height": int(height)}
     args = {
         "src": lua_path(resolve_path(filename)),
         "name": name, "bounds": bounds, "new_name": new_name,
-        "color": parse_color(color) if color else None, "data": data,
+        "color": parse_color(color) if color else None, "data": _coerce_slice_data(data),
     }
     body = """
     local spr = open_sprite(ARG.src)

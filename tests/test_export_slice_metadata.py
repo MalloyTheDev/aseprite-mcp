@@ -67,3 +67,18 @@ def test_export_slice_metadata_no_slices_warns():
     assert m["warnings"] == ["No slices found in the sprite."]
     doc = json.loads(Path(m["created_files"][0]["path"]).read_text(encoding="utf-8"))
     assert doc["slices"] == []
+
+
+def test_dict_slice_data_round_trips_to_type_and_id():
+    """A dict passed to add_slice(data=...) is JSON-encoded and round-trips: the exported
+    metadata derives type/id from it and parses data back to the dict (regression for the
+    'expected string, got dict' rejection / type='custom' fallback)."""
+    sprite.create_sprite("w/sdict.aseprite", 32, 32)
+    slices.add_slice("w/sdict.aseprite", "torso", 8, 8, 16, 16,
+                     data={"type": "hitbox", "id": "body"})
+    m = export_presets.export_slice_metadata("w/sdict.aseprite", "w/sdict_slices.json")
+    doc = json.loads(Path(m["created_files"][0]["path"]).read_text(encoding="utf-8"))
+    torso = next(s for s in doc["slices"] if s["name"] == "torso")
+    assert torso["type"] == "hitbox"
+    assert torso["id"] == "body"
+    assert torso["data"] == {"type": "hitbox", "id": "body"}
