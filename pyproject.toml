@@ -15,7 +15,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "mcp[cli]>=1.4.0",
+    "mcp[cli]>=1.28.0",
     "pillow>=12.2.0",
 ]
 
