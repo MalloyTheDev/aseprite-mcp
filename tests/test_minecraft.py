@@ -391,3 +391,19 @@ def test_seam_in_any_frame_fails_the_texture():
 def test_seam_check_skipped_when_not_tiling():
     ramp = evaluate_tiling(_grid(lambda x, y: _hex(x * 16, x * 16, x * 16)))
     assert evaluate_texture(_info(), tiling=False, frame_tilings=[ramp])["passed"]
+
+
+def test_plan_renames_the_default_layer_instead_of_leaving_it():
+    # create_sprite leaves a "Layer 1" behind. Left in place, a spec asking for two layers
+    # produces three, and "Layer 1" is exactly what core/validation.py flags as suspicious.
+    ops = _one(plan_spec(BLOCK), "apply_operations")["args"]["operations"]
+    assert ops[0] == {"op": "rename_layer",
+                      "args": {"layer": "Layer 1", "new_name": "base"}}
+    added = [o["args"]["name"] for o in ops if o["op"] == "add_layer"]
+    assert added == ["grime"]  # not ["base", "grime"]
+
+
+def test_plan_names_the_default_layer_when_spec_declares_none():
+    spec = {k: v for k, v in BLOCK.items() if k != "layers"}
+    ops = _one(plan_spec(spec), "apply_operations")["args"]["operations"]
+    assert ops[0]["args"]["new_name"] == "texture"

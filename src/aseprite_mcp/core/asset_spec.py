@@ -314,15 +314,14 @@ def plan_spec(spec: dict) -> list[dict]:
 
 
 def _layer_and_animation_ops(spec: dict, kind: str) -> list[dict]:
+    if kind == "minecraft":
+        return _minecraft_layer_ops(spec) + _minecraft_frame_ops(spec)
+
     ops: list[dict] = []
     defaults = _DEFAULT_LAYERS.get(kind, ())
     for layer in spec.get("layers", []):
         if layer not in defaults:
             ops.append({"op": "add_layer", "args": {"name": layer}})
-
-    if kind == "minecraft":
-        ops.extend(_minecraft_frame_ops(spec))
-        return ops
 
     anims = spec.get("animations") or []
     if anims and kind in ("character", "enemy"):
@@ -340,6 +339,22 @@ def _layer_and_animation_ops(spec: dict, kind: str) -> list[dict]:
                 "direction": a.get("direction", "forward"),
             }})
             frame += count
+    return ops
+
+
+# The layer `create_sprite` leaves behind. Unlike the character/enemy scaffolds, which
+# name their layers, the generic sprite tool produces a single "Layer 1" — a name this
+# project's own game-export validation flags as suspicious. It is renamed rather than
+# left beside the spec's layers, so a spec asking for two layers gets two.
+_GENERIC_FIRST_LAYER = "Layer 1"
+
+
+def _minecraft_layer_ops(spec: dict) -> list[dict]:
+    layers = list(spec.get("layers") or [])
+    first = layers[0] if layers else "texture"
+    ops: list[dict] = [{"op": "rename_layer",
+                        "args": {"layer": _GENERIC_FIRST_LAYER, "new_name": first}}]
+    ops += [{"op": "add_layer", "args": {"name": name}} for name in layers[1:]]
     return ops
 
 
