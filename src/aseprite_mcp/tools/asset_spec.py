@@ -19,10 +19,21 @@ from ..app import mcp
 from ..core.asset_spec import plan_spec, validate_spec
 from ..core.errors import ValidationFailed
 from ..core.manifest import file_entry, sprite_summary, workflow_manifest
-from . import batch, export, export_presets, inspect, palette, slices, workflow
+from . import (
+    batch,
+    export,
+    export_presets,
+    inspect,
+    minecraft,
+    palette,
+    slices,
+    sprite,
+    workflow,
+)
 
 # Maps a plan step's tool name to the real callable it dispatches to.
 _DISPATCH = {
+    "create_sprite": sprite.create_sprite,
     "create_character_sprite": workflow.create_character_sprite,
     "make_8_direction_walk_template": workflow.make_8_direction_walk_template,
     "create_icon_set": workflow.create_icon_set,
@@ -36,6 +47,7 @@ _DISPATCH = {
     "export_gif": export.export_gif,
     "export_spritesheet": export.export_spritesheet,
     "export_png": export.export_png,
+    "export_minecraft_texture": minecraft.export_minecraft_texture,
 }
 
 
@@ -142,6 +154,11 @@ def _export_files(tool: str, result: dict) -> list[dict]:
         return [file_entry("engine_resource", result["created_files"][0]["path"], "tres")]
     if tool == "export_slice_metadata":
         return [file_entry("metadata", result["created_files"][0]["path"], "json")]
+    if tool == "export_minecraft_texture":
+        # Returns a manifest rather than a bare {output}: one call can produce both the
+        # PNG and its .png.mcmeta sidecar, and dropping the sidecar from the build's
+        # created-files list would hide half of what an animated texture needs.
+        return list(result["created_files"])
     out = result["output"]
     return [file_entry("image", out, Path(out).suffix.lstrip(".") or "png")]
 
@@ -156,5 +173,14 @@ def _build_next_actions(kind: str, fname: str) -> list[str]:
         actions.append("Draw each cell inside its named slice (the placeholders are there to draw over).")
     elif kind == "tileset":
         actions.append("Paint tiles with paint_tile_pixels and lay them out with set_tiles.")
+    elif kind == "minecraft":
+        actions.append(
+            f"Draw each frame of {fname} at texture resolution — every Aseprite frame "
+            "becomes one row of the vertical strip the game animates."
+        )
+        actions.append(
+            f"Before shipping, run validate_minecraft_texture('{fname}', tiling=True) for a "
+            "block texture: wrap-around seams are invisible in the editor and obvious on a wall."
+        )
     actions.append("Re-run the export_* tools (overwrite=True) to regenerate engine files after editing.")
     return actions

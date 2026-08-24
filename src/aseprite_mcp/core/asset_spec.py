@@ -18,17 +18,24 @@ from __future__ import annotations
 
 import json
 
+from . import minecraft
 from .models import ColorSpec
 
 SCHEMA = "aseprite_mcp.asset_spec.v1"
 
 # Each kind maps to a real, deterministic executor (a workflow scaffold). A kind with no
 # executor behind it would be a footgun — projectile/vfx/portrait are deferred to v2.
-SPEC_KINDS = ("character", "enemy", "item_sheet", "icon_set", "tileset", "walk_8dir")
-# Kinds whose canvas is given explicitly (the grid kinds derive their canvas from cells).
+SPEC_KINDS = ("character", "enemy", "item_sheet", "icon_set", "tileset", "walk_8dir",
+              "minecraft")
+# Kinds whose canvas is given explicitly. The rest derive theirs — from cell size and grid
+# for the sheet kinds, from texture_size for minecraft.
 CANVAS_KINDS = ("character", "enemy", "walk_8dir")
 COLOR_MODES = ("rgb", "indexed", "gray")
-EXPORT_FORMATS = ("godot_spriteframes", "slice_metadata", "gif", "spritesheet", "png")
+EXPORT_FORMATS = ("godot_spriteframes", "slice_metadata", "gif", "spritesheet", "png",
+                  "minecraft_texture")
+# Exports that only make sense for one kind, so a spec cannot ask for a Godot resource
+# from a Minecraft texture (or the reverse) and discover it as a runtime dispatch error.
+_KIND_ONLY_EXPORTS = {"minecraft_texture": "minecraft"}
 
 # Layers a kind's scaffold already creates (so spec layers don't duplicate them).
 _DEFAULT_LAYERS = {"character": ("body", "details"), "enemy": ("body", "details")}
@@ -79,7 +86,7 @@ def validate_spec(spec) -> dict:
     _check_layers(spec, check)
     _check_animations(spec, kind, check)
     _check_slices(spec, check)
-    _check_exports(spec, check)
+    _check_exports(spec, kind, check)
 
     return {"passed": len(errors) == 0, "checks": checks, "errors": errors, "warnings": warnings}
 
@@ -101,8 +108,9 @@ def _check_canvas(spec, kind, check) -> None:
         check("canvas.color_mode", mode in COLOR_MODES, "error",
               f"canvas.color_mode must be one of {list(COLOR_MODES)} (got {mode!r}).")
     elif canvas is not None:
+        derived_from = "texture_size" if kind == "minecraft" else "cell size/grid"
         check("canvas.derived", False, "warning",
-              f"kind '{kind}' derives its canvas from cell size/grid; 'canvas' is ignored.")
+              f"kind '{kind}' derives its canvas from {derived_from}; 'canvas' is ignored.")
 
 
 def _check_kind_fields(spec, kind, check) -> None:
@@ -123,6 +131,8 @@ def _check_kind_fields(spec, kind, check) -> None:
         if fpd is not None:
             check("walk_8dir.frames_per_direction", _is_pos_int(fpd), "error",
                   "frames_per_direction must be a positive integer.")
+    elif kind == "minecraft":
+        minecraft.validate_fields(spec, check)
 
 
 def _check_palette(spec, check) -> None:
@@ -196,7 +206,7 @@ def _check_slices(spec, check) -> None:
               f"slice {i} needs integer bounds {{x, y, width, height}}.")
 
 
-def _check_exports(spec, check) -> None:
+def _check_exports(spec, kind, check) -> None:
     exports = spec.get("exports")
     if exports is None:
         return
@@ -204,8 +214,19 @@ def _check_exports(spec, check) -> None:
         return
     for i, e in enumerate(exports):
         fmt = e.get("format") if isinstance(e, dict) else None
-        check(f"exports[{i}].format", fmt in EXPORT_FORMATS, "error",
-              f"export {i} 'format' must be one of {list(EXPORT_FORMATS)} (got {fmt!r}).")
+        if not check(f"exports[{i}].format", fmt in EXPORT_FORMATS, "error",
+                     f"export {i} 'format' must be one of {list(EXPORT_FORMATS)} (got {fmt!r})."):
+            continue
+        required_kind = _KIND_ONLY_EXPORTS.get(fmt)
+        check(f"exports[{i}].kind", required_kind is None or required_kind == kind, "error",
+              f"export format {fmt!r} is only valid for kind '{required_kind}' (this spec is "
+              f"kind '{kind}').")
+        if kind == "minecraft" and fmt == "minecraft_texture":
+            root = e.get("pack_root")
+            check(f"exports[{i}].pack_root", isinstance(root, str) and root.strip() != "",
+                  "error",
+                  f"export {i} needs a 'pack_root' — the resource-pack directory the "
+                  "assets/ tree is written under.")
 
 
 # --------------------------------------------------------------------------- #
@@ -260,6 +281,15 @@ def plan_spec(spec: dict) -> list[dict]:
             "columns": int(spec["columns"]), "rows": int(spec["rows"]),
             "tiles": spec.get("tiles"),
         }, "tilemap layer + starter tileset"))
+    elif kind == "minecraft":
+        # One Aseprite frame per Minecraft animation frame, at the texture's own size.
+        # The vertical strip the game wants is produced at export time, not authored by
+        # hand — a hand-built 16x128 canvas cannot be previewed as an animation, and gets
+        # its frame boundaries wrong the moment the frame count changes.
+        size = int(spec.get("texture_size", 16))
+        steps.append(_step("create_sprite", {
+            "filename": fname, "width": size, "height": size, "color_mode": "rgb",
+        }, f"{size}x{size} RGBA texture canvas"))
 
     # 2) palette override (structure, not pixels).
     if spec.get("palette"):
@@ -278,7 +308,7 @@ def plan_spec(spec: dict) -> list[dict]:
 
     # 5) exports.
     for exp in spec.get("exports", []):
-        steps.append(_export_step(fname, name, exp))
+        steps.append(_export_step(fname, name, exp, spec))
 
     return steps
 
@@ -289,6 +319,10 @@ def _layer_and_animation_ops(spec: dict, kind: str) -> list[dict]:
     for layer in spec.get("layers", []):
         if layer not in defaults:
             ops.append({"op": "add_layer", "args": {"name": layer}})
+
+    if kind == "minecraft":
+        ops.extend(_minecraft_frame_ops(spec))
+        return ops
 
     anims = spec.get("animations") or []
     if anims and kind in ("character", "enemy"):
@@ -306,6 +340,27 @@ def _layer_and_animation_ops(spec: dict, kind: str) -> list[dict]:
                 "direction": a.get("direction", "forward"),
             }})
             frame += count
+    return ops
+
+
+def _minecraft_frame_ops(spec: dict) -> list[dict]:
+    """Frames + timing for an animated Minecraft texture.
+
+    Frame durations are set from `frametime` so the Aseprite timeline previews at the
+    speed the game will actually play — the sidecar counts ticks, Aseprite counts
+    milliseconds, and an un-converted timeline is a preview of the wrong animation.
+    """
+    anim = spec.get("animation")
+    if not anim:
+        return []
+    frames = int(anim["frames"])
+    duration = int(anim.get("frametime", 1)) * minecraft.MS_PER_TICK
+    ops: list[dict] = [{"op": "add_frame", "args": {"duration_ms": duration}}
+                       for _ in range(frames - 1)]  # frame 1 already exists
+    ops.append({"op": "set_frame_duration", "args": {"frame": 1, "duration_ms": duration}})
+    ops.append({"op": "add_tag", "args": {
+        "name": spec["name"].rsplit("/", 1)[-1], "from": 1, "to": frames, "direction": "forward",
+    }})
     return ops
 
 
@@ -342,9 +397,28 @@ def _slice_step(fname: str, sl: dict) -> dict:
     return _step("add_slice", args, f"slice '{sl['name']}'")
 
 
-def _export_step(fname: str, name: str, exp: dict) -> dict:
+def _export_step(fname: str, name: str, exp: dict, spec: dict) -> dict:
     fmt = exp["format"]
     scale = int(exp.get("scale", 1))
+    if fmt == "minecraft_texture":
+        anim = spec.get("animation")
+        args = {
+            "filename": fname,
+            "pack_root": exp["pack_root"],
+            "namespace": spec.get("namespace", "minecraft"),
+            "category": spec["category"],
+            "texture_name": name,
+        }
+        if anim:
+            args["frametime"] = int(anim.get("frametime", 1))
+            args["interpolate"] = bool(anim.get("interpolate", False))
+            if anim.get("frame_order"):
+                args["frame_order"] = list(anim["frame_order"])
+        purpose = (
+            f"{minecraft.texture_rel_path(args['namespace'], args['category'], name)}"
+            + (" + .png.mcmeta (vertical frame strip)" if anim else "")
+        )
+        return _step("export_minecraft_texture", args, purpose)
     if fmt == "godot_spriteframes":
         return _step("export_godot_spriteframes",
                      {"filename": fname, "output": exp.get("output", f"{name}.tres"), "scale": scale},

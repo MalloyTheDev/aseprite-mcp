@@ -20,6 +20,7 @@ from .tools import (  # noqa: F401,E402
     image,
     inspect,
     layers,
+    minecraft,
     palette,
     reference,
     slices,
