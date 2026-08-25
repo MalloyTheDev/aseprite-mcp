@@ -56,7 +56,11 @@ def validate_spec(spec) -> dict:
     warnings: list[str] = []
 
     def check(name: str, ok: bool, level: str, detail: str = "") -> bool:
-        checks.append({"name": name, "ok": ok, "level": level, "detail": detail})
+        # `detail` describes the FAILURE, so carrying it on a passing check makes a clean
+        # report read like a list of problems ("ok": true beside "is not a valid resource
+        # path"). Emit it only when it is true.
+        checks.append({"name": name, "ok": ok, "level": level,
+                       "detail": "" if ok else detail})
         if not ok:
             (errors if level == "error" else warnings).append(detail or name)
         return ok
