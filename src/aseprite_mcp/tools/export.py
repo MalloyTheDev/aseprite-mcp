@@ -15,6 +15,75 @@ from .common import lua_path, resolve_path
 _SHEET_TYPES = {"horizontal", "vertical", "rows", "columns", "packed"}
 
 
+
+def _sprite_facts(src) -> dict:
+    """Frame count, tag names and layer names, so an export can be checked before it runs."""
+    body = """
+    local spr = open_sprite(ARG.src)
+    RESULT = sprite_info(spr)
+    """
+    return run_lua(body, {"src": lua_path(src)})
+
+
+def _require_frame(src, frame: int) -> int:
+    """Aseprite silently exports a DIFFERENT frame when asked for one out of range.
+
+    The old code clamped with max(0, frame-1) and then reported the requested number back,
+    so export_png(frame=99) on a one-frame sprite wrote frame 1 and answered {"frame": 99}.
+    """
+    count = len(_sprite_facts(src).get("frames") or [])
+    if not 1 <= int(frame) <= count:
+        raise ExportError(
+            f"frame {frame} does not exist; the sprite has {count} frame(s), numbered 1-{count}."
+        )
+    return int(frame)
+
+
+def _require_scale(scale: int) -> int:
+    value = int(scale)
+    if value < 1:
+        raise ExportError(f"scale must be at least 1 (got {scale}).")
+    return value
+
+
+def _require_tag(src, tag: str) -> str:
+    """An unknown --tag makes Aseprite export EVERY frame, and still exit 0."""
+    names = [t.get("name") for t in (_sprite_facts(src).get("tags") or [])]
+    if tag not in names:
+        known = ", ".join(repr(n) for n in names) if names else "none"
+        raise ExportError(f"no tag named {tag!r}; the sprite has: {known}.")
+    return tag
+
+
+def _flat_layer_names(layers, out=None):
+    out = [] if out is None else out
+    for layer in layers or []:
+        name = layer.get("name")
+        if name:
+            out.append(name)
+        _flat_layer_names(layer.get("layers"), out)
+    return out
+
+
+def _require_layer(src, layer: str) -> str:
+    """An unknown --layer exports the whole sprite instead, and still exits 0."""
+    names = _flat_layer_names(_sprite_facts(src).get("layers"))
+    if layer not in names:
+        known = ", ".join(repr(n) for n in names) if names else "none"
+        raise ExportError(f"no layer named {layer!r}; the sprite has: {known}.")
+    return layer
+
+
+def _verify_written(out, what: str = "export") -> int:
+    """run_cli only raises on a non-zero exit, and Aseprite exits 0 for work it skipped."""
+    if not out.exists():
+        raise ExportError(f"{what} reported success but wrote nothing to {out}.")
+    size = out.stat().st_size
+    if size == 0:
+        raise ExportError(f"{what} wrote an empty file to {out}.")
+    return size
+
+
 @mcp.tool()
 def export_png(
     filename: str, output: str, frame: int = 1, scale: int = 1, overwrite: bool = False
@@ -29,14 +98,17 @@ def export_png(
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
-    f0 = max(0, int(frame) - 1)
+    frame = _require_frame(src, frame)
+    scale = _require_scale(scale)
+    f0 = frame - 1
     run_cli([
         str(src),
         "--frame-range", f"{f0},{f0}",
-        "--scale", str(max(1, int(scale))),
+        "--scale", str(scale),
         "--save-as", str(out),
     ])
-    return {"ok": True, "output": str(out), "frame": int(frame), "scale": int(scale)}
+    return {"ok": True, "output": str(out), "frame": frame, "scale": scale,
+            "bytes": _verify_written(out, "export_png")}
 
 
 @mcp.tool()
@@ -47,8 +119,10 @@ def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = Fal
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
-    run_cli([str(src), "--scale", str(max(1, int(scale))), "--save-as", str(out)])
-    return {"ok": True, "output": str(out), "scale": int(scale)}
+    scale = _require_scale(scale)
+    run_cli([str(src), "--scale", str(scale), "--save-as", str(out)])
+    return {"ok": True, "output": str(out), "scale": scale,
+            "bytes": _verify_written(out, "export_gif")}
 
 
 @mcp.tool()
@@ -61,13 +135,16 @@ def export_tag_gif(
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
+    tag = _require_tag(src, tag)
+    scale = _require_scale(scale)
     run_cli([
         str(src),
         "--tag", tag,
-        "--scale", str(max(1, int(scale))),
+        "--scale", str(scale),
         "--save-as", str(out),
     ])
-    return {"ok": True, "output": str(out), "tag": tag, "scale": int(scale)}
+    return {"ok": True, "output": str(out), "tag": tag, "scale": scale,
+            "bytes": _verify_written(out, "export_tag_gif")}
 
 
 @mcp.tool()
@@ -114,14 +191,14 @@ def export_spritesheet(
         str(src),
         "--sheet", str(out),
         "--sheet-type", sheet_type,
-        "--scale", str(max(1, int(scale))),
+        "--scale", str(_require_scale(scale)),
     ]
     if padding:
         cli += ["--shape-padding", str(int(padding)), "--border-padding", str(int(padding))]
     if layer:
-        cli += ["--layer", layer]
+        cli += ["--layer", _require_layer(src, layer)]
     if ignore_layer:
-        cli += ["--ignore-layer", ignore_layer]
+        cli += ["--ignore-layer", _require_layer(src, ignore_layer)]
     if split_layers:
         cli.append("--split-layers")
     if split_tags:
@@ -131,6 +208,7 @@ def export_spritesheet(
         cli += ["--data", str(data_path), "--format", "json-array", "--list-tags", "--list-slices"]
         result["data_output"] = str(data_path)
     run_cli(cli)
+    result["bytes"] = _verify_written(out, "export_spritesheet")
     return result
 
 
@@ -139,14 +217,17 @@ def export_layer(filename: str, layer: str, output: str, frame: int = 1, scale: 
     """Export a single layer of one frame as a PNG (others excluded)."""
     src = resolve_path(filename)
     out = resolve_path(output)
-    f0 = max(0, int(frame) - 1)
+    layer = _require_layer(src, layer)
+    frame = _require_frame(src, frame)
+    scale = _require_scale(scale)
     run_cli([
         str(src), "--layer", layer,
-        "--frame-range", f"{f0},{f0}",
-        "--scale", str(max(1, int(scale))),
+        "--frame-range", f"{frame - 1},{frame - 1}",
+        "--scale", str(scale),
         "--save-as", str(out),
     ])
-    return {"ok": True, "output": str(out), "layer": layer, "frame": int(frame)}
+    return {"ok": True, "output": str(out), "layer": layer, "frame": frame, "scale": scale,
+            "bytes": _verify_written(out, "export_layer")}
 
 
 @mcp.tool()
