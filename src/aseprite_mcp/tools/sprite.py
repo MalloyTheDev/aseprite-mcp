@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from ..app import mcp
 from ..core.errors import ValidationFailed
-from ..core.limits import MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS, check_canvas_size
+from ..core.limits import (
+    MAX_CANVAS_DIMENSION,
+    MAX_CANVAS_PIXELS,
+    MAX_SPRITE_TOTAL_PIXELS,
+    check_canvas_size,
+)
 from ..core.paths import ensure_output_path
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
@@ -208,6 +213,7 @@ def scale_sprite(
         "method": method,
         "max_dim": MAX_CANVAS_DIMENSION,
         "max_pixels": MAX_CANVAS_PIXELS,
+        "max_total_pixels": MAX_SPRITE_TOTAL_PIXELS,
     }
     body = """
     local spr = open_sprite(ARG.src)
@@ -223,6 +229,22 @@ def scale_sprite(
       error(string.format(
         "scaled canvas %dx%d exceeds the limits (max %dpx per axis, %d pixels total). "
         .. "Use a smaller factor or explicit width/height.", w, h, ARG.max_dim, ARG.max_pixels))
+    end
+    -- SpriteSize rescales every cel, not just the canvas, so a legal target size
+    -- still multiplies by the number of independent cel images. Bound the predicted
+    -- aggregate before allocating any of it.
+    local ratio = (w * h) / (spr.width * spr.height)
+    local total = 0
+    for _, cel in ipairs(spr.cels) do
+      if cel.image ~= nil then
+        total = total + cel.image.width * cel.image.height * ratio
+      end
+    end
+    if total > ARG.max_total_pixels then
+      error(string.format(
+        "scaling to %dx%d would need about %d pixels across %d cels; maximum is %d. "
+        .. "Use a smaller factor, or flatten/trim the sprite first.",
+        w, h, math.floor(total), #spr.cels, ARG.max_total_pixels))
     end
     app.command.SpriteSize{ ui = false, width = w, height = h, method = ARG.method }
     save_sprite(spr)

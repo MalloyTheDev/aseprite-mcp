@@ -39,8 +39,11 @@ the workspace — see *Out of scope* below.
   begins, with a message explaining how to split the request. Since v0.7.1 the same module
   also bounds **canvas geometry** (16384px per axis *and* 16,777,216 pixels of area, so a
   pair of individually-legal axes can't add up to gigabytes), **inline base64 images**
-  (32 MB), **text rasterization** (budgeted while rendering, not after), and the amount of
-  Aseprite output retained for an error message.
+  (32 MB **and** their declared raster dimensions, so a compressed decompression bomb
+  cannot slip past a byte cap), **text rasterization** (budgeted while rendering, not
+  after), **aggregate cel area** when scaling a sprite, and Aseprite's output, which is
+  drained into a bounded buffer as it is read rather than captured whole and trimmed
+  afterwards.
 - **Timeouts.** Every Aseprite invocation runs under `ASEPRITE_MCP_TIMEOUT` (default 90s,
   clamped to 1-3600s so a hostile or fat-fingered value can't disable the guard).
 - **Bring your own Aseprite.** The server only executes the Aseprite binary you point it

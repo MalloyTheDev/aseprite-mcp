@@ -9,7 +9,13 @@ import os
 import tempfile
 
 from ..app import mcp
-from ..core.limits import MAX_IMAGE_BYTES, check_size_bytes
+from ..core.errors import ValidationFailed
+from ..core.limits import (
+    MAX_CANVAS_DIMENSION,
+    MAX_CANVAS_PIXELS,
+    MAX_IMAGE_BYTES,
+    check_size_bytes,
+)
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
@@ -40,6 +46,49 @@ RESULT = { ok = true, layer = layer.name, frame = framenum,
 
 def _stamp(args: dict) -> dict:
     return run_lua(_STAMP_BODY, args)
+
+
+def check_image_dimensions(path: str) -> tuple[int, int] | None:
+    """Reject an image whose declared dimensions exceed the canvas limits.
+
+    A byte cap does not bound the raster: PNG and friends compress a solid colour
+    to almost nothing, so a payload well under the size limit can declare
+    16384x16384 and make Aseprite allocate gigabytes the moment it opens the file.
+    Pillow parses only the header here, so the dimensions are read without decoding
+    any pixels.
+
+    Returns the (width, height) that were checked, or None when the format is not
+    one Pillow recognizes (notably Aseprite's own .aseprite/.ase), in which case no
+    claim is made and the caller proceeds.
+    """
+    from PIL import Image as PILImage
+    from PIL import UnidentifiedImageError
+
+    try:
+        # open() parses the header only, no pixel decode. Pillow applies its own
+        # bomb guard here too, but its threshold (2x MAX_IMAGE_PIXELS, ~179 Mpx) is
+        # an order of magnitude above this project's canvas cap, so the explicit
+        # check below is what rejects anything in between.
+        with PILImage.open(path) as img:
+            width, height = img.size
+    except PILImage.DecompressionBombError as exc:
+        raise ValidationFailed(
+            f"Source image rejected as a decompression bomb by Pillow: {exc}"
+        ) from exc
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None
+
+    if width > MAX_CANVAS_DIMENSION or height > MAX_CANVAS_DIMENSION:
+        raise ValidationFailed(
+            f"Source image is {width}x{height}; maximum is {MAX_CANVAS_DIMENSION}px "
+            "per axis. Resize it before stamping."
+        )
+    if width * height > MAX_CANVAS_PIXELS:
+        raise ValidationFailed(
+            f"Source image is {width}x{height} ({width * height} pixels); maximum is "
+            f"{MAX_CANVAS_PIXELS}. Resize it before stamping."
+        )
+    return width, height
 
 
 def decoded_size(b64: str) -> int:
@@ -74,9 +123,11 @@ def stamp_file(
         opacity: 0-255.
         blend_mode: Blend mode for compositing (normal, multiply, …).
     """
+    source_path = resolve_path(source)
+    check_image_dimensions(str(source_path))
     args = {
         "src": lua_path(resolve_path(filename)),
-        "source": lua_path(resolve_path(source)),
+        "source": lua_path(source_path),
         "layer": layer, "frame": int(frame),
         "source_frame": int(source_frame),
         "x": int(x), "y": int(y),
@@ -125,6 +176,7 @@ def draw_image_base64(
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(raw)
+        check_image_dimensions(tmp)
         args = {
             "src": lua_path(resolve_path(filename)),
             "source": lua_path(tmp),

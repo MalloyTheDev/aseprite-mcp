@@ -13,12 +13,15 @@ Every case here fires *before* Aseprite is launched, which is the point: these a
 pre-flight checks, so they are testable (and enforced) on a machine with no Aseprite.
 """
 
+import io
+import sys
+
 import pytest
 
 from aseprite_mcp.core import config, limits
 from aseprite_mcp.core.errors import ExportError, ValidationFailed, WorkspaceError
 from aseprite_mcp.core.paths import ensure_output_pattern, expansion_matches
-from aseprite_mcp.core.runner import _truncate
+from aseprite_mcp.core.runner import _run_bounded, _truncate
 from aseprite_mcp.tools import export, image, sprite, text
 
 
@@ -40,7 +43,7 @@ def test_canvas_size_at_limits_is_allowed():
 
 def test_canvas_area_caps_two_legal_axes():
     """Both axes are within the per-axis cap, yet the canvas is ~1 GB of pixels."""
-    with pytest.raises(ValidationFailed, match="pixels; maximum is"):
+    with pytest.raises(ValidationFailed, match=r"pixels; maximum is"):
         limits.check_canvas_size(16384, 16384)
 
 
@@ -297,3 +300,144 @@ def test_truncate_bound_is_in_characters():
     assert len(out.replace("[... 90 characters truncated ...]\n", "")) == 10
     assert "characters truncated" in out
     assert limits.MAX_PROCESS_OUTPUT_CHARS == 8 * 1024 * 1024
+
+
+# ================================ bounded process capture (codex P1) ========
+# subprocess.run(capture_output=True) accumulates the whole stream before any
+# post-hoc truncation can run, so the guard has to apply while reading. These
+# drive a real child process, so they need no Aseprite.
+
+_FLOOD = (
+    "import sys\n"
+    "for _ in range(200): sys.stdout.write('A' * 100000)\n"
+    "sys.stdout.write('\\nSENTINEL_AT_END\\n')\n"
+)
+
+
+def test_capture_is_bounded_while_reading():
+    """A child emitting ~20M characters must not be retained in full."""
+    proc = _run_bounded([sys.executable, "-c", _FLOOD], timeout=60, limit=4096)
+    assert proc.returncode == 0
+    assert len(proc.stdout) < 8192, "retained far more than the cap"
+
+
+def test_capture_keeps_the_tail_so_the_result_sentinel_survives():
+    """Truncation must drop the head: the RESULT/ERROR sentinels are printed last."""
+    proc = _run_bounded([sys.executable, "-c", _FLOOD], timeout=60, limit=4096)
+    assert proc.stdout.strip().endswith("SENTINEL_AT_END")
+    assert "characters truncated" in proc.stdout
+
+
+def test_capture_does_not_deadlock_when_both_pipes_fill():
+    """Draining one pipe to EOF before the other deadlocks once the child fills it."""
+    both = (
+        "import sys\n"
+        "for _ in range(200):\n"
+        "    sys.stdout.write('O' * 100000)\n"
+        "    sys.stderr.write('E' * 100000)\n"
+    )
+    proc = _run_bounded([sys.executable, "-c", both], timeout=30, limit=4096)
+    assert proc.returncode == 0
+    assert len(proc.stdout) < 8192 and len(proc.stderr) < 8192
+
+
+def test_capture_preserves_timeout_semantics():
+    import subprocess
+
+    with pytest.raises(subprocess.TimeoutExpired) as excinfo:
+        _run_bounded([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1)
+    assert excinfo.value.timeout == 1
+
+
+def test_capture_reports_a_nonzero_exit():
+    proc = _run_bounded([sys.executable, "-c", "import sys; sys.exit(3)"], timeout=30)
+    assert proc.returncode == 3
+
+
+# ============================= image dimension bomb guard (codex P1) ========
+def _png(width: int, height: int) -> bytes:
+    from PIL import Image as PILImage
+
+    buf = io.BytesIO()
+    PILImage.new("L", (width, height), 0).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_small_image_is_allowed(tmp_path):
+    f = tmp_path / "ok.png"
+    f.write_bytes(_png(64, 64))
+    assert image.check_image_dimensions(str(f)) == (64, 64)
+
+
+def test_image_at_the_canvas_cap_is_allowed(tmp_path):
+    f = tmp_path / "cap.png"
+    f.write_bytes(_png(4096, 4096))
+    assert image.check_image_dimensions(str(f)) == (4096, 4096)
+
+
+def test_decompression_bomb_is_rejected_despite_passing_the_byte_cap(tmp_path):
+    """A solid-colour PNG is tiny on disk but declares a huge raster.
+
+    The 32 MB byte cap cannot see this: the file is well under it, yet opening it
+    would make Aseprite allocate hundreds of megabytes.
+    """
+    data = _png(6000, 6000)
+    assert len(data) < limits.MAX_IMAGE_BYTES, "fixture must pass the byte cap"
+    f = tmp_path / "bomb.png"
+    f.write_bytes(data)
+    with pytest.raises(ValidationFailed, match=r"pixels|per axis"):
+        image.check_image_dimensions(str(f))
+
+
+def test_pillow_bomb_error_becomes_a_typed_error(tmp_path):
+    """Past Pillow's own threshold it raises DecompressionBombError at open()."""
+    f = tmp_path / "huge.png"
+    f.write_bytes(_png(20000, 20000))
+    with pytest.raises(ValidationFailed, match="decompression bomb"):
+        image.check_image_dimensions(str(f))
+
+
+def test_unrecognized_format_is_skipped_not_rejected(tmp_path):
+    """Aseprite's own formats are not Pillow-readable; make no claim about them."""
+    f = tmp_path / "sprite.aseprite"
+    f.write_bytes(b"\x00" * 64)
+    assert image.check_image_dimensions(str(f)) is None
+
+
+# ====================== text bitmap bound vs plot budget (codex P2) =========
+def test_sparse_text_at_high_scale_is_not_rejected_by_its_bounding_box():
+    """Only threshold-passing pixels are plotted, so the budget must count those.
+
+    Folding scale**2 into the glyph bounding box rejected a 7x7 box at scale 64
+    (200,704 > 200,000) even when the line plots nothing at all.
+    """
+    from PIL import ImageFont
+
+    coords, _, _ = text._render_text_pixels(
+        "       ", limits.MAX_TEXT_SCALE, ImageFont.load_default(), 1, 128
+    )
+    assert coords == []
+
+
+def test_text_bitmap_allocation_still_bounded():
+    assert limits.MAX_TEXT_BITMAP_PIXELS < limits.MAX_CANVAS_PIXELS
+
+
+# ================== aggregate cel area on scale (codex P1) =================
+def test_scale_sprite_passes_the_aggregate_cel_budget_to_lua(ws, monkeypatch):
+    """SpriteSize rescales every cel, so the guard needs the aggregate cap.
+
+    The bound itself is enforced in Lua, where the cel images are visible; this
+    pins that the limit actually reaches it.
+    """
+    seen = {}
+
+    def fake_run_lua(body, args=None, timeout=None):
+        seen["body"], seen["args"] = body, args or {}
+        return {}
+
+    monkeypatch.setattr(sprite, "run_lua", fake_run_lua)
+    sprite.scale_sprite("s.aseprite", factor=2.0)
+    assert seen["args"]["max_total_pixels"] == limits.MAX_SPRITE_TOTAL_PIXELS
+    assert "max_total_pixels" in seen["body"]
+    assert "spr.cels" in seen["body"]

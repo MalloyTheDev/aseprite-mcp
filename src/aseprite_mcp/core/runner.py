@@ -7,6 +7,8 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
+from collections import deque
 
 from . import config
 from .errors import (  # noqa: F401  (AsepriteError re-exported for back-compat)
@@ -17,6 +19,94 @@ from .errors import (  # noqa: F401  (AsepriteError re-exported for back-compat)
 )
 from .limits import MAX_PROCESS_OUTPUT_CHARS
 from .luagen import ERROR_PREFIX, RESULT_PREFIX, assemble_script
+
+# Size of each read from a child pipe. Peak retention per stream is the character
+# cap plus at most one of these.
+_READ_CHUNK = 64 * 1024
+
+
+def _drain_tail(stream, limit: int, box: dict) -> None:
+    """Read `stream` to EOF, retaining only its final `limit` characters.
+
+    The tail is the part worth keeping: the RESULT/ERROR sentinels are printed last,
+    and a traceback ends with its cause. Whole chunks are discarded from the front as
+    soon as the remainder still covers the limit, so memory stays bounded however much
+    the child emits.
+    """
+    chunks: deque[str] = deque()
+    held = 0
+    dropped = 0
+    try:
+        while True:
+            chunk = stream.read(_READ_CHUNK)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            held += len(chunk)
+            while chunks and held - len(chunks[0]) >= limit:
+                first = chunks.popleft()
+                held -= len(first)
+                dropped += len(first)
+    except (OSError, ValueError):  # pipe closed underneath us (e.g. after a kill)
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            stream.close()
+
+    text = "".join(chunks)
+    if len(text) > limit:
+        dropped += len(text) - limit
+        text = text[-limit:]
+    if dropped:
+        text = f"[... {dropped} characters truncated ...]\n" + text
+    box["text"] = text
+
+
+def _run_bounded(
+    argv: list[str], timeout: float, limit: int = MAX_PROCESS_OUTPUT_CHARS
+) -> subprocess.CompletedProcess:
+    """Run `argv`, retaining at most `limit` characters of each output stream.
+
+    `subprocess.run(capture_output=True)` accumulates the whole of stdout and stderr
+    in memory before it returns, so truncating afterwards cannot prevent a runaway
+    script from exhausting the host: by then the memory has been spent. Draining each
+    pipe in its own thread into a bounded tail buffer keeps peak usage proportional to
+    the cap instead of to whatever the child decides to print. Two threads, because
+    reading one pipe to EOF before the other deadlocks as soon as the child fills the
+    one that is not being read.
+    """
+    proc = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    out_box: dict = {}
+    err_box: dict = {}
+    readers = [
+        threading.Thread(target=_drain_tail, args=(proc.stdout, limit, out_box), daemon=True),
+        threading.Thread(target=_drain_tail, args=(proc.stderr, limit, err_box), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        for reader in readers:
+            reader.join(timeout=5)
+        raise
+    finally:
+        for reader in readers:
+            reader.join(timeout=5)
+
+    return subprocess.CompletedProcess(
+        argv, proc.returncode, out_box.get("text", ""), err_box.get("text", "")
+    )
 
 
 def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -> dict:
@@ -31,14 +121,7 @@ def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(script)
-        proc = subprocess.run(
-            [exe, "-b", "--script", path],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout or config.timeout(),
-        )
+        proc = _run_bounded([exe, "-b", "--script", path], timeout or config.timeout())
     except subprocess.TimeoutExpired as exc:
         raise AsepriteTimeoutError(
             f"Aseprite timed out after {exc.timeout:.0f}s. Increase ASEPRITE_MCP_TIMEOUT "
@@ -99,14 +182,7 @@ def run_cli(cli_args: list[str], timeout: float | None = None) -> subprocess.Com
     """Run a raw Aseprite CLI command (used for exports / rendering)."""
     exe = config.find_aseprite()
     try:
-        proc = subprocess.run(
-            [exe, "-b", *cli_args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout or config.timeout(),
-        )
+        proc = _run_bounded([exe, "-b", *cli_args], timeout or config.timeout())
     except subprocess.TimeoutExpired as exc:
         raise AsepriteTimeoutError(f"Aseprite CLI timed out after {exc.timeout:.0f}s.") from exc
 

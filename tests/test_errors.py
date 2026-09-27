@@ -113,9 +113,13 @@ def test_missing_result_raises_lua_tool_error():
 
 
 # ------------------------------------------------------- runner cli / timeout
+# These patch `runner._run_bounded`, the seam that actually launches Aseprite.
+# It replaced a direct `subprocess.run(capture_output=True)` call so that output is
+# bounded while it is read rather than truncated after the fact; the behaviour being
+# pinned here (typed errors on non-zero exit and on timeout) is unchanged.
 def test_cli_nonzero_raises_cli_error(monkeypatch):
     monkeypatch.setattr(runner.config, "find_aseprite", lambda: "aseprite")
-    monkeypatch.setattr(runner.subprocess, "run",
+    monkeypatch.setattr(runner, "_run_bounded",
                         lambda *a, **k: _proc(stderr="export failed", returncode=1))
     with pytest.raises(AsepriteCLIError, match="export failed"):
         runner.run_cli(["x.aseprite", "--save-as", "y.png"])
@@ -125,7 +129,7 @@ def test_cli_timeout_raises_timeout_error(monkeypatch):
     def boom(*a, **k):
         raise subprocess.TimeoutExpired(cmd="aseprite", timeout=5)
     monkeypatch.setattr(runner.config, "find_aseprite", lambda: "aseprite")
-    monkeypatch.setattr(runner.subprocess, "run", boom)
+    monkeypatch.setattr(runner, "_run_bounded", boom)
     with pytest.raises(AsepriteTimeoutError, match="timed out"):
         runner.run_cli(["x.aseprite"])
 
@@ -134,7 +138,7 @@ def test_lua_timeout_raises_timeout_error(monkeypatch):
     def boom(*a, **k):
         raise subprocess.TimeoutExpired(cmd="aseprite", timeout=5)
     monkeypatch.setattr(runner.config, "find_aseprite", lambda: "aseprite")
-    monkeypatch.setattr(runner.subprocess, "run", boom)
+    monkeypatch.setattr(runner, "_run_bounded", boom)
     with pytest.raises(AsepriteTimeoutError, match="timed out"):
         runner.run_lua("RESULT = {}")
 

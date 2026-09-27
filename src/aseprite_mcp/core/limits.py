@@ -38,11 +38,23 @@ MAX_CANVAS_DIMENSION = 16_384
 # 16384x16384 (1 GB) does not, even though both axes are within the per-axis cap.
 MAX_CANVAS_PIXELS = 16_777_216  # 4096 * 4096
 
+# Maximum total pixel storage a single sprite operation may ask Aseprite to hold.
+# A canvas cap alone is not enough: SpriteSize rescales every cel, so a sprite with
+# many independent full-frame cels multiplies one legal target canvas by the cel
+# count (100 cels at 4096x4096 is ~1.7 Gpx, several GB of RGBA).
+MAX_SPRITE_TOTAL_PIXELS = 67_108_864  # 4x one max canvas
+
 # --- Inline payloads ------------------------------------------------------- #
 # Maximum decoded size of an inline base64 image handed to draw_image_base64.
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 # Maximum number of pixels one draw_text call may plot.
 MAX_TEXT_PIXELS = 200_000
+# Maximum size of the intermediate (unscaled) Pillow bitmap used to rasterize one
+# line. This bounds the allocation only. It is deliberately separate from
+# MAX_TEXT_PIXELS: the plotted-pixel budget counts pixels that pass the threshold,
+# so folding the scale factor into the bitmap check would reject sparse or
+# whitespace-heavy text that plots almost nothing.
+MAX_TEXT_BITMAP_PIXELS = 4_194_304
 # Bounds on the text-rendering knobs that multiply into that pixel count.
 MAX_TEXT_SCALE = 64
 MAX_FONT_SIZE = 512
