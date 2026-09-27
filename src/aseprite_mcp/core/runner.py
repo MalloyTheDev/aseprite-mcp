@@ -15,7 +15,7 @@ from .errors import (  # noqa: F401  (AsepriteError re-exported for back-compat)
     AsepriteTimeoutError,
     LuaToolError,
 )
-from .limits import MAX_PROCESS_OUTPUT_BYTES
+from .limits import MAX_PROCESS_OUTPUT_CHARS
 from .luagen import ERROR_PREFIX, RESULT_PREFIX, assemble_script
 
 
@@ -51,9 +51,13 @@ def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -
     return _parse_result(proc)
 
 
-def _truncate(text: str, limit: int = MAX_PROCESS_OUTPUT_BYTES) -> str:
+def _truncate(text: str, limit: int = MAX_PROCESS_OUTPUT_CHARS) -> str:
     """Bound a captured stream so a runaway Aseprite script can't blow up the
-    error path it feeds. Keeps the tail, which is where the failure usually is."""
+    error path it feeds. Keeps the tail, which is where the failure usually is.
+
+    The bound is in characters, matching MAX_PROCESS_OUTPUT_CHARS; see the note on
+    that constant for why the decoded length is the right unit here.
+    """
     if len(text) <= limit:
         return text
     return f"[... {len(text) - limit} characters truncated ...]\n" + text[-limit:]

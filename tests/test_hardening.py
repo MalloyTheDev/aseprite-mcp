@@ -174,6 +174,33 @@ def test_base64_payload_cap(ws):
         image.draw_image_base64("s.aseprite", oversized, 0, 0)
 
 
+def test_decoded_size_is_exact_for_every_length():
+    """The pre-decode size check must not overestimate.
+
+    An overestimate rejects a payload that decodes to exactly MAX_IMAGE_BYTES, since
+    base64 pads up to a multiple of 4 and the naive (len * 3) // 4 inverse counts the
+    padding as data.
+    """
+    import base64
+
+    wrong = [
+        n for n in range(0, 300)
+        if image.decoded_size(base64.b64encode(b"x" * n).decode()) != n
+    ]
+    assert not wrong, f"decoded_size wrong for lengths: {wrong[:10]}"
+
+
+def test_payload_exactly_at_the_cap_is_not_rejected():
+    """A payload decoding to exactly the cap is allowed; one byte over is not."""
+    import base64
+
+    at_cap = base64.b64encode(b"x" * 3002).decode()
+    assert image.decoded_size(at_cap) == 3002
+    limits.check_size_bytes("payload", image.decoded_size(at_cap), 3002)  # no raise
+    with pytest.raises(ValidationFailed):
+        limits.check_size_bytes("payload", image.decoded_size(at_cap), 3001)
+
+
 def test_base64_small_payload_passes_the_size_gate(ws):
     """A tiny payload must fail later (bad image / no Aseprite), never on size."""
     with pytest.raises(Exception) as excinfo:
@@ -258,3 +285,15 @@ def test_truncate_bounds_long_output_and_keeps_the_tail():
     assert out.endswith("TAIL")
     assert "truncated" in out
     assert len(out) < 200
+
+
+def test_truncate_bound_is_in_characters():
+    """The cap counts characters, and the notice says so.
+
+    Multibyte input must not be measured as if it were bytes, or the reported unit
+    and the constant's name would disagree with what is actually enforced.
+    """
+    out = _truncate("\u4e00" * 100, 10)
+    assert len(out.replace("[... 90 characters truncated ...]\n", "")) == 10
+    assert "characters truncated" in out
+    assert limits.MAX_PROCESS_OUTPUT_CHARS == 8 * 1024 * 1024

@@ -5,9 +5,10 @@ works on any machine:
 
     ASEPRITE_PATH            Absolute path to Aseprite.exe (or `aseprite` binary).
     ASEPRITE_MCP_WORKSPACE   Directory where relative sprite paths are resolved.
-    ASEPRITE_MCP_TIMEOUT     Per-invocation timeout in seconds (default 90, clamped
-                             to 1-3600; an unparseable/out-of-range value falls back
-                             to the nearest bound rather than disabling the timeout).
+    ASEPRITE_MCP_TIMEOUT     Per-invocation timeout in seconds (default 90). A numeric
+                             value outside 1-3600 is clamped to the nearest bound; an
+                             unparseable, empty or non-finite value falls back to the
+                             default. Neither case can disable the timeout.
     ASEPRITE_MCP_ALLOW_ABSOLUTE  Set to 1/true to permit absolute paths and paths
                              that escape the workspace. Off by default (sandboxed).
 """

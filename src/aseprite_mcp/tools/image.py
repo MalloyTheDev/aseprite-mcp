@@ -42,6 +42,17 @@ def _stamp(args: dict) -> dict:
     return run_lua(_STAMP_BODY, args)
 
 
+def decoded_size(b64: str) -> int:
+    """Decoded byte count of a base64 string, without decoding it.
+
+    Base64 encodes N bytes as ceil(4N/3) characters, then pads to a multiple of 4.
+    Dropping the padding makes the inverse exact for every N, so this is not an
+    estimate: it lets an oversized payload be rejected before the decoded copy is
+    allocated, without rejecting a payload that lands exactly on the cap.
+    """
+    return (len(b64.rstrip("=")) * 3) // 4
+
+
 @mcp.tool()
 def stamp_file(
     filename: str,
@@ -95,10 +106,10 @@ def draw_image_base64(
     data = image_base64.strip()
     if data.startswith("data:"):
         data = data.split(",", 1)[-1]
-    # Check the *encoded* length first: base64 is 4 chars per 3 bytes, so this
-    # rejects an oversized payload without allocating the decoded copy.
+    # Size-check before decoding so an oversized payload never allocates its
+    # decoded copy. The post-decode check below still runs as a backstop.
     check_size_bytes(
-        "image_base64 (decoded)", (len(data) * 3) // 4, MAX_IMAGE_BYTES,
+        "image_base64 (decoded)", decoded_size(data), MAX_IMAGE_BYTES,
         remedy="Write the image into the workspace and use stamp_file instead.",
     )
     try:

@@ -46,8 +46,12 @@ MAX_TEXT_PIXELS = 200_000
 # Bounds on the text-rendering knobs that multiply into that pixel count.
 MAX_TEXT_SCALE = 64
 MAX_FONT_SIZE = 512
-# Maximum bytes of Aseprite stdout/stderr retained for a single invocation.
-MAX_PROCESS_OUTPUT_BYTES = 8 * 1024 * 1024
+# Maximum characters of Aseprite stdout/stderr retained for a single invocation.
+# Characters, not bytes: subprocess.run has already decoded the stream into a str by
+# the time this applies, so the guard bounds what is carried into an error message
+# rather than what is read. Measuring characters keeps that check free; measuring
+# bytes would re-encode every captured stream, including the small common case.
+MAX_PROCESS_OUTPUT_CHARS = 8 * 1024 * 1024
 
 
 def check_list_length(
