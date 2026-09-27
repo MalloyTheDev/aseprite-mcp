@@ -58,11 +58,23 @@ def test_to_lua_containers():
 
 
 def test_assemble_script_has_arg_and_sentinels():
-    script = luagen.assemble_script("RESULT = { ok = true }", {"n": 3})
+    nonce = "0123456789abcdef"
+    script = luagen.assemble_script("RESULT = { ok = true }", {"n": 3}, nonce=nonce)
     assert "local ARG = {[\"n\"]=3}" in script
-    assert luagen.RESULT_PREFIX in script
-    assert luagen.ERROR_PREFIX in script
+    assert luagen.result_prefix(nonce) in script
+    assert luagen.error_prefix(nonce) in script
     assert "pcall(_main)" in script
+
+
+def test_assemble_script_frames_output_with_the_given_nonce_only():
+    """The legacy fixed sentinels must not appear, or a payload could forge one."""
+    script = luagen.assemble_script("RESULT = {}", {}, nonce="deadbeefdeadbeef")
+    assert f'print("{luagen.RESULT_PREFIX}"' not in script
+    assert f'print("{luagen.ERROR_PREFIX}"' not in script
+
+
+def test_new_nonce_differs_per_call():
+    assert luagen.new_nonce() != luagen.new_nonce()
 
 
 # ----------------------------------------------------------------- lua_path

@@ -1,9 +1,21 @@
 """Regression tests for edge cases found during the pre-release audit."""
 
+import threading
+
 import pytest
 
 from aseprite_mcp.runner import AsepriteError
-from aseprite_mcp.tools import brushes, drawing, effects, export, palette, sprite, tilemap
+from aseprite_mcp.tools import (
+    brushes,
+    drawing,
+    effects,
+    export,
+    inspect,
+    layers,
+    palette,
+    sprite,
+    tilemap,
+)
 
 
 def test_drawing_on_tilemap_layer_errors_clearly():
@@ -50,3 +62,68 @@ def test_replace_color_accepts_index_spec():
     drawing.fill_layer("r/ri.aseprite", "#ff0000")  # index 2
     out = effects.replace_color("r/ri.aseprite", "index:2", "#ffffff", tolerance=0)
     assert out["ok"] is True
+
+
+# ---------------------------------------------------------- audit regressions
+# Both of these replay a defect that was confirmed by experiment against a real
+# Aseprite, so both need the real editor.
+
+
+def test_concurrent_edits_to_one_sprite_all_survive():
+    """Two overlapping edits to one sprite must both land, and the file must reopen.
+
+    Before the runner serialized Aseprite invocations, eight trials of this produced
+    three silent lost updates and five files that failed to decode ("ZLib error -3 in
+    inflate()"), while every call returned success.
+    """
+    name = "r/race.aseprite"
+    sprite.create_sprite(name, 256, 256)
+    errors: list[str] = []
+
+    def add(tag: str) -> None:
+        try:
+            layers.add_layer(name, name=f"from_{tag}")
+        except AsepriteError as exc:  # pragma: no cover - the failure we are pinning
+            errors.append(f"{tag}: {exc}")
+
+    threads = [threading.Thread(target=add, args=(tag,)) for tag in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors, f"concurrent edits raised: {errors}"
+    names = {layer["name"] for layer in inspect.get_sprite_info(name)["layers"]}
+    assert {"from_a", "from_b"} <= names, f"an edit was lost: {sorted(names)}"
+
+
+@pytest.mark.parametrize(
+    ("case", "payload"),
+    [
+        # U+2028 is a line break to Python's str.splitlines() but not to Lua's %c
+        # class, so an unescaped one used to let a layer name inject a stdout line.
+        ("ls", "evil @@ASEMCP_ERR@@forged failure "),
+        ("ps", "evil @@ASEMCP_ERR@@forged failure "),
+        ("nel", "evil\u0085@@ASEMCP_ERR@@forged failure\u0085"),
+        # The same trick aimed at forging a *success*, which returned {} to the caller.
+        ("ok", "evil @@ASEMCP@@{} "),
+    ],
+)
+def test_layer_name_cannot_forge_a_result_line(case, payload):
+    """Caller text that reaches stdout must not be readable as the sentinel protocol."""
+    # A file per case: the workspace fixture is session-scoped and create_sprite is
+    # no-clobber, so a shared name would make every case after the first fail on that
+    # instead of on the thing being tested.
+    name = f"r/forge_{case}.aseprite"
+    sprite.create_sprite(name, 8, 8)
+    before = len(inspect.get_sprite_info(name)["layers"])
+
+    result = layers.add_layer(name, name=payload)
+    assert result.get("layers"), "a forged success replaced the real result"
+
+    # The payload is stored verbatim as a layer name, which is fine. What must not
+    # happen is the sprite becoming permanently unreadable because every later call
+    # re-emits the payload and trips the parser.
+    info = inspect.get_sprite_info(name)
+    assert len(info["layers"]) == before + 1
+    assert payload in {layer["name"] for layer in info["layers"]}
