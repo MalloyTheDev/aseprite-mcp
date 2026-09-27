@@ -8,6 +8,7 @@ from ..app import mcp
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_FONT_SIZE,
+    MAX_TEXT_BITMAP_PIXELS,
     MAX_TEXT_PIXELS,
     MAX_TEXT_SCALE,
     check_list_length,
@@ -46,12 +47,19 @@ def _render_text_pixels(text: str, scale: int, font, spacing: int, threshold: in
     for line in text.split("\n"):
         if line:
             bbox = measure.textbbox((0, 0), line, font=font)
-            w, h = bbox[2] + 1, bbox[3] + 1
-            # An empty-ish glyph box is cheap; a huge one is not. Reject before
-            # allocating the Pillow bitmap it would take to render it.
-            if max(1, w) * max(1, h) * per_source_pixel > budget:
-                raise _too_large(max(1, w) * max(1, h) * per_source_pixel)
-            img = PILImage.new("L", (max(1, w), max(1, h)), 0)
+            w, h = max(1, bbox[2] + 1), max(1, bbox[3] + 1)
+            # Bound the intermediate bitmap on its own (unscaled) size. The scale
+            # factor belongs to the plotted-pixel budget below, not here: only
+            # threshold-passing pixels are ever appended, so multiplying the whole
+            # glyph box by scale**2 would reject sparse or whitespace-heavy text
+            # that plots far fewer pixels than its bounding box suggests.
+            if w * h > MAX_TEXT_BITMAP_PIXELS:
+                raise ValidationFailed(
+                    f"Text line needs a {w}x{h} ({w * h} pixel) bitmap to rasterize; "
+                    f"maximum is {MAX_TEXT_BITMAP_PIXELS}. Reduce font_size or shorten "
+                    "the line."
+                )
+            img = PILImage.new("L", (w, h), 0)
             ImageDraw.Draw(img).text((0, 0), line, fill=255, font=font)
             px = img.load()
             for cy in range(img.height):

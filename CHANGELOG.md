@@ -52,8 +52,25 @@ All notable changes to this project are documented here. The format is based on
 - **Executable resolution.** The `ASEPRITE_PATH` cache is keyed on the env var, so a
   change to it is no longer served a stale binary, and a path pointing at a *directory*
   is rejected with a message that says so.
-- **Bounded process output.** Aseprite stdout/stderr retained for an error message is
-  truncated to 8 MB (tail kept), so a runaway script can't blow up the error path.
+- **Bounded process output, while it is read.** Aseprite's stdout/stderr are now drained
+  into a bounded tail buffer (8M characters) by a reader thread per stream, replacing
+  `subprocess.run(capture_output=True)`. Truncating after the fact could not prevent
+  memory exhaustion, because `capture_output` accumulates the whole stream before it
+  returns. The tail is what is kept, since the RESULT/ERROR sentinels are printed last.
+- **Inline and source images are checked for declared dimensions.** A byte cap does not
+  bound the raster: a solid-colour PNG compresses to a few hundred KB while declaring
+  20000x20000, so it passes a 32 MB limit and then makes Aseprite allocate gigabytes.
+  `stamp_file` and `draw_image_base64` now read the header with Pillow (no pixel decode)
+  and enforce the canvas limits, converting Pillow's own bomb error into a typed one.
+  Formats Pillow cannot identify, notably `.aseprite`, are passed through unchecked.
+- **Sprite scaling accounts for every cel.** `SpriteSize` rescales each cel, so a legal
+  target canvas still multiplies by the cel count: 100 full-frame cels of a 16x16 sprite
+  scaled to 4096x4096 is ~1.7 Gpx, several GB of RGBA. The predicted aggregate is now
+  bounded (`MAX_SPRITE_TOTAL_PIXELS`) before any of it is allocated.
+- **The text budget counts plotted pixels, not the bounding box.** Folding `scale**2`
+  into the glyph-box pre-check rejected a 7x7 box at scale 64 (200,704 > 200,000) even
+  for a line of spaces that plots nothing. The bitmap allocation and the plotted-pixel
+  budget are now separate limits.
 - **Supply-chain hardening of CI** — GitHub Actions are now pinned to commit SHAs
   (`actions/checkout`, `astral-sh/setup-uv`) instead of mutable tags, and a
   `.github/dependabot.yml` keeps actions and Python deps (uv ecosystem) current via
