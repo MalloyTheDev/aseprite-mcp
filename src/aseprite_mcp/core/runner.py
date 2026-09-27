@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -14,6 +15,7 @@ from .errors import (  # noqa: F401  (AsepriteError re-exported for back-compat)
     AsepriteTimeoutError,
     LuaToolError,
 )
+from .limits import MAX_PROCESS_OUTPUT_CHARS
 from .luagen import ERROR_PREFIX, RESULT_PREFIX, assemble_script
 
 
@@ -43,16 +45,26 @@ def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -
             "or split the operation into smaller steps."
         ) from exc
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(path)
-        except OSError:
-            pass
 
     return _parse_result(proc)
 
 
+def _truncate(text: str, limit: int = MAX_PROCESS_OUTPUT_CHARS) -> str:
+    """Bound a captured stream so a runaway Aseprite script can't blow up the
+    error path it feeds. Keeps the tail, which is where the failure usually is.
+
+    The bound is in characters, matching MAX_PROCESS_OUTPUT_CHARS; see the note on
+    that constant for why the decoded length is the right unit here.
+    """
+    if len(text) <= limit:
+        return text
+    return f"[... {len(text) - limit} characters truncated ...]\n" + text[-limit:]
+
+
 def _parse_result(proc: subprocess.CompletedProcess) -> dict:
-    out = proc.stdout or ""
+    out = _truncate(proc.stdout or "")
     result_json: str | None = None
     error_msg: str | None = None
 
@@ -67,7 +79,7 @@ def _parse_result(proc: subprocess.CompletedProcess) -> dict:
         raise LuaToolError(error_msg)
 
     if result_json is None:
-        detail = (proc.stderr or "").strip() or out.strip() or (
+        detail = _truncate((proc.stderr or "").strip()) or out.strip() or (
             f"Aseprite exited with code {proc.returncode} and produced no result."
         )
         raise LuaToolError(detail)
@@ -99,7 +111,7 @@ def run_cli(cli_args: list[str], timeout: float | None = None) -> subprocess.Com
         raise AsepriteTimeoutError(f"Aseprite CLI timed out after {exc.timeout:.0f}s.") from exc
 
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip() or (
+        detail = _truncate((proc.stderr or proc.stdout or "").strip()) or (
             f"Aseprite CLI failed with exit code {proc.returncode}."
         )
         raise AsepriteCLIError(detail)

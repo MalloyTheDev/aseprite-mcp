@@ -77,7 +77,8 @@ def fill_gradient(
     local rad = math.rad(ARG.angle)
     local dx, dy = math.cos(rad), math.sin(rad)
     local function proj(px, py) return px * dx + py * dy end
-    local c1, c2, c3, c4 = proj(rx, ry), proj(rx + rw - 1, ry), proj(rx, ry + rh - 1), proj(rx + rw - 1, ry + rh - 1)
+    local c1, c2 = proj(rx, ry), proj(rx + rw - 1, ry)
+    local c3, c4 = proj(rx, ry + rh - 1), proj(rx + rw - 1, ry + rh - 1)
     local pmin = math.min(c1, c2, c3, c4)
     local pmax = math.max(c1, c2, c3, c4)
     local span = pmax - pmin

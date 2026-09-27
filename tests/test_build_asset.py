@@ -27,7 +27,7 @@ def test_build_character_is_structure_only():
         "exports": [{"format": "godot_spriteframes"}, {"format": "slice_metadata"}],
     }
     m = asset_spec.build_asset_from_spec(spec)
-    assert _REQUIRED <= set(m) and m["kind"] == "asset_spec"
+    assert set(m) >= _REQUIRED and m["kind"] == "asset_spec"
 
     info = inspect.get_sprite_info("w/hero_spec.aseprite")
     assert [layer["name"] for layer in info["layers"]] == ["body", "details", "fx"]

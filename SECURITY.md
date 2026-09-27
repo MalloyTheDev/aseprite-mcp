@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes target the latest released `0.6.x` line and `main`. Older tags are not
+Security fixes target the latest released `0.7.x` line and `main`. Older tags are not
 patched — upgrade to the newest release.
 
 ## Threat model
@@ -24,20 +24,29 @@ the workspace — see *Out of scope* below.
   paths, `..` escapes, and symlinks that point outside the workspace are **rejected**
   (`config.resolve` calls `.resolve()` before checking containment). Opt out only with
   `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
-- **No-clobber output (v0.6.1+).** Output-writing tools refuse to overwrite an existing
-  file unless `overwrite=True`; multi-file exports validate every target before writing
-  any of them.
+- **No-clobber output (v0.6.1+, completed in v0.7.1).** Every output-writing tool refuses
+  to overwrite an existing file unless `overwrite=True`; multi-file exports validate every
+  target before writing any of them. Pattern exports (`frames/walk_{frame}.png`) are
+  expanded by Aseprite itself, so they are checked against everything the pattern could
+  match. (Through v0.7.0, six tools bypassed this and wrote silently: `export_layer`,
+  `export_layers`, `export_tags`, `export_frames`, `export_onion_skin`, `import_image`.)
 - **No shell, no Lua injection.** Aseprite is invoked with list-form arguments (never a
   shell string). Every user value is passed into generated Lua through an **escaped `ARG`
   table** — user input is never concatenated into Lua source. The `to_lua` escaping is
   covered by Hypothesis property tests asserting strings can't break out of their literal.
 - **Size limits (DoS guard, v0.6.x+).** Batch op-lists and pixel/tile/colour lists are
   capped (`core/limits.py`); exceeding a cap raises `ValidationFailed` before any work
-  begins, with a message explaining how to split the request.
-- **Timeouts.** Every Aseprite invocation runs under `ASEPRITE_MCP_TIMEOUT` (default 90s).
+  begins, with a message explaining how to split the request. Since v0.7.1 the same module
+  also bounds **canvas geometry** (16384px per axis *and* 16,777,216 pixels of area, so a
+  pair of individually-legal axes can't add up to gigabytes), **inline base64 images**
+  (32 MB), **text rasterization** (budgeted while rendering, not after), and the amount of
+  Aseprite output retained for an error message.
+- **Timeouts.** Every Aseprite invocation runs under `ASEPRITE_MCP_TIMEOUT` (default 90s,
+  clamped to 1-3600s so a hostile or fat-fingered value can't disable the guard).
 - **Bring your own Aseprite.** The server only executes the Aseprite binary you point it
   at via `ASEPRITE_PATH` / PATH.
-- **Least-privilege CI.** The GitHub Actions workflow runs with `permissions: contents: read`.
+- **Least-privilege CI.** The GitHub Actions workflow runs with `permissions: contents: read`
+  and pins every action to a commit SHA. CodeQL scans `main` and every PR.
 
 ## Out of scope (your responsibility)
 

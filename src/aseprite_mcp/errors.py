@@ -1,6 +1,6 @@
 """Backwards-compatible shim. Errors now live in `aseprite_mcp.core.errors`."""
 
-from aseprite_mcp.core.errors import (  # noqa: F401
+from aseprite_mcp.core.errors import (
     AsepriteCLIError,
     AsepriteError,
     AsepriteMCPError,

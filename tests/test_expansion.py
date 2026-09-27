@@ -50,7 +50,7 @@ def test_drop_shadow_adds_layer():
     sprite.create_sprite("e/shadow.aseprite", 8, 8, "rgb")
     drawing.draw_rectangle("e/shadow.aseprite", 1, 1, 3, 3, "#ffffff", filled=True)
     info = effects.add_drop_shadow("e/shadow.aseprite", "Layer 1", 1, 1, "#000000", opacity=128)
-    names = [l["name"] for l in info["layers"]]
+    names = [lyr["name"] for lyr in info["layers"]]
     assert "Layer 1 shadow" in names
 
 

@@ -3,7 +3,7 @@
 Preserves long-standing imports like `from aseprite_mcp.runner import AsepriteError`.
 """
 
-from aseprite_mcp.core.runner import (  # noqa: F401
+from aseprite_mcp.core.runner import (
     AsepriteCLIError,
     AsepriteError,
     AsepriteTimeoutError,

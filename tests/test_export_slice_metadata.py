@@ -25,7 +25,7 @@ def _setup(name):
 def test_export_slice_metadata_round_trip():
     _setup("w/sl")
     m = export_presets.export_slice_metadata("w/sl.aseprite")
-    assert _REQUIRED <= set(m)
+    assert set(m) >= _REQUIRED
     assert m["kind"] == "engine_metadata"
 
     path = m["created_files"][0]["path"]

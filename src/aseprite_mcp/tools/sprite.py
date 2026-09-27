@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
+from ..core.limits import MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS, check_canvas_size
 from ..core.paths import ensure_output_path
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
@@ -22,7 +24,8 @@ def create_sprite(
     Args:
         filename: Output path. Relative paths go in the workspace. Use a
             .aseprite/.ase extension to keep layers & frames editable.
-        width, height: Canvas size in pixels (1-65535).
+        width, height: Canvas size in pixels. Each axis is capped at 16384px
+            and the total area at 16,777,216 pixels (e.g. 4096x4096).
         color_mode: "rgb" (default), "indexed", or "gray".
         background: Optional fill colour for the first layer (e.g. "#1d2b53").
             Omit for a transparent canvas.
@@ -30,13 +33,12 @@ def create_sprite(
 
     Returns the new sprite's structured info.
     """
-    if not (1 <= width <= 65535) or not (1 <= height <= 65535):
-        raise ValueError("width and height must be between 1 and 65535")
+    width, height = check_canvas_size(width, height)
     path = ensure_output_path(filename, overwrite=overwrite)
     args = {
         "path": lua_path(path),
-        "width": int(width),
-        "height": int(height),
+        "width": width,
+        "height": height,
         "color_mode": color_mode,
         "bg": parse_color(background) if background else None,
     }
@@ -114,13 +116,15 @@ def resize_canvas(
     """Resize the canvas WITHOUT scaling the artwork (adds or trims space).
 
     anchor controls where existing content sits in the new canvas:
-    "top_left" (default) or "center".
+    "top_left" (default) or "center". The new canvas is subject to the same
+    dimension/area caps as `create_sprite`.
     """
+    width, height = check_canvas_size(width, height)
     src = resolve_path(filename)
     args = {
         "src": lua_path(src),
-        "width": int(width),
-        "height": int(height),
+        "width": width,
+        "height": height,
         "anchor": anchor,
     }
     body = """
@@ -139,14 +143,19 @@ def resize_canvas(
 
 @mcp.tool()
 def crop_sprite(filename: str, x: int, y: int, width: int, height: int) -> dict:
-    """Crop the canvas to the rectangle (x, y, width, height)."""
+    """Crop the canvas to the rectangle (x, y, width, height).
+
+    The resulting canvas is subject to the same dimension/area caps as `create_sprite`
+    (a "crop" to a larger rectangle grows the canvas).
+    """
+    width, height = check_canvas_size(width, height)
     src = resolve_path(filename)
     args = {
         "src": lua_path(src),
         "x": int(x),
         "y": int(y),
-        "width": int(width),
-        "height": int(height),
+        "width": width,
+        "height": height,
     }
     body = """
     local spr = open_sprite(ARG.src)
@@ -169,16 +178,36 @@ def scale_sprite(
 
     Provide either `factor` (e.g. 2.0 to double) OR explicit `width`/`height`.
     method: "nearest" (crisp pixels, default) or "bilinear" (smooth).
+
+    The scaled canvas is subject to the same dimension/area caps as `create_sprite`.
+    With `factor` the result depends on the sprite's current size, so that check runs
+    inside Aseprite and reports the size it would have produced.
     """
     src = resolve_path(filename)
     if factor is None and width is None and height is None:
         raise ValueError("Provide either factor or width/height.")
+    if factor is not None:
+        factor = float(factor)
+        if factor != factor or factor <= 0 or factor == float("inf"):
+            raise ValidationFailed(
+                f"factor must be a positive finite number, got {factor!r}."
+            )
+    if width is not None and height is not None:
+        width, height = check_canvas_size(width, height)
+    elif width is not None:
+        check_canvas_size(width, 1)
+        width = int(width)
+    elif height is not None:
+        check_canvas_size(1, height)
+        height = int(height)
     args = {
         "src": lua_path(src),
         "factor": factor,
         "width": width,
         "height": height,
         "method": method,
+        "max_dim": MAX_CANVAS_DIMENSION,
+        "max_pixels": MAX_CANVAS_PIXELS,
     }
     body = """
     local spr = open_sprite(ARG.src)
@@ -190,6 +219,11 @@ def scale_sprite(
     end
     w = w or spr.width
     h = h or spr.height
+    if w > ARG.max_dim or h > ARG.max_dim or w * h > ARG.max_pixels then
+      error(string.format(
+        "scaled canvas %dx%d exceeds the limits (max %dpx per axis, %d pixels total). "
+        .. "Use a smaller factor or explicit width/height.", w, h, ARG.max_dim, ARG.max_pixels))
+    end
     app.command.SpriteSize{ ui = false, width = w, height = h, method = ARG.method }
     save_sprite(spr)
     RESULT = sprite_info(spr)

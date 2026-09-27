@@ -35,7 +35,7 @@ def test_golden_animation_metadata():
 
     info = inspect.get_sprite_info(f)
     assert info["frameCount"] == 3
-    assert [l["name"] for l in info["layers"]] == ["Layer 1", "fg"]
+    assert [lyr["name"] for lyr in info["layers"]] == ["Layer 1", "fg"]
     assert len(info["tags"]) == 1
     t = info["tags"][0]
     assert (t["name"], t["from"], t["to"], t["aniDir"]) == ("walk", 1, 3, "pingpong")

@@ -58,7 +58,8 @@ Create a new sprite file and save it.
 Args:
     filename: Output path. Relative paths go in the workspace. Use a
         .aseprite/.ase extension to keep layers & frames editable.
-    width, height: Canvas size in pixels (1-65535).
+    width, height: Canvas size in pixels. Each axis is capped at 16384px
+        and the total area at 16,777,216 pixels (e.g. 4096x4096).
     color_mode: "rgb" (default), "indexed", or "gray".
     background: Optional fill colour for the first layer (e.g. "#1d2b53").
         Omit for a transparent canvas.
@@ -79,6 +80,9 @@ Returns the new sprite's structured info.
 ### `crop_sprite`
 
 Crop the canvas to the rectangle (x, y, width, height).
+
+The resulting canvas is subject to the same dimension/area caps as `create_sprite`
+(a "crop" to a larger rectangle grows the canvas).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -103,7 +107,8 @@ Flatten all layers into a single layer (in place).
 Resize the canvas WITHOUT scaling the artwork (adds or trims space).
 
 anchor controls where existing content sits in the new canvas:
-"top_left" (default) or "center".
+"top_left" (default) or "center". The new canvas is subject to the same
+dimension/area caps as `create_sprite`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -136,6 +141,10 @@ Scale the whole sprite (artwork included).
 
 Provide either `factor` (e.g. 2.0 to double) OR explicit `width`/`height`.
 method: "nearest" (crisp pixels, default) or "bilinear" (smooth).
+
+The scaled canvas is subject to the same dimension/area caps as `create_sprite`.
+With `factor` the result depends on the sprite's current size, so that check runs
+inside Aseprite and reports the size it would have produced.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -919,6 +928,9 @@ Args:
     threshold: 0-255 cutoff; pixels brighter than this are drawn (lower =
         heavier text). Keeps glyphs crisp (no anti-aliasing artefacts).
 
+scale is capped at 64, font_size at 512, and the rendered text at 200,000
+pixels; the pixel budget is enforced while rasterizing, not afterwards.
+
 Returns the standard draw result plus the rendered text's pixel size.
 
 | Parameter | Type | Required | Default |
@@ -1057,7 +1069,8 @@ Place many tiles at once. tiles: list of {"column", "row", "index"}.
 Composite an inline base64-encoded PNG (or other image) onto a layer at (x, y).
 
 Useful for pasting externally generated artwork. `image_base64` may include a
-`data:image/png;base64,` prefix.
+`data:image/png;base64,` prefix. The decoded image is capped at 32 MB; for
+anything larger, write the file into the workspace and use `stamp_file`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1327,11 +1340,14 @@ Export each frame to its own image file.
 output_pattern must contain "{frame}" (and optionally "{tag}", "{layer}"),
 e.g. "frames/walk_{frame}.png". Aseprite substitutes the values.
 
+overwrite: Replace files the pattern would expand onto (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output_pattern` | string | yes |  |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_gif`
@@ -1352,6 +1368,8 @@ overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 Export a single layer of one frame as a PNG (others excluded).
 
+overwrite: Replace `output` if it already exists (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -1359,6 +1377,7 @@ Export a single layer of one frame as a PNG (others excluded).
 | `output` | string | yes |  |
 | `frame` | integer | no | 1 |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_layers`
@@ -1368,12 +1387,17 @@ Export each layer to its own image file.
 output_pattern must contain "{layer}" (e.g. "layers/{layer}.png"); add
 "{frame}" too for animations. include_hidden also exports hidden layers.
 
+overwrite: Replace files the pattern would expand onto (default False =
+no-clobber). Aseprite expands the placeholders, so the check refuses when any
+file matching the pattern already exists.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output_pattern` | string | yes |  |
 | `scale` | integer | no | 1 |
 | `include_hidden` | boolean | no | False |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_onion_skin`
@@ -1385,6 +1409,7 @@ Args:
     previous, next: How many earlier/later frames to ghost.
     ghost_opacity: Max opacity (0-255) of the nearest ghost; further frames fade.
     scale: Integer upscaling factor for the output PNG.
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1395,6 +1420,7 @@ Args:
 | `next` | integer | no | 0 |
 | `ghost_opacity` | integer | no | 80 |
 | `scale` | integer | no | 4 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_png`
@@ -1471,11 +1497,14 @@ Export each animation tag's frames to their own files.
 output_pattern must contain "{tag}" (and usually "{frame}"),
 e.g. "anim/{tag}_{frame}.png".
 
+overwrite: Replace files the pattern would expand onto (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output_pattern` | string | yes |  |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `import_image`
@@ -1485,11 +1514,13 @@ Create an editable .aseprite sprite from a flat image (.png/.bmp/.jpg/...).
 Args:
     input_image: Source raster image.
     output: Destination .aseprite path.
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `input_image` | string | yes |  |
 | `output` | string | yes |  |
+| `overwrite` | boolean | no | False |
 
 
 ## Engine export presets
