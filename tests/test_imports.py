@@ -48,7 +48,7 @@ def test_error_alias_survives():
 
 
 def test_core_does_not_import_mcp_app_or_tools():
-    """Importing core must not pull in the FastMCP app or any tool module — proving
+    """Importing core must not pull in the MCP app or any tool module, proving
     core is reusable without MCP registration side effects. Checked in a clean
     interpreter so other tests' imports don't pollute the result."""
     imports = "".join(f"import {m}\n" for m in CORE_MODULES)
@@ -56,7 +56,10 @@ def test_core_does_not_import_mcp_app_or_tools():
         "import sys\n"
         + imports
         + "assert 'aseprite_mcp.app' not in sys.modules, 'core imported the MCP app'\n"
-        "assert 'mcp.server.fastmcp' not in sys.modules, 'core imported FastMCP'\n"
+        # The server package, not a submodule: mcp 2.x removed mcp.server.fastmcp, so
+        # asserting on that path would pass for the wrong reason (nothing can import it)
+        # and stop testing the isolation this guards.
+        "assert 'mcp.server' not in sys.modules, 'core imported the MCP server package'\n"
         "assert not any(m.startswith('aseprite_mcp.tools') for m in sys.modules), "
         "'core imported a tools module'\n"
     )

@@ -1,4 +1,4 @@
-"""The shared FastMCP application instance.
+"""The shared MCP application instance.
 
 Defined in its own module so every tool module can `from ..app import mcp`
 without creating an import cycle with `server.py`.
@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from .core.errors import UnknownArgumentError
 
@@ -35,8 +35,8 @@ Workflow notes:
   * Recommended first step for a new asset: `create_sprite`, then draw, then preview.
 """
 
-class StrictFastMCP(FastMCP):
-    """FastMCP that rejects arguments its tools do not declare.
+class StrictMCPServer(MCPServer):
+    """An MCPServer that rejects arguments its tools do not declare.
 
     The schema layer validates the arguments a tool *does* declare and silently drops the
     rest, so `create_sprite(colour_mode="indexed")` -- when the parameter is `color_mode` --
@@ -68,7 +68,9 @@ class StrictFastMCP(FastMCP):
 
         return register
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]):  # type: ignore[override]
+    async def call_tool(  # type: ignore[override]
+        self, name: str, arguments: dict[str, Any], *args: Any, **kwargs: Any
+    ):
         accepted = self._accepted.get(name)
         if accepted is not None:
             unknown = sorted(set(arguments) - accepted)
@@ -77,7 +79,10 @@ class StrictFastMCP(FastMCP):
                     f"{name} does not accept {', '.join(repr(u) for u in unknown)}. "
                     f"Accepted arguments: {', '.join(sorted(accepted))}."
                 )
-        return await super().call_tool(name, arguments)
+        # Forwarded positionally/by keyword rather than enumerated: call_tool gained a
+        # `context` parameter in the 2.x SDK, and an override that pins the older
+        # two-argument shape silently stops receiving anything added after it.
+        return await super().call_tool(name, arguments, *args, **kwargs)
 
 
-mcp = StrictFastMCP("aseprite", instructions=INSTRUCTIONS)
+mcp = StrictMCPServer("aseprite", instructions=INSTRUCTIONS)

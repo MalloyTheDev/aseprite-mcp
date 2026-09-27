@@ -17,23 +17,30 @@ import json
 import pytest
 
 import aseprite_mcp.server  # noqa: F401  -- importing registers the real tools
-from aseprite_mcp.app import StrictFastMCP, mcp
+from aseprite_mcp.app import StrictMCPServer, mcp
 from aseprite_mcp.core import oplib
 from aseprite_mcp.core.errors import AsepriteMCPError, UnknownArgumentError, ValidationFailed
 
 
 def call(server, name, arguments):
+    """Invoke a tool and return its parsed dict, whatever shape the SDK hands back.
+
+    mcp 2.x returns a CallToolResult carrying a `content` list; earlier versions
+    returned the content sequence itself. The text block is the tool's JSON either way,
+    so parse that rather than `structured_content`, which wraps the payload.
+    """
     result = asyncio.run(server.call_tool(name, arguments))
     if isinstance(result, dict):
         return result
     if isinstance(result, tuple):
         result = result[0]
-    return json.loads(result[0].text)
+    blocks = getattr(result, "content", result)
+    return json.loads(blocks[0].text)
 
 
 @pytest.fixture()
 def server():
-    s = StrictFastMCP("test")
+    s = StrictMCPServer("test")
 
     @s.tool()
     def sprite(width: int = 16, color_mode: str = "rgb") -> dict:
@@ -79,7 +86,7 @@ def test_the_real_server_rejects_a_misspelled_parameter():
 def test_var_keyword_tools_are_not_policed(server):
     """A **kwargs tool takes open-ended names, so it must not get an accepted-set.
 
-    Asserted at registration rather than through a call: FastMCP models **kwargs as a single
+    Asserted at registration rather than through a call: the SDK models **kwargs as a single
     required `kwargs` field, so such a tool cannot be invoked with loose names end-to-end
     anyway. What matters is that the guard does not invent a whitelist for a signature that
     deliberately has none.

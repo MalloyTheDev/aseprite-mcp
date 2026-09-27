@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from mcp.server.fastmcp import Image
+from mcp.server.mcpserver import Image
 
 from ..app import mcp
 from ..core import config

@@ -131,7 +131,8 @@ async def main(check: bool = False) -> int:
                 # 3.13 auto-dedents docstrings at compile time, ≤3.12 does not.
                 out.append(inspect.cleandoc(t.description))
                 out.append("")
-            out.append(_params_table(t.inputSchema or {}))
+            # `input_schema` since mcp 2.x; it was `inputSchema` in 1.x.
+            out.append(_params_table(t.input_schema or {}))
             out.append("")
 
     content = "\n".join(out)

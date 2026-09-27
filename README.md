@@ -134,6 +134,14 @@ Everything is configurable via environment variables (all optional):
 | `ASEPRITE_MCP_WORKSPACE` | Folder where **relative** sprite paths are resolved. | `<repo>/workspace` |
 | `ASEPRITE_MCP_TIMEOUT` | Per-operation timeout in seconds (clamped to 1-3600). | `90` |
 | `ASEPRITE_MCP_ALLOW_ABSOLUTE` | Allow absolute / workspace-escaping paths (`1`/`true` to enable). | off (sandboxed) |
+| `ASEPRITE_MCP_TRANSPORT` | `stdio`, `streamable-http`, or `sse`. See the warning below before using an HTTP transport. | `stdio` |
+
+`stdio` is the right default: it is what desktop MCP clients launch, and it keeps the
+server reachable only by the process that started it. The HTTP transports exist for
+agents that cannot spawn a local process. Treat them as a deliberate exposure decision:
+this server's file access is scoped by a workspace directory, not by an identity, so
+binding it to a reachable port gives every caller that can reach it the same filesystem
+access the local user has. Bind to loopback, or put authentication in front of it.
 
 On this machine Aseprite was detected at
 `C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe`, so `ASEPRITE_PATH`
@@ -457,7 +465,7 @@ The agent's own "eyes" remain `render_preview`, which returns a PNG it can inspe
 ## How it works
 
 ```
-client (Claude) ──MCP──> aseprite-mcp (FastMCP, Python)
+client (any MCP client) ──MCP──> aseprite-mcp (MCPServer, Python)
                               │  builds a Lua body + ARG table
                               ▼
                          luagen.assemble_script  ──>  temp .lua
@@ -479,7 +487,7 @@ flags (`--sheet`, `--scale`, `--data`, …).
 
 ```
 src/aseprite_mcp/
-  app.py          FastMCP instance + usage instructions
+  app.py          MCPServer instance + usage instructions
   config.py       locate Aseprite, workspace, path resolution
   luagen.py       Python->Lua serializer + shared Lua PRELUDE + script assembly
   runner.py       run_lua() / run_cli(), parse sentinel JSON
