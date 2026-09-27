@@ -16,12 +16,61 @@ All notable changes to this project are documented here. The format is based on
   Kinds: character, enemy, item_sheet, icon_set, tileset, walk_8dir. Pure schema/planner in
   `core/asset_spec.py`. (113 tools.)
 
+### Fixed
+- **No-clobber policy was not actually universal.** Six output-writing tools
+  (`export_layer`, `export_layers`, `export_tags`, `export_frames`, `export_onion_skin`,
+  `import_image`) resolved their destination with `resolve_path()` instead of
+  `ensure_output_path()`, so they silently overwrote existing files while `SECURITY.md`
+  and the README documented the opposite. All six now honour the policy and accept
+  `overwrite=True`.
+- **Server instructions described the pre-sandbox behaviour.** The `INSTRUCTIONS` string
+  the agent reads still said absolute paths were "honoured as-is"; it now describes the
+  sandbox and the no-clobber default.
+
 ### Security
+- **Pattern exports are no-clobber too.** Aseprite expands `{frame}`/`{layer}`/`{tag}`
+  patterns itself, so the concrete filenames aren't known up front. `ensure_output_pattern`
+  refuses when anything the pattern could expand into already exists (literal text is
+  glob-escaped, so a `[` in a filename can't cause a false conflict).
+- **Canvas geometry is bounded.** `create_sprite` allowed 65535x65535 (~17 GB of pixels)
+  and `resize_canvas` / `crop_sprite` / `scale_sprite` had no size validation at all.
+  All four now go through `check_canvas_size`: 16384px per axis **and** 16,777,216 pixels
+  of area, because two individually-legal axes can still be gigabytes. The `scale_sprite`
+  `factor` path is checked inside Aseprite, where the source size is known, and rejects
+  non-finite/non-positive factors up front.
+- **Inline payloads are bounded.** `draw_image_base64` capped at 32 MB decoded (checked
+  against the encoded length first, so an oversized payload is rejected without
+  allocating the decode).
+- **Text rasterization is budgeted while it renders.** `draw_text`'s 200,000-pixel cap
+  previously fired *after* the coordinate list was fully materialized. With each source
+  pixel becoming `scale**2` entries, the memory was already spent by the time the guard
+  ran. The budget is now enforced during rasterization, and `scale`/`font_size` are
+  capped at 64/512.
+- **Timeouts can't be disabled.** `ASEPRITE_MCP_TIMEOUT` is clamped to 1-3600s; a
+  negative, zero, NaN, or infinite value falls back to the default instead of making
+  every call fail instantly or hang forever.
+- **Executable resolution.** The `ASEPRITE_PATH` cache is keyed on the env var, so a
+  change to it is no longer served a stale binary, and a path pointing at a *directory*
+  is rejected with a message that says so.
+- **Bounded process output.** Aseprite stdout/stderr retained for an error message is
+  truncated to 8 MB (tail kept), so a runaway script can't blow up the error path.
 - **Supply-chain hardening of CI** — GitHub Actions are now pinned to commit SHAs
   (`actions/checkout`, `astral-sh/setup-uv`) instead of mutable tags, and a
   `.github/dependabot.yml` keeps actions and Python deps (uv ecosystem) current via
   reviewed PRs (with version annotations). Future bumps are Dependabot PRs, not a manual
   floating-tag chore.
+- **CodeQL** (`security-extended`) now scans `main`, every PR, and weekly on a schedule.
+
+### Changed
+- **Ruff lint in CI.** The project had no linter; `ruff check` now runs on `src`, `tests`,
+  and `scripts` across the whole Python matrix. The 89 findings from the first run are
+  fixed, including three `raise ... from` chains that were swallowing the original
+  exception and a `zip()` whose equal-length invariant is now explicit (`strict=True`).
+  The formatter is deliberately **not** wired up: it would rewrite 49 files and bury
+  behavioural changes in noise.
+- **CI runs are cancelled when superseded** on pull requests (never on `main`), and the
+  workflow can be dispatched manually.
+- **`py.typed`** ships in the wheel, so the annotations are visible to consumers.
 
 ## [0.7.0] - 2026-06-13
 

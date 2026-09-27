@@ -12,7 +12,7 @@ _REQUIRED = {"ok", "schema_version", "kind", "created_files", "suggested_next_ac
 
 
 def _assert_manifest(m, kind):
-    assert _REQUIRED <= set(m)
+    assert set(m) >= _REQUIRED
     assert m["ok"] is True
     assert m["schema_version"] == "workflow_manifest.v1"
     assert m["kind"] == kind

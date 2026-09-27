@@ -37,7 +37,7 @@ def _lua_string(s: str) -> str:
             out.append("\\t")
         elif o < 32 or o == 127:
             # Zero-padded decimal escape is unambiguous regardless of the next char.
-            out.append("\\%03d" % o)
+            out.append(f"\\{o:03d}")
         else:
             out.append(ch)
     out.append('"')

@@ -421,7 +421,8 @@ def create_icon_set(
         created_files=[file_entry("source_sprite", info["path"], "aseprite")],
         suggested_next_actions=[
             "Draw each icon inside its named slice region.",
-            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', tile_multiple={icon_size}).",
+            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', "
+            f"tile_multiple={icon_size}).",
             f"Export the atlas: export_game_asset_bundle('{filename}').",
         ],
     )
@@ -448,7 +449,8 @@ def create_rpg_item_sheet(
         created_files=[file_entry("source_sprite", info["path"], "aseprite")],
         suggested_next_actions=[
             "Draw each item inside its named slice region.",
-            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', tile_multiple={item_size}).",
+            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', "
+            f"tile_multiple={item_size}).",
             f"Export the atlas: export_game_asset_bundle('{filename}').",
         ],
     )

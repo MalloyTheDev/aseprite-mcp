@@ -14,8 +14,11 @@ edit sprite files (.aseprite/.ase), draw pixel art, build animations, manage
 palettes, and export to PNG/GIF/sprite sheets.
 
 Workflow notes:
-  * Relative filenames are resolved inside the server's workspace directory;
-    absolute paths are honoured as-is. Most tools return the resolved path.
+  * Filenames are relative to the server's workspace directory. Absolute paths and
+    paths that escape the workspace (via "..") are rejected by default; the operator
+    can opt out with ASEPRITE_MCP_ALLOW_ABSOLUTE=1. Most tools return the resolved path.
+  * Tools that write files are no-clobber: they refuse to replace an existing file
+    unless you pass overwrite=True. Pick a fresh name, or opt in deliberately.
   * Sprites are real files on disk. Edits open the file, modify it, and save.
   * Frames are 1-based. Colours accept "#RRGGBB", "#RRGGBBAA", "r,g,b", "r,g,b,a",
     "index:N" (for indexed sprites), or a few names (black, white, red, green,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..app import mcp
 from ..core.errors import ExportError
-from ..core.paths import ensure_output_path
+from ..core.paths import ensure_output_path, ensure_output_pattern
 from ..core.runner import run_cli, run_lua
 from .common import lua_path, resolve_path
 
@@ -135,10 +135,20 @@ def export_spritesheet(
 
 
 @mcp.tool()
-def export_layer(filename: str, layer: str, output: str, frame: int = 1, scale: int = 1) -> dict:
-    """Export a single layer of one frame as a PNG (others excluded)."""
+def export_layer(
+    filename: str,
+    layer: str,
+    output: str,
+    frame: int = 1,
+    scale: int = 1,
+    overwrite: bool = False,
+) -> dict:
+    """Export a single layer of one frame as a PNG (others excluded).
+
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+    """
     src = resolve_path(filename)
-    out = resolve_path(output)
+    out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     f0 = max(0, int(frame) - 1)
     run_cli([
         str(src), "--layer", layer,
@@ -151,17 +161,25 @@ def export_layer(filename: str, layer: str, output: str, frame: int = 1, scale: 
 
 @mcp.tool()
 def export_layers(
-    filename: str, output_pattern: str, scale: int = 1, include_hidden: bool = False
+    filename: str,
+    output_pattern: str,
+    scale: int = 1,
+    include_hidden: bool = False,
+    overwrite: bool = False,
 ) -> dict:
     """Export each layer to its own image file.
 
     output_pattern must contain "{layer}" (e.g. "layers/{layer}.png"); add
     "{frame}" too for animations. include_hidden also exports hidden layers.
+
+    overwrite: Replace files the pattern would expand onto (default False =
+    no-clobber). Aseprite expands the placeholders, so the check refuses when any
+    file matching the pattern already exists.
     """
     if "{layer}" not in output_pattern:
         raise ValueError('output_pattern must contain "{layer}".')
     src = resolve_path(filename)
-    out = resolve_path(output_pattern)
+    out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     cli = [str(src), "--split-layers", "--scale", str(max(1, int(scale)))]
     if include_hidden:
         cli.append("--all-layers")
@@ -171,16 +189,20 @@ def export_layers(
 
 
 @mcp.tool()
-def export_tags(filename: str, output_pattern: str, scale: int = 1) -> dict:
+def export_tags(
+    filename: str, output_pattern: str, scale: int = 1, overwrite: bool = False
+) -> dict:
     """Export each animation tag's frames to their own files.
 
     output_pattern must contain "{tag}" (and usually "{frame}"),
     e.g. "anim/{tag}_{frame}.png".
+
+    overwrite: Replace files the pattern would expand onto (default False = no-clobber).
     """
     if "{tag}" not in output_pattern:
         raise ValueError('output_pattern must contain "{tag}".')
     src = resolve_path(filename)
-    out = resolve_path(output_pattern)
+    out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     run_cli([
         str(src), "--split-tags",
         "--scale", str(max(1, int(scale))),
@@ -198,6 +220,7 @@ def export_onion_skin(
     next: int = 0,
     ghost_opacity: int = 80,
     scale: int = 4,
+    overwrite: bool = False,
 ) -> dict:
     """Export a frame with neighbouring frames ghosted behind it (onion skin).
 
@@ -206,10 +229,12 @@ def export_onion_skin(
         previous, next: How many earlier/later frames to ghost.
         ghost_opacity: Max opacity (0-255) of the nearest ghost; further frames fade.
         scale: Integer upscaling factor for the output PNG.
+        overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
+    out_path = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     args = {
         "src": lua_path(resolve_path(filename)),
-        "output": lua_path(resolve_path(output)),
+        "output": lua_path(out_path),
         "frame": int(frame),
         "previous": max(0, int(previous)),
         "next": max(0, int(next)),
@@ -251,31 +276,37 @@ def export_onion_skin(
 
 
 @mcp.tool()
-def export_frames(filename: str, output_pattern: str, scale: int = 1) -> dict:
+def export_frames(
+    filename: str, output_pattern: str, scale: int = 1, overwrite: bool = False
+) -> dict:
     """Export each frame to its own image file.
 
     output_pattern must contain "{frame}" (and optionally "{tag}", "{layer}"),
     e.g. "frames/walk_{frame}.png". Aseprite substitutes the values.
+
+    overwrite: Replace files the pattern would expand onto (default False = no-clobber).
     """
     if "{frame}" not in output_pattern:
         raise ValueError('output_pattern must contain "{frame}", e.g. "out_{frame}.png".')
     src = resolve_path(filename)
-    out = resolve_path(output_pattern)
+    out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     run_cli([str(src), "--scale", str(max(1, int(scale))), "--save-as", str(out)])
     return {"ok": True, "output_pattern": str(out), "scale": int(scale)}
 
 
 @mcp.tool()
-def import_image(input_image: str, output: str) -> dict:
+def import_image(input_image: str, output: str, overwrite: bool = False) -> dict:
     """Create an editable .aseprite sprite from a flat image (.png/.bmp/.jpg/...).
 
     Args:
         input_image: Source raster image.
         output: Destination .aseprite path.
+        overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
+    dst = ensure_output_path(output, overwrite=overwrite)
     args = {
         "src": lua_path(resolve_path(input_image)),
-        "dst": lua_path(resolve_path(output)),
+        "dst": lua_path(dst),
     }
     body = """
     local spr = open_sprite(ARG.src)
@@ -283,5 +314,5 @@ def import_image(input_image: str, output: str) -> dict:
     RESULT = sprite_info(spr)
     """
     info = run_lua(body, args)
-    info["path"] = str(resolve_path(output))
+    info["path"] = str(dst)
     return info

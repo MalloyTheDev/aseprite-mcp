@@ -2,7 +2,6 @@
 
 import pytest
 
-from aseprite_mcp.tools.common import parse_color
 from aseprite_mcp.core.models import (
     ColorSpec,
     FrameRange,
@@ -14,6 +13,7 @@ from aseprite_mcp.core.models import (
     Size,
     SpritePath,
 )
+from aseprite_mcp.tools.common import parse_color
 
 
 # ---------------------------------------------------------------- geometry

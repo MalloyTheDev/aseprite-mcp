@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+
 # --------------------------------------------------------------------------- #
 # Geometry                                                                    #
 # --------------------------------------------------------------------------- #
@@ -19,7 +20,7 @@ class Point:
     y: int
 
     @classmethod
-    def of(cls, x, y) -> "Point":
+    def of(cls, x, y) -> Point:
         return cls(int(x), int(y))
 
 
@@ -29,7 +30,7 @@ class Size:
     height: int
 
     @classmethod
-    def of(cls, width, height) -> "Size":
+    def of(cls, width, height) -> Size:
         w, h = int(width), int(height)
         if w < 1 or h < 1:
             raise ValueError(f"size must be at least 1x1, got {w}x{h}")
@@ -44,7 +45,7 @@ class Rect:
     height: int
 
     @classmethod
-    def of(cls, x, y, width, height) -> "Rect":
+    def of(cls, x, y, width, height) -> Rect:
         return cls(int(x), int(y), int(width), int(height))
 
     @property
@@ -96,7 +97,7 @@ class ColorSpec:
     index: int | None = None
 
     @classmethod
-    def parse(cls, spec: str | None) -> "ColorSpec":
+    def parse(cls, spec: str | None) -> ColorSpec:
         """Parse a flexible colour string. Accepts "#RGB", "#RGBA", "#RRGGBB",
         "#RRGGBBAA", "r,g,b", "r,g,b,a", "index:N"/"idx:N", or a name (black, white,
         red, transparent, ...). Raises ValueError on anything unparseable."""
@@ -127,16 +128,16 @@ class ColorSpec:
                     r, g, b, a = (int(h[i:i + 2], 16) for i in (0, 2, 4, 6))
                 else:
                     raise ValueError
-            except ValueError:
-                raise ValueError(f"Invalid hex colour: {spec!r}")
+            except ValueError as exc:
+                raise ValueError(f"Invalid hex colour: {spec!r}") from exc
             return cls(r=r, g=g, b=b, a=a)
 
         if "," in s:
             parts = [p.strip() for p in s.split(",") if p.strip() != ""]
             try:
-                nums = [max(0, min(255, int(round(float(p))))) for p in parts]
-            except ValueError:
-                raise ValueError(f"Invalid numeric colour: {spec!r}")
+                nums = [max(0, min(255, round(float(p)))) for p in parts]
+            except ValueError as exc:
+                raise ValueError(f"Invalid numeric colour: {spec!r}") from exc
             if len(nums) == 3:
                 return cls(r=nums[0], g=nums[1], b=nums[2], a=255)
             if len(nums) == 4:
@@ -165,7 +166,7 @@ class Pixel:
     color: ColorSpec | None = None
 
     @classmethod
-    def of(cls, x, y, color=None) -> "Pixel":
+    def of(cls, x, y, color=None) -> Pixel:
         cs = color if (color is None or isinstance(color, ColorSpec)) else ColorSpec.parse(color)
         return cls(int(x), int(y), cs)
 
@@ -187,7 +188,7 @@ class LayerRef:
     value: str | int | None = None
 
     @classmethod
-    def of(cls, value) -> "LayerRef":
+    def of(cls, value) -> LayerRef:
         if value is None or isinstance(value, str):
             return cls(value)
         return cls(int(value))
@@ -200,7 +201,7 @@ class FrameRef:
     number: int
 
     @classmethod
-    def of(cls, number) -> "FrameRef":
+    def of(cls, number) -> FrameRef:
         n = int(number)
         if n < 1:
             raise ValueError(f"frame number is 1-based and must be >= 1, got {n}")
@@ -215,7 +216,7 @@ class FrameRange:
     end: int
 
     @classmethod
-    def of(cls, start, end) -> "FrameRange":
+    def of(cls, start, end) -> FrameRange:
         a, b = FrameRef.of(start).number, FrameRef.of(end).number
         return cls(min(a, b), max(a, b))
 

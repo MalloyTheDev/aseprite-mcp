@@ -40,7 +40,8 @@ def test_valid_character_passes():
 
 
 def test_missing_name_fails():
-    spec = {**CHAR}; del spec["name"]
+    spec = {**CHAR}
+    del spec["name"]
     r = validate_spec(spec)
     assert not r["passed"] and any("name" in e for e in r["errors"])
 
@@ -56,7 +57,8 @@ def test_unknown_schema_fails():
 
 
 def test_character_requires_canvas():
-    spec = {**CHAR}; del spec["canvas"]
+    spec = {**CHAR}
+    del spec["canvas"]
     r = validate_spec(spec)
     assert not r["passed"] and any("canvas" in e for e in r["errors"])
 

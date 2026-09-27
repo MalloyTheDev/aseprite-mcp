@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# A new push to a PR makes the in-flight run obsolete; don't burn a runner on it.
+# `main` is never cancelled, so every commit there keeps a complete result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Least privilege: CI only reads the repo (no writes to contents, packages, etc.).
 permissions:
@@ -29,6 +36,9 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --python ${{ matrix.python-version }}
+
+      - name: Lint (ruff)
+        run: uv run --python ${{ matrix.python-version }} ruff check src tests scripts
 
       - name: Import check (server + all tool modules register)
         run: uv run --python ${{ matrix.python-version }} python -c "import asyncio; from aseprite_mcp.server import mcp; print('tools:', len(asyncio.run(mcp.list_tools())))"

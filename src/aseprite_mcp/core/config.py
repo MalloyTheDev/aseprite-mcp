@@ -5,7 +5,9 @@ works on any machine:
 
     ASEPRITE_PATH            Absolute path to Aseprite.exe (or `aseprite` binary).
     ASEPRITE_MCP_WORKSPACE   Directory where relative sprite paths are resolved.
-    ASEPRITE_MCP_TIMEOUT     Per-invocation timeout in seconds (default 90).
+    ASEPRITE_MCP_TIMEOUT     Per-invocation timeout in seconds (default 90, clamped
+                             to 1-3600; an unparseable/out-of-range value falls back
+                             to the nearest bound rather than disabling the timeout).
     ASEPRITE_MCP_ALLOW_ABSOLUTE  Set to 1/true to permit absolute paths and paths
                              that escape the workspace. Off by default (sandboxed).
 """
@@ -34,20 +36,35 @@ _CANDIDATES = [
     "/usr/local/bin/aseprite",
 ]
 
+# Cache of the last successful lookup, keyed by the ASEPRITE_PATH value it was
+# resolved under. Keying on the env var means a caller (or a test) that changes
+# ASEPRITE_PATH is never served a stale executable from a previous value.
 _cached_exe: str | None = None
+_cached_for_env: str | None = None
+
+
+def _is_executable_file(path: str) -> bool:
+    """True if `path` names an existing file (a directory is not a binary)."""
+    return Path(path).is_file()
 
 
 def find_aseprite() -> str:
     """Return the path to the Aseprite executable, or raise AsepriteNotFoundError
     (which is also a FileNotFoundError, for backwards compatibility)."""
-    global _cached_exe
-    if _cached_exe and Path(_cached_exe).exists():
-        return _cached_exe
+    global _cached_exe, _cached_for_env
 
     env = os.environ.get("ASEPRITE_PATH")
+    if _cached_exe and _cached_for_env == env and _is_executable_file(_cached_exe):
+        return _cached_exe
+
     if env:
-        if Path(env).exists():
-            _cached_exe = env
+        if Path(env).is_dir():
+            raise AsepriteNotFoundError(
+                f"ASEPRITE_PATH is set to '{env}', which is a directory. Point it at the "
+                "Aseprite executable itself (e.g. .../Aseprite/Aseprite.exe)."
+            )
+        if _is_executable_file(env):
+            _cached_exe, _cached_for_env = env, env
             return env
         raise AsepriteNotFoundError(
             f"ASEPRITE_PATH is set to '{env}' but no file exists there."
@@ -55,12 +72,12 @@ def find_aseprite() -> str:
 
     on_path = shutil.which("aseprite") or shutil.which("Aseprite")
     if on_path:
-        _cached_exe = on_path
+        _cached_exe, _cached_for_env = on_path, env
         return on_path
 
     for candidate in _CANDIDATES:
-        if Path(candidate).exists():
-            _cached_exe = candidate
+        if _is_executable_file(candidate):
+            _cached_exe, _cached_for_env = candidate, env
             return candidate
 
     raise AsepriteNotFoundError(
@@ -120,8 +137,27 @@ def resolve(filename: str) -> Path:
     return full
 
 
+# Per-invocation timeout bounds. A timeout is a safety device: a value of 0 or a
+# negative number would make every call fail instantly, and inf/NaN would disable
+# the guard entirely, so both ends are clamped rather than honoured.
+DEFAULT_TIMEOUT = 90.0
+MIN_TIMEOUT = 1.0
+MAX_TIMEOUT = 3600.0
+
+
 def timeout() -> float:
+    """Per-invocation Aseprite timeout in seconds, clamped to [MIN_TIMEOUT, MAX_TIMEOUT].
+
+    An unset, unparseable, or non-finite ASEPRITE_MCP_TIMEOUT falls back to
+    DEFAULT_TIMEOUT; anything outside the range is clamped to the nearest bound.
+    """
+    raw = os.environ.get("ASEPRITE_MCP_TIMEOUT")
+    if raw is None or raw.strip() == "":
+        return DEFAULT_TIMEOUT
     try:
-        return float(os.environ.get("ASEPRITE_MCP_TIMEOUT", "90"))
+        value = float(raw)
     except ValueError:
-        return 90.0
+        return DEFAULT_TIMEOUT
+    if value != value or value in (float("inf"), float("-inf")):  # NaN / +-inf
+        return DEFAULT_TIMEOUT
+    return max(MIN_TIMEOUT, min(MAX_TIMEOUT, value))

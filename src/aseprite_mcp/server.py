@@ -5,7 +5,7 @@ from __future__ import annotations
 from .app import mcp
 
 # Importing each module registers its @mcp.tool() functions on `mcp`.
-from .tools import (  # noqa: F401,E402
+from .tools import (
     asset_spec,
     batch,
     brushes,

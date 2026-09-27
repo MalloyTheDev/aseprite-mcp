@@ -132,7 +132,7 @@ Everything is configurable via environment variables (all optional):
 | --- | --- | --- |
 | `ASEPRITE_PATH` | Full path to `Aseprite.exe` / `aseprite`. | Auto-detected (Steam, standalone, PATH). |
 | `ASEPRITE_MCP_WORKSPACE` | Folder where **relative** sprite paths are resolved. | `<repo>/workspace` |
-| `ASEPRITE_MCP_TIMEOUT` | Per-operation timeout in seconds. | `90` |
+| `ASEPRITE_MCP_TIMEOUT` | Per-operation timeout in seconds (clamped to 1-3600). | `90` |
 | `ASEPRITE_MCP_ALLOW_ABSOLUTE` | Allow absolute / workspace-escaping paths (`1`/`true` to enable). | off (sandboxed) |
 
 On this machine Aseprite was detected at
@@ -500,10 +500,18 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
   `ASEPRITE_MCP_WORKSPACE` (default `<repo>/workspace`). Absolute paths and paths that
   escape the workspace via `..` (or a symlink that points outside it) are **rejected**
   unless you set `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
-- **No-clobber by default.** Output-writing tools (`create_sprite`, `save_sprite_as`,
-  `export_*`, `export_game_asset_bundle`) refuse to overwrite an existing file; pass
-  `overwrite=True` to replace it on purpose. Multi-file exports validate every target up
-  front, so they fail before writing anything if any target already exists.
+- **No-clobber by default.** Every output-writing tool (`create_sprite`, `save_sprite_as`,
+  `import_image`, all `export_*`, `export_game_asset_bundle`) refuses to overwrite an
+  existing file; pass `overwrite=True` to replace it on purpose. Multi-file exports
+  validate every target up front, so they fail before writing anything if any target
+  already exists. Pattern exports (`frames/walk_{frame}.png`) are expanded by Aseprite
+  itself, so they are checked against everything the pattern could match.
+- **Bounded work per call.** A single call cannot exhaust the host: batch op-lists and
+  pixel/tile/colour lists are capped, canvases are capped at 16384px per axis **and**
+  16,777,216 pixels of area (so two individually-legal axes can't add up to gigabytes),
+  inline base64 images at 32 MB, and text rasterization is budgeted while it renders.
+  `ASEPRITE_MCP_TIMEOUT` is clamped to 1-3600s so it can't be set to something that
+  disables the timeout.
 - **No shell, no injection.** Aseprite is invoked with list-form arguments (never a
   shell), and every user value is passed into generated Lua through an escaped `ARG`
   table — user input is never concatenated into Lua source.

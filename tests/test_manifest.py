@@ -11,7 +11,7 @@ _REQUIRED_KEYS = {"ok", "schema_version", "kind", "created_files", "suggested_ne
 
 def test_manifest_has_required_keys():
     m = M.workflow_manifest("character_sprite")
-    assert _REQUIRED_KEYS <= set(m)
+    assert set(m) >= _REQUIRED_KEYS
     assert m["ok"] is True
     assert m["schema_version"] == "workflow_manifest.v1"
     assert m["kind"] == "character_sprite"

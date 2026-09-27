@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from pathlib import Path
 
 from mcp.server.fastmcp import Image
 
-from ..core import config
 from ..app import mcp
+from ..core import config
 from ..core.runner import AsepriteError, run_cli, run_lua
 from .common import lua_path, resolve_path
 
@@ -53,10 +54,8 @@ def render_preview(filename: str, frame: int = 1, scale: int = 8) -> Image:
         ])
         data = Path(out).read_bytes()
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(out)
-        except OSError:
-            pass
     return Image(data=data, format="png")
 
 

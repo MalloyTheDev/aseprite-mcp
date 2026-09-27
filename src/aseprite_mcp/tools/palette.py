@@ -273,7 +273,7 @@ def generate_ramp(
         H = (h + (t * hue_shift / 360.0)) % 1.0
         S = min(1.0, max(0.0, sat * (1 + t * saturation_shift / 100.0)))
         rr, gg, bb = colorsys.hls_to_rgb(H, L, S)
-        colors.append("#%02x%02x%02x" % (round(rr * 255), round(gg * 255), round(bb * 255)))
+        colors.append(f"#{round(rr * 255):02x}{round(gg * 255):02x}{round(bb * 255):02x}")
 
     result = {"steps": steps, "colors": colors}
     if apply != "none":
