@@ -230,6 +230,17 @@ def resolve(filename: str, *, create_parent: bool = False) -> Path:
             "No filename was given. Pass a path relative to the workspace "
             f"({ws}), e.g. 'sprites/hero.aseprite'."
         )
+    # Rejected here, explicitly, rather than left to pathlib. Through Python 3.12 an
+    # embedded NUL made `Path.resolve()` raise ValueError, so this failed closed as a
+    # side effect; 3.13 resolves such a path without complaint and the sandbox then
+    # returned it as accepted. A guard that holds only because of an implementation
+    # detail of the standard library is not a guard, and this one had already stopped
+    # holding on the newest interpreter the project supports.
+    if "\x00" in str(filename):
+        raise WorkspaceError(
+            "Filenames may not contain a null byte. Remove it and use a plain path "
+            f"relative to the workspace ({ws})."
+        )
     p = Path(filename).expanduser()
     permissive = allow_absolute()
 

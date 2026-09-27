@@ -1,5 +1,7 @@
 """Pure-Python tests for the batch operation registry — no Aseprite (always run)."""
 
+import inspect
+
 import pytest
 
 from aseprite_mcp.core import oplib
@@ -213,3 +215,31 @@ def test_apply_operations_docstring_carries_the_generated_listing():
     doc = batch.apply_operations.__doc__ or ""
     for line in oplib.operations_reference().splitlines():
         assert line.strip() in doc
+
+
+def test_the_generated_operations_reference_is_interpreter_independent():
+    """The appended reference must not shift with the interpreter's docstring handling.
+
+    Python 3.13 dedents docstrings at compile time and 3.12 does not, so a block appended
+    at "the docstring's own level" lands at a different indent on each version. That text
+    is the source for docs/TOOLS.md, so the committed file was in sync on 3.12 and out of
+    sync on 3.13, and only CI saw it. Requiring the finished docstring to already be in
+    canonical form makes cleandoc a no-op and the generated docs identical everywhere.
+    """
+    from aseprite_mcp.tools.batch import apply_operations
+
+    doc = apply_operations.__doc__
+    assert doc is not None
+    assert inspect.cleandoc(doc) == doc.strip(), (
+        "apply_operations.__doc__ is not in canonical form, so docs/TOOLS.md will "
+        "differ between Python versions"
+    )
+
+    header = "Operations and their arguments ('?' marks an optional argument):\n"
+    _, found, tail = doc.partition(header)
+    assert found, "the operations reference header is missing from the docstring"
+    entries = [ln for ln in tail.splitlines() if ln.strip() and "(" in ln]
+    assert entries, "no operation entries found in the appended reference"
+    for line in entries:
+        indent = len(line) - len(line.lstrip())
+        assert indent == 2, f"entry indented {indent}, expected 2: {line!r}"

@@ -10,8 +10,8 @@ single, all-or-nothing call.
 
 from __future__ import annotations
 
+import inspect
 import json
-import textwrap
 
 from ..app import mcp
 from ..core import oplib
@@ -97,11 +97,18 @@ def apply_operations(filename: str, operations: list[dict], dry_run: bool = Fals
 # hand-written version listed 21 op names and no argument names at all, which left
 # reading core/oplib.py as the only way to find out what an op takes.
 #
-# Indented to the docstring's own level so `inspect.cleandoc` still dedents the whole
-# thing evenly.
+# The base docstring is cleandoc'd before anything is appended, because how much
+# indentation it still carries at this point depends on the interpreter: Python 3.13
+# dedents docstrings at compile time and 3.12 does not. Matching the appended block to
+# "the docstring's own level" therefore produces a different result per version, and
+# docs/TOOLS.md is generated from this text, so the committed file was in sync on 3.12
+# and out of sync on 3.13. Normalising first makes the result identical everywhere.
 apply_operations.__doc__ = (
-    f"{apply_operations.__doc__.rstrip()}\n\n"
-    "    Operations and their arguments ('?' marks an optional argument):\n"
-    f"{textwrap.indent(oplib.operations_reference(), '    ')}\n"
+    f"{inspect.cleandoc(apply_operations.__doc__ or '').rstrip()}\n\n"
+    "Operations and their arguments ('?' marks an optional argument):\n"
+    # operations_reference() already indents its entries by two, so nothing is added
+    # here. Indenting again is what produced the four-space entries the previous
+    # version only avoided because cleandoc happened to strip the difference back off.
+    f"{oplib.operations_reference()}\n"
 )
 apply_operations = mcp.tool()(apply_operations)
