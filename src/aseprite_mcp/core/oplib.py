@@ -84,6 +84,17 @@ def validate_operations(operations) -> list[dict]:
         if not isinstance(args, dict):
             raise ValidationFailed(f"op {i} ({name}): 'args' must be an object.")
 
+        # The loop below walks the SPEC, so anything the caller sent that is not in the spec
+        # simply never gets looked at. A misspelled optional arg -- "blendmode" for
+        # "blend_mode", "opacty" for "opacity" -- vanished silently and the op reported
+        # success having ignored it. Required args were caught; optional ones were not.
+        unknown = sorted(set(args) - set(spec))
+        if unknown:
+            raise ValidationFailed(
+                f"op {i} ({name}): unknown arg(s) {', '.join(repr(u) for u in unknown)}. "
+                f"Accepted: {', '.join(sorted(spec))}."
+            )
+
         norm: dict = {}
         for arg, (kind, required) in spec.items():
             if arg not in args or args[arg] is None:

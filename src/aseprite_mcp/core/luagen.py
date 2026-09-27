@@ -14,8 +14,40 @@ The runner parses those sentinel lines back into Python.
 
 from __future__ import annotations
 
+import secrets
+
+# Legacy un-nonced sentinels. Retained because `aseprite_mcp.luagen` re-exports them,
+# but no longer used to frame real output: see `new_nonce` for why.
 RESULT_PREFIX = "@@ASEMCP@@"
 ERROR_PREFIX = "@@ASEMCP_ERR@@"
+
+
+def new_nonce() -> str:
+    """A fresh token scoping one run's stdout sentinels to that run.
+
+    Sentinels are recognised by position: the runner treats any stdout line starting
+    with the result or error prefix as protocol. With a fixed prefix, any caller-supplied
+    string that reaches stdout, a layer name, a tag, a filename, can therefore claim to
+    *be* the protocol, and escaping alone is a losing game because it has to enumerate
+    every byte sequence the reader might treat as a line break.
+
+    A per-run nonce removes the class instead of patching instances: the payload is
+    serialized before the nonce is generated and never appears in the script's input,
+    so it cannot name the token it would have to guess. Escaping the line terminators is
+    still worth doing (see `_esc`), but it is now defence in depth rather than the
+    only thing standing between a layer name and a forged result.
+    """
+    return secrets.token_hex(8)
+
+
+def result_prefix(nonce: str) -> str:
+    """The success sentinel for `nonce`. Distinct from `error_prefix` by construction."""
+    return f"@@ASEMCP:{nonce}@@"
+
+
+def error_prefix(nonce: str) -> str:
+    """The failure sentinel for `nonce`."""
+    return f"@@ASEMCP_ERR:{nonce}@@"
 
 
 # --------------------------------------------------------------------------- #
@@ -92,7 +124,7 @@ local function _is_array(t)
 end
 
 local function _esc(s)
-  return (s:gsub('[%c"\\]', function(ch)
+  s = s:gsub('[%c"\\]', function(ch)
     local b = string.byte(ch)
     if ch == '"' then return '\\"'
     elseif ch == '\\' then return '\\\\'
@@ -102,7 +134,17 @@ local function _esc(s)
     elseif b == 8 then return '\\b'
     elseif b == 12 then return '\\f'
     else return string.format('\\u%04x', b) end
-  end))
+  end)
+  -- Lua's %c class is byte-wise, so the pattern above covers only 0x00-0x1F and 0x7F.
+  -- Bytes 128 and up pass through untouched, which means the UTF-8 encodings of the
+  -- Unicode line terminators reach stdout intact. Python's str.splitlines() treats
+  -- U+0085, U+2028 and U+2029 as line breaks, so an unescaped one lets a value inside
+  -- a JSON string start a new stdout line. Escape them to keep "one result, one line"
+  -- true for the reader as well as for Lua.
+  s = s:gsub("\194\133", "\\u0085")
+  s = s:gsub("\226\128\168", "\\u2028")
+  s = s:gsub("\226\128\169", "\\u2029")
+  return s
 end
 
 local function json_encode(v)
@@ -618,8 +660,17 @@ end
 """
 
 
-def assemble_script(body: str, args: dict | None = None) -> str:
-    """Wrap a tool body with the ARG table, the prelude, and the pcall harness."""
+def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
+    """Wrap a tool body with the ARG table, the prelude, and the pcall harness.
+
+    `nonce` is required, and must come from `new_nonce()` per run. The caller keeps it
+    to parse the output; see `new_nonce` for why a fixed sentinel is not safe.
+
+    The error branch json_encodes the message rather than printing it raw. Lua error
+    text embeds caller data (a missing layer name, an unparseable colour), so printing
+    `tostring(_err)` unescaped puts an unescaped newline on stdout and splits one
+    logical error across lines.
+    """
     arg_literal = to_lua(args or {})
     return (
         f"local ARG = {arg_literal}\n"
@@ -630,8 +681,8 @@ def assemble_script(body: str, args: dict | None = None) -> str:
         "end\n"
         "local _ok, _err = pcall(_main)\n"
         "if _ok then\n"
-        f'  print("{RESULT_PREFIX}" .. json_encode(RESULT))\n'
+        f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"
-        f'  print("{ERROR_PREFIX}" .. tostring(_err))\n'
+        f'  print("{error_prefix(nonce)}" .. json_encode(tostring(_err)))\n'
         "end\n"
     )

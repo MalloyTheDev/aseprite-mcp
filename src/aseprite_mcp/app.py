@@ -1,4 +1,4 @@
-"""The shared FastMCP application instance.
+"""The shared MCP application instance.
 
 Defined in its own module so every tool module can `from ..app import mcp`
 without creating an import cycle with `server.py`.
@@ -6,7 +6,12 @@ without creating an import cycle with `server.py`.
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+import inspect
+from typing import Any
+
+from mcp.server import MCPServer
+
+from .core.errors import UnknownArgumentError
 
 INSTRUCTIONS = """\
 This server drives Aseprite (a pixel-art / sprite editor) headlessly to create and
@@ -17,8 +22,10 @@ Workflow notes:
   * Filenames are relative to the server's workspace directory. Absolute paths and
     paths that escape the workspace (via "..") are rejected by default; the operator
     can opt out with ASEPRITE_MCP_ALLOW_ABSOLUTE=1. Most tools return the resolved path.
-  * Tools that write files are no-clobber: they refuse to replace an existing file
-    unless you pass overwrite=True. Pick a fresh name, or opt in deliberately.
+  * Tools that create a NEW output file (exports, saves, imports) are no-clobber: they
+    refuse to replace an existing file unless you pass overwrite=True. Editing tools
+    that take an existing `filename` save in place and need no such flag, so drawing
+    into the same sprite repeatedly is expected and safe.
   * Sprites are real files on disk. Edits open the file, modify it, and save.
   * Frames are 1-based. Colours accept "#RRGGBB", "#RRGGBBAA", "r,g,b", "r,g,b,a",
     "index:N" (for indexed sprites), or a few names (black, white, red, green,
@@ -28,4 +35,54 @@ Workflow notes:
   * Recommended first step for a new asset: `create_sprite`, then draw, then preview.
 """
 
-mcp = FastMCP("aseprite", instructions=INSTRUCTIONS)
+class StrictMCPServer(MCPServer):
+    """An MCPServer that rejects arguments its tools do not declare.
+
+    The schema layer validates the arguments a tool *does* declare and silently drops the
+    rest, so `create_sprite(colour_mode="indexed")` -- when the parameter is `color_mode` --
+    returns ok and an RGB sprite. The caller gets a confidently wrong asset and no signal to
+    correct on.
+
+    Accepted names are recorded at registration from each function's own signature, so the
+    check cannot drift out of step with the tools. Ported verbatim from pixelprep-mcp, where
+    this bug was first found.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._accepted: dict[str, set[str]] = {}
+
+    def tool(self, *args: Any, **kwargs: Any):  # type: ignore[override]
+        decorate = super().tool(*args, **kwargs)
+
+        def register(fn):
+            parameters = inspect.signature(fn).parameters.values()
+            # **kwargs means the tool genuinely takes open-ended names; do not police it.
+            if not any(p.kind is p.VAR_KEYWORD for p in parameters):
+                name = kwargs.get("name") or (args[0] if args and isinstance(args[0], str) else None)
+                self._accepted[name or fn.__name__] = {
+                    p.name for p in parameters
+                    if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+                }
+            return decorate(fn)
+
+        return register
+
+    async def call_tool(  # type: ignore[override]
+        self, name: str, arguments: dict[str, Any], *args: Any, **kwargs: Any
+    ):
+        accepted = self._accepted.get(name)
+        if accepted is not None:
+            unknown = sorted(set(arguments) - accepted)
+            if unknown:
+                raise UnknownArgumentError(
+                    f"{name} does not accept {', '.join(repr(u) for u in unknown)}. "
+                    f"Accepted arguments: {', '.join(sorted(accepted))}."
+                )
+        # Forwarded positionally/by keyword rather than enumerated: call_tool gained a
+        # `context` parameter in the 2.x SDK, and an override that pins the older
+        # two-argument shape silently stops receiving anything added after it.
+        return await super().call_tool(name, arguments, *args, **kwargs)
+
+
+mcp = StrictMCPServer("aseprite", instructions=INSTRUCTIONS)
