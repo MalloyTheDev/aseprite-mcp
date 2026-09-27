@@ -1,12 +1,14 @@
 {
-  "_comment": "Copy into your MCP client config (e.g. claude_desktop_config.json). Replace the paths below. On Windows, escape backslashes (\\\\). On macOS/Linux use forward slashes and the aseprite binary path.",
+  "_comment": "The `mcpServers` shape, which Claude Desktop, Cursor, Cline, Roo Code, Windsurf and LM Studio all read. Copy the `mcpServers` block into your client's config file and replace the paths. For the config file path per client, and for the formats Codex CLI, Continue, Zed and Goose use instead, see docs/CLIENTS.md.",
+  "_comment_paths": "Windows-style paths shown; escape backslashes in JSON (\\\\) or just use forward slashes, which work on every platform. Set ASEPRITE_MCP_WORKSPACE explicitly to the folder your art lives in: relative sprite filenames resolve inside it, and leaving it unset falls back to a `workspace` directory beside the installed package.",
+  "_comment_launch": "`run aseprite-mcp` holds .venv/Scripts/aseprite-mcp.exe open, which blocks `uv sync` on Windows while the server runs. Swap the last argument for `python`, `-m`, `aseprite_mcp` to avoid that.",
   "mcpServers": {
     "aseprite": {
       "command": "uv",
       "args": ["--directory", "C:\\path\\to\\aseprite-mcp", "run", "aseprite-mcp"],
       "env": {
         "ASEPRITE_PATH": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Aseprite\\Aseprite.exe",
-        "ASEPRITE_MCP_WORKSPACE": "C:\\path\\to\\aseprite-mcp\\workspace"
+        "ASEPRITE_MCP_WORKSPACE": "C:\\path\\to\\your\\art-project"
       }
     }
   }

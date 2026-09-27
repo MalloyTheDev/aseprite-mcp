@@ -38,10 +38,12 @@ def ensure_output_path(
       path is confirmed safe).
     - If the target already exists and `overwrite` is False, raises `error_type`.
     - Returns the resolved absolute `Path`.
+
+    `create_parent` defaults to True because Aseprite will not create an output folder
+    itself; pass False to validate a target without touching the filesystem.
     """
-    resolved = config.resolve(str(path))  # sandbox check + safe parent mkdir
-    if not create_parent:  # config.resolve already created it; nothing extra to do
-        pass
+    # sandbox check, then the parent mkdir only once the path is confirmed safe
+    resolved = config.resolve(str(path), create_parent=create_parent)
     if resolved.exists() and not overwrite:
         raise error_type(
             f"Output '{resolved}' already exists. Pass overwrite=True to replace it."
@@ -101,7 +103,9 @@ def ensure_output_pattern(
     into is already on disk, the conservative reading of "don't clobber". Returns the
     resolved absolute pattern `Path` for handing to the Aseprite CLI.
     """
-    resolved = config.resolve(str(pattern))  # sandbox check + safe parent mkdir
+    # sandbox check + safe parent mkdir: Aseprite expands the placeholders but will not
+    # create the directory it writes them into.
+    resolved = config.resolve(str(pattern), create_parent=True)
     if overwrite:
         return resolved
     existing = expansion_matches(resolved)

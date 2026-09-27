@@ -17,6 +17,7 @@ from .errors import (  # noqa: F401  (AsepriteError re-exported for back-compat)
     AsepriteNotFoundError,
     AsepriteTimeoutError,
     LuaToolError,
+    strip_script_location,
 )
 from .limits import MAX_PROCESS_OUTPUT_CHARS
 from .luagen import assemble_script, error_prefix, new_nonce, result_prefix
@@ -260,12 +261,22 @@ def _parse_result(proc: subprocess.CompletedProcess, *, nonce: str) -> dict:
 
 
 def _decode_error(payload: str) -> str:
-    """Decode the json_encoded Lua error message, tolerating a malformed one."""
+    """Decode the json_encoded Lua error message, tolerating a malformed one.
+
+    The script location is stripped here rather than at each call site. Lua's `error()`
+    prepends `<script>:<line>:` at level 1, and the prelude's helpers use the default
+    level, so a caller asking for a layer that does not exist was told
+    `C:\\...\\Temp\\asemcp_i5f2dp0f.lua:264: No layer named 'ghost'`. The path names a
+    temporary file that no longer exists by the time anyone reads it, and the line number
+    refers to generated code, so both are noise to the caller and a host path leak.
+    Doing it at this one seam covers every tool, not only the batch runner.
+    """
     try:
         decoded = json.loads(payload)
     except json.JSONDecodeError:
-        return payload
-    return decoded if isinstance(decoded, str) else str(decoded)
+        return strip_script_location(payload)
+    text = decoded if isinstance(decoded, str) else str(decoded)
+    return strip_script_location(text)
 
 
 def run_cli(cli_args: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:

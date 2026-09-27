@@ -11,6 +11,7 @@ from mcp.server.mcpserver import Image
 
 from ..app import mcp
 from ..core import config
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import AsepriteError, run_cli, run_lua
 from .common import lua_path, resolve_path
 
@@ -82,9 +83,9 @@ def get_pixels(
         "height": height,
         "frame": int(frame),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
-    local framenum = clamp_frame(spr, ARG.frame)
+    local framenum = require_frame(spr, ARG.frame, "frame")
     local x0 = ARG.x
     local y0 = ARG.y
     local w = ARG.width or (spr.width - x0)
@@ -128,16 +129,40 @@ def get_pixels(
     return run_lua(body, args)
 
 
+def _within(root: str, path: str | Path) -> bool:
+    """True if `path`, with every link resolved, is `root` or lives under it.
+
+    `root` must already be `normcase(realpath(...))`-normalised.
+    """
+    real = os.path.normcase(os.path.realpath(path))
+    prefix = root if root.endswith(os.sep) else root + os.sep
+    return real == root or real.startswith(prefix)
+
+
 @mcp.tool()
 def list_sprites() -> dict:
     """List sprite/image files in the workspace directory."""
     ws = config.workspace()
+    root = os.path.normcase(os.path.realpath(ws))
     exts = {".aseprite", ".ase", ".png", ".gif", ".bmp", ".jpg", ".jpeg", ".tga"}
     files = []
-    for p in sorted(ws.rglob("*")):
-        if p.is_file() and p.suffix.lower() in exts:
+    # An NTFS junction is not a symlink as far as Python is concerned (`is_symlink()` is
+    # False for one), so `rglob` walked straight through a junction in the workspace and
+    # reported names and byte sizes from outside it. Every directory is re-checked with
+    # `realpath` before descending, which stops the disclosure and also stops a junction
+    # aimed at C:\ from walking the whole drive; every file is re-checked too, because a
+    # file symlink pointing outside is followed by `is_file()` and `stat()`.
+    for dirpath, dirnames, filenames in os.walk(ws):
+        dirnames[:] = [d for d in dirnames if _within(root, os.path.join(dirpath, d))]
+        for name in filenames:
+            p = Path(dirpath) / name
+            if p.suffix.lower() not in exts or not p.is_file():
+                continue
+            if not _within(root, p):
+                continue
             files.append({
                 "name": str(p.relative_to(ws)).replace("\\", "/"),
                 "bytes": p.stat().st_size,
             })
+    files.sort(key=lambda entry: entry["name"])
     return {"workspace": str(ws), "count": len(files), "files": files}

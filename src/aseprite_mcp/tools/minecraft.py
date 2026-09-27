@@ -21,8 +21,9 @@ import json
 from pathlib import Path
 
 from ..app import mcp
+from ..core import config
 from ..core import minecraft as mc
-from ..core.errors import ExportError
+from ..core.errors import ExportError, WorkspaceError
 from ..core.manifest import file_entry, sprite_summary, workflow_manifest
 from ..core.paths import ensure_output_path
 from . import export, inspect
@@ -199,6 +200,13 @@ def export_minecraft_texture(
             "written - add frames to the sprite to animate it."
         )
 
+    # Validate every planned output (and create the directory) before writing any of them.
+    # The sidecar's no-clobber check used to run *after* the PNG had been written, so an
+    # existing sidecar left half a texture behind: a strip with no animation metadata,
+    # which the game renders as squashed art rather than reporting.
+    for planned in [out_rel] + ([f"{out_rel}.mcmeta"] if frames > 1 else []):
+        ensure_output_path(planned, overwrite=overwrite, error_type=ExportError)
+
     created = []
     if frames > 1:
         result = export.export_spritesheet(
@@ -218,11 +226,21 @@ def export_minecraft_texture(
         png_path = result["output"]
         created.append(file_entry("image", png_path, "png"))
 
-    if not (Path(pack_root) / "pack.mcmeta").exists():
-        warnings.append(
-            f"No pack.mcmeta in '{pack_root}' - the game will not load the directory as a "
-            "resource pack. Run write_pack_mcmeta(pack_root=...)."
-        )
+    # `Path(pack_root)` resolved against the process working directory, not the workspace:
+    # two bugs in one. The texture itself is written under <workspace>/<pack_root>/, so a
+    # correctly built pack always reported "No pack.mcmeta"; and an unsandboxed relative
+    # path made the check an existence oracle for any path on the host, echoed back in the
+    # warning text.
+    try:
+        pack_meta = config.resolve(f"{pack_root}/pack.mcmeta")
+    except WorkspaceError as exc:
+        warnings.append(f"Could not check '{pack_root}' for pack.mcmeta: {exc}")
+    else:
+        if not pack_meta.exists():
+            warnings.append(
+                f"No pack.mcmeta in '{pack_root}' - the game will not load the directory "
+                "as a resource pack. Run write_pack_mcmeta(pack_root=...)."
+            )
 
     actions = [f"Texture written to {rel} ({frames} frame(s))."]
     if frames > 1:
@@ -315,7 +333,18 @@ def validate_minecraft_texture(
             raise ExportError("pack_root was given without category; both are needed to "
                               "locate the exported texture.")
         name = texture_name or Path(filename).stem
-        png = Path(pack_root) / mc.texture_rel_path(namespace, category, name)
+        rel = mc.texture_rel_path(namespace, category, name)
+        # Through the sandbox, for the same reasons as in export_minecraft_texture: the
+        # unresolved path checked the process working directory instead of the workspace,
+        # so this reported a missing sidecar for a pack that had one. A pack_root the
+        # sandbox refuses is a caller error here rather than an advisory warning: the
+        # caller asked for the sidecar to be verified and it cannot be.
+        try:
+            png = config.resolve(f"{pack_root}/{rel}")
+        except WorkspaceError as exc:
+            raise ExportError(
+                f"pack_root {pack_root!r} cannot be checked: {exc}"
+            ) from None
         has_mcmeta = png.with_suffix(".png.mcmeta").exists()
 
     report = mc.evaluate_texture(

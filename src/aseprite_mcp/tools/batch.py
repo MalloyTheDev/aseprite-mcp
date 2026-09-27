@@ -11,9 +11,11 @@ single, all-or-nothing call.
 from __future__ import annotations
 
 import json
+import textwrap
 
 from ..app import mcp
 from ..core import oplib
+from ..core.errors import strip_script_location
 from ..core.manifest import sprite_summary, workflow_manifest
 from ..core.runner import LuaToolError, run_lua
 from .common import lua_path, resolve_path
@@ -28,26 +30,27 @@ def _structured_batch_error(message: str) -> LuaToolError | None:
     if isinstance(info, dict) and "failed_op_index" in info:
         return LuaToolError(
             f"Batch aborted at op {info['failed_op_index']} ({info.get('failed_op')}): "
-            f"{info.get('error')} — the sprite was not modified (rolled back)."
+            f"{strip_script_location(info.get('error'))}; the sprite was not modified "
+            "(rolled back)."
         )
     return None
 
 
-@mcp.tool()
 def apply_operations(filename: str, operations: list[dict], dry_run: bool = False) -> dict:
     """Apply a list of edit operations to a sprite in one atomic, single-process batch.
 
-    Each operation is `{"op": "<name>", "args": {...}}`. Supported ops (v1):
-    add_layer, rename_layer, set_layer_visible, set_layer_opacity, remove_layer,
-    add_frame, duplicate_frame, set_frame_duration, add_tag, remove_tag, set_pixel,
-    draw_line, draw_rectangle, fill_rectangle, draw_ellipse, fill_ellipse, fill_layer,
-    clear_layer, add_slice, remove_slice, replace_color. Ops run **in order against the
+    Each operation is `{"op": "<name>", "args": {...}}`. Ops run **in order against the
     same open sprite**, so later ops see earlier ones (e.g. add a layer then draw on it).
+    Arguments not listed for an op are rejected rather than ignored.
 
     Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
     error names the failing op index. `dry_run=True` validates the op list and returns
     the plan **without launching Aseprite** (shape checks only — runtime issues like a
     missing layer surface on a real run).
+
+    Frames are 1-based, and an `arg=frame` argument must name a frame that already
+    exists: an out-of-range frame is rejected with the sprite's valid range rather than
+    clamped, so a per-op `summary` always describes the frames actually touched.
 
     Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
     """
@@ -71,6 +74,11 @@ def apply_operations(filename: str, operations: list[dict], dry_run: bool = Fals
         structured = _structured_batch_error(str(exc))
         if structured is not None:
             raise structured from exc
+        # Not one of ours (a failure outside the transaction, e.g. the sprite would not
+        # open). Still caller-facing, so it gets the same path hygiene.
+        cleaned = strip_script_location(str(exc))
+        if cleaned != str(exc):
+            raise LuaToolError(cleaned) from exc
         raise
 
     return workflow_manifest(
@@ -81,3 +89,19 @@ def apply_operations(filename: str, operations: list[dict], dry_run: bool = Fals
             f"Validate it's game-ready: validate_sprite_for_game_export('{filename}').",
         ],
     )
+
+
+# The op/argument table is generated from `oplib.OP_SPECS` and appended to the docstring
+# *before* registration, so what MCP serves as this tool's description (and what
+# docs/TOOLS.md renders) cannot drift from the registry the validator actually uses. The
+# hand-written version listed 21 op names and no argument names at all, which left
+# reading core/oplib.py as the only way to find out what an op takes.
+#
+# Indented to the docstring's own level so `inspect.cleandoc` still dedents the whole
+# thing evenly.
+apply_operations.__doc__ = (
+    f"{apply_operations.__doc__.rstrip()}\n\n"
+    "    Operations and their arguments ('?' marks an optional argument):\n"
+    f"{textwrap.indent(oplib.operations_reference(), '    ')}\n"
+)
+apply_operations = mcp.tool()(apply_operations)

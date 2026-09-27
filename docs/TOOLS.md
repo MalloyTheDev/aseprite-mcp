@@ -73,7 +73,7 @@ Returns the new sprite's structured info.
 | `width` | integer | yes |  |
 | `height` | integer | yes |  |
 | `color_mode` | string | no | rgb |
-| `background` | string | null | no | None |
+| `background` | string | no | _none_ |
 | `overwrite` | boolean | no | False |
 
 
@@ -149,9 +149,9 @@ inside Aseprite and reports the size it would have produced.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `factor` | number | null | no | None |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
+| `factor` | number | no | _none_ |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
 | `method` | string | no | nearest |
 
 
@@ -193,8 +193,8 @@ Returns rows of "#RRGGBBAA" hex strings. The region is capped at 64x64
 | `filename` | string | yes |  |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -260,7 +260,7 @@ Args:
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `name` | string | yes |  |
-| `group` | string | null | no | None |
+| `group` | string | no | _none_ |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
 | `visible` | boolean | no | True |
@@ -328,11 +328,11 @@ Update one or more layer properties. Only the arguments you pass are changed.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `layer` | string | yes |  |
-| `opacity` | integer | null | no | None |
-| `blend_mode` | string | null | no | None |
-| `visible` | boolean | null | no | None |
-| `editable` | boolean | null | no | None |
-| `name` | string | null | no | None |
+| `opacity` | integer | no | _none_ |
+| `blend_mode` | string | no | _none_ |
+| `visible` | boolean | no | _none_ |
+| `editable` | boolean | no | _none_ |
+| `name` | string | no | _none_ |
 
 
 ## Frames (animation)
@@ -344,7 +344,8 @@ Append a new frame to the animation.
 Args:
     duration_ms: Frame duration in milliseconds (default 100).
     copy_from: If given (1-based), duplicate the content of that frame;
-        otherwise the new frame is empty.
+        otherwise the new frame is empty. Must name an existing frame -- an
+        out-of-range number is rejected, not clamped.
 
 Returns the new frame number and updated frame count.
 
@@ -352,12 +353,15 @@ Returns the new frame number and updated frame count.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `duration_ms` | integer | no | 100 |
-| `copy_from` | integer | null | no | None |
+| `copy_from` | integer | no | _none_ |
 
 
 ### `duplicate_frame`
 
 Duplicate an existing frame (1-based); the copy is inserted after it.
+
+`frame` must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -368,6 +372,9 @@ Duplicate an existing frame (1-based); the copy is inserted after it.
 ### `remove_frame`
 
 Delete a frame (1-based). The sprite must have more than one frame.
+
+`frame` must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it (which used to delete a different frame).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -389,6 +396,10 @@ Set every frame's duration in milliseconds (uniform animation speed).
 
 Set a single frame's duration in milliseconds (1-based frame).
 
+`frame` must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it (which used to report the requested number
+while changing frame 1).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -402,6 +413,10 @@ Set a single frame's duration in milliseconds (1-based frame).
 
 Create an animation tag spanning frames [from_frame, to_frame] (1-based).
 
+Both frames must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it (which used to report a tag added while
+creating it over a different range).
+
 direction: "forward" (default), "reverse", "pingpong", or "pingpong_reverse".
 color: optional tag colour (shown in the timeline).
 
@@ -412,7 +427,7 @@ color: optional tag colour (shown in the timeline).
 | `from_frame` | integer | yes |  |
 | `to_frame` | integer | yes |  |
 | `direction` | string | no | forward |
-| `color` | string | null | no | None |
+| `color` | string | no | _none_ |
 
 
 ### `remove_tag`
@@ -430,17 +445,18 @@ Delete an animation tag by name.
 Update an existing tag. Only the arguments you pass are changed.
 
 Note: changing from_frame/to_frame recreates the tag in place to update its
-range reliably across Aseprite versions.
+range reliably across Aseprite versions. A frame that does not exist is rejected
+with the sprite's valid range rather than clamped into it.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `name` | string | yes |  |
-| `from_frame` | integer | null | no | None |
-| `to_frame` | integer | null | no | None |
-| `new_name` | string | null | no | None |
-| `direction` | string | null | no | None |
-| `color` | string | null | no | None |
+| `from_frame` | integer | no | _none_ |
+| `to_frame` | integer | no | _none_ |
+| `new_name` | string | no | _none_ |
+| `direction` | string | no | _none_ |
+| `color` | string | no | _none_ |
 
 
 ## Cels
@@ -513,7 +529,7 @@ Erase the target layer/frame cel to full transparency.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -533,7 +549,7 @@ control point (control_x, control_y). `steps` controls smoothness.
 | `y1` | integer | yes |  |
 | `color` | string | yes |  |
 | `steps` | integer | no | 32 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -555,7 +571,7 @@ coverage (RGB sprites only; ignored otherwise).
 | `color` | string | yes |  |
 | `filled` | boolean | no | False |
 | `antialias` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -578,7 +594,7 @@ Args:
 | `color` | string | yes |  |
 | `pixel_perfect` | boolean | no | False |
 | `antialias` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -597,8 +613,8 @@ Args:
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `pixels` | array<object> | yes |  |
-| `color` | string | null | no | None |
-| `layer` | string | null | no | None |
+| `color` | string | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -617,7 +633,7 @@ pixels across the whole path for a clean pixel-art outline.
 | `color` | string | yes |  |
 | `closed` | boolean | no | False |
 | `pixel_perfect` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -634,7 +650,7 @@ Draw a rectangle. filled=False draws a 1px outline, True fills it.
 | `height` | integer | yes |  |
 | `color` | string | yes |  |
 | `filled` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -649,7 +665,7 @@ colour starting at (x,y) on the target layer with `color`.
 | `x` | integer | yes |  |
 | `y` | integer | yes |  |
 | `color` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -661,7 +677,7 @@ Fill the entire target layer/frame cel with a solid colour.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `color` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -685,7 +701,7 @@ Args:
 | `points` | array<object> | yes |  |
 | `color` | string | yes |  |
 | `anchor` | string | no | center |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -702,9 +718,9 @@ or "both" (4-way radial symmetry). Axes default to the canvas centre.
 | `pixels` | array<object> | yes |  |
 | `color` | string | yes |  |
 | `mode` | string | no | horizontal |
-| `axis_x` | integer | null | no | None |
-| `axis_y` | integer | null | no | None |
-| `layer` | string | null | no | None |
+| `axis_x` | integer | no | _none_ |
+| `axis_y` | integer | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -723,7 +739,7 @@ Args:
 | `layer` | string | yes |  |
 | `direction` | string | no | horizontal |
 | `source_side` | string | no | first |
-| `axis` | integer | null | no | None |
+| `axis` | integer | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -743,13 +759,13 @@ Args:
 | `source` | string | yes |  |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
 | `spacing_x` | integer | no | 0 |
 | `spacing_y` | integer | no | 0 |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -795,7 +811,7 @@ Args:
 | `thickness` | integer | no | 1 |
 | `connectivity` | integer | no | 8 |
 | `where` | string | no | outside |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -808,7 +824,7 @@ Adjust brightness (-255..255, additive) and contrast (-255..255) of a layer.
 | `filename` | string | yes |  |
 | `brightness` | integer | no | 0 |
 | `contrast` | integer | no | 0 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -822,7 +838,7 @@ Shift hue (degrees) and scale saturation/lightness (percent, -100..100).
 | `hue` | integer | no | 0 |
 | `saturation` | integer | no | 0 |
 | `lightness` | integer | no | 0 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -834,7 +850,7 @@ Desaturate toward grayscale by `amount` percent (0-100).
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `amount` | integer | no | 100 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -850,9 +866,9 @@ Fill a region with a 2-colour checkerboard of `size`-pixel squares.
 | `size` | integer | no | 1 |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
-| `layer` | string | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -878,9 +894,9 @@ Args:
 | `dither` | boolean | no | False |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
-| `layer` | string | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -891,7 +907,7 @@ Invert the RGB colours of a layer's pixels (alpha preserved).
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -906,7 +922,7 @@ with `to_color`, on the chosen layer + frame.
 | `from_color` | string | yes |  |
 | `to_color` | string | yes |  |
 | `tolerance` | integer | no | 0 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -941,11 +957,11 @@ Returns the standard draw result plus the rendered text's pixel size.
 | `y` | integer | yes |  |
 | `color` | string | yes |  |
 | `scale` | integer | no | 1 |
-| `font_path` | string | null | no | None |
+| `font_path` | string | no | _none_ |
 | `font_size` | integer | no | 16 |
 | `spacing` | integer | no | 1 |
 | `threshold` | integer | no | 128 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -960,7 +976,7 @@ Returns the new tile's index.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `layer` | string | yes |  |
-| `color` | string | null | no | None |
+| `color` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -979,8 +995,8 @@ Args:
 | `name` | string | yes |  |
 | `tile_width` | integer | no | 16 |
 | `tile_height` | integer | no | 16 |
-| `columns` | integer | null | no | None |
-| `rows` | integer | null | no | None |
+| `columns` | integer | no | _none_ |
+| `rows` | integer | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1032,7 +1048,7 @@ pixels: list of {"x", "y", "color"?}; falls back to the shared `color`.
 | `layer` | string | yes |  |
 | `tile_index` | integer | yes |  |
 | `pixels` | array<object> | yes |  |
-| `color` | string | null | no | None |
+| `color` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1080,7 +1096,7 @@ anything larger, write the file into the workspace and use `stamp_file`.
 | `y` | integer | yes |  |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1104,7 +1120,7 @@ Args:
 | `source_frame` | integer | no | 1 |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1135,7 +1151,7 @@ Returns the list of "#RRGGBBAA" colours found.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `from_image` | string | null | no | None |
+| `from_image` | string | no | _none_ |
 | `set_as_palette` | boolean | no | True |
 | `include_alpha` | boolean | no | False |
 | `max_colors` | integer | no | 256 |
@@ -1163,7 +1179,7 @@ Returns the ramp as a list of "#RRGGBB" colours (darkest first).
 | `hue_shift` | number | no | 0.0 |
 | `saturation_shift` | number | no | 0.0 |
 | `light_range` | number | no | 0.6 |
-| `filename` | string | null | no | None |
+| `filename` | string | no | _none_ |
 | `apply` | string | no | none |
 
 
@@ -1211,6 +1227,9 @@ colors: list of colour strings, e.g. ["#000000", "#ffffff", "255,0,0"].
 ### `set_palette_color`
 
 Set a single palette entry by index (0-based). Grows the palette if needed.
+
+The index is bounded by the palette ceiling: the Lua below resizes the palette to
+`index + 1`, so the index *is* a palette size.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1263,14 +1282,14 @@ Args:
 | `y` | integer | yes |  |
 | `width` | integer | yes |  |
 | `height` | integer | yes |  |
-| `center_x` | integer | null | no | None |
-| `center_y` | integer | null | no | None |
-| `center_width` | integer | null | no | None |
-| `center_height` | integer | null | no | None |
-| `pivot_x` | integer | null | no | None |
-| `pivot_y` | integer | null | no | None |
-| `color` | string | null | no | None |
-| `data` | string | null | no | None |
+| `center_x` | integer | no | _none_ |
+| `center_y` | integer | no | _none_ |
+| `center_width` | integer | no | _none_ |
+| `center_height` | integer | no | _none_ |
+| `pivot_x` | integer | no | _none_ |
+| `pivot_y` | integer | no | _none_ |
+| `color` | string | no | _none_ |
+| `data` | string | no | _none_ |
 
 
 ### `list_slices`
@@ -1300,13 +1319,13 @@ Update an existing slice's bounds, name, colour, or data.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `name` | string | yes |  |
-| `x` | integer | null | no | None |
-| `y` | integer | null | no | None |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
-| `new_name` | string | null | no | None |
-| `color` | string | null | no | None |
-| `data` | string | null | no | None |
+| `x` | integer | no | _none_ |
+| `y` | integer | no | _none_ |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `new_name` | string | no | _none_ |
+| `color` | string | no | _none_ |
+| `data` | string | no | _none_ |
 
 
 ## Transforms
@@ -1466,10 +1485,10 @@ Args:
 | `output` | string | yes |  |
 | `sheet_type` | string | no | packed |
 | `scale` | integer | no | 1 |
-| `data_output` | string | null | no | None |
+| `data_output` | string | no | _none_ |
 | `padding` | integer | no | 0 |
-| `layer` | string | null | no | None |
-| `ignore_layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
+| `ignore_layer` | string | no | _none_ |
 | `split_layers` | boolean | no | False |
 | `split_tags` | boolean | no | False |
 | `overwrite` | boolean | no | False |
@@ -1553,9 +1572,9 @@ Returns a ``workflow_manifest.v1`` manifest (kind ``engine_preset``).
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output` | string | yes |  |
-| `sheet_output` | string | null | no | None |
+| `sheet_output` | string | no | _none_ |
 | `scale` | integer | no | 1 |
-| `texture_res_path` | string | null | no | None |
+| `texture_res_path` | string | no | _none_ |
 | `default_loop` | boolean | no | True |
 | `overwrite` | boolean | no | False |
 
@@ -1581,7 +1600,7 @@ Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `output` | string | null | no | None |
+| `output` | string | no | _none_ |
 | `overwrite` | boolean | no | False |
 
 
@@ -1597,6 +1616,8 @@ Args:
     opacity: Layer opacity (0-255); dim it so your art stands out.
     scale_to_fit: Resize the reference to the canvas size (smooth).
     x, y: Placement when not scaling to fit.
+    frame: Which existing frame to place the reference on (1-based). An
+        out-of-range frame is rejected with the sprite's valid range.
 
 Exclude this layer from exports with ignore_layer="<layer_name>".
 
@@ -1617,8 +1638,9 @@ Exclude this layer from exports with ignore_layer="<layer_name>".
 Import a sequence of images as per-frame references for rotoscoping.
 
 Each image is placed on its own frame in a single dimmed, locked layer
-(frames are created as needed). Draw your animation on a layer above, then
-exclude this layer at export with ignore_layer="<layer_name>".
+(frames are created as needed, so `start_frame` may sit past the end). Draw your
+animation on a layer above, then exclude this layer at export with
+ignore_layer="<layer_name>".
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1663,7 +1685,7 @@ appear as slices under `sprite.slices`.
 | `name` | string | yes |  |
 | `icon_size` | integer | no | 16 |
 | `count` | integer | no | 4 |
-| `columns` | integer | null | no | None |
+| `columns` | integer | no | _none_ |
 
 
 ### `create_rpg_item_sheet`
@@ -1678,8 +1700,8 @@ appear as slices (named after each item) under `sprite.slices`.
 | --- | --- | --- | --- |
 | `name` | string | yes |  |
 | `item_size` | integer | no | 16 |
-| `items` | array | null | no | None |
-| `columns` | integer | null | no | None |
+| `items` | array<string> | no | _none_ |
+| `columns` | integer | no | _none_ |
 
 
 ### `create_tileset_project`
@@ -1697,7 +1719,7 @@ names to their tileset indices.
 | `tile_size` | integer | no | 16 |
 | `columns` | integer | no | 4 |
 | `rows` | integer | no | 4 |
-| `tiles` | array | null | no | None |
+| `tiles` | array<object> | no | _none_ |
 
 
 ### `export_game_asset_bundle`
@@ -1717,7 +1739,7 @@ disk as manifest.json inside the bundle).
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `bundle_name` | string | null | no | None |
+| `bundle_name` | string | no | _none_ |
 | `scale` | integer | no | 1 |
 | `overwrite` | boolean | no | False |
 
@@ -1754,7 +1776,7 @@ Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifes
 | `filename` | string | yes |  |
 | `frames_per_direction` | integer | no | 4 |
 | `frame_duration_ms` | integer | no | 120 |
-| `directions` | array | null | no | None |
+| `directions` | array<string> | no | _none_ |
 
 
 ### `validate_sprite_for_game_export`
@@ -1775,17 +1797,17 @@ All criteria are optional; only the ones you pass are enforced. Returns a
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `expected_width` | integer | null | no | None |
-| `expected_height` | integer | null | no | None |
-| `tile_multiple` | integer | null | no | None |
-| `allowed_color_modes` | array | null | no | None |
-| `min_frames` | integer | null | no | None |
-| `max_frames` | integer | null | no | None |
-| `required_tags` | array | null | no | None |
+| `expected_width` | integer | no | _none_ |
+| `expected_height` | integer | no | _none_ |
+| `tile_multiple` | integer | no | _none_ |
+| `allowed_color_modes` | array<string> | no | _none_ |
+| `min_frames` | integer | no | _none_ |
+| `max_frames` | integer | no | _none_ |
+| `required_tags` | array<string> | no | _none_ |
 | `require_transparent_background` | boolean | no | False |
-| `max_palette_size` | integer | null | no | None |
-| `expected_exports` | array | null | no | None |
-| `spritesheet_data` | string | null | no | None |
+| `max_palette_size` | integer | no | _none_ |
+| `expected_exports` | array<string> | no | _none_ |
+| `spritesheet_data` | string | no | _none_ |
 
 
 ## Asset spec (declarative build)
@@ -1832,8 +1854,10 @@ returns the validation report instead.
 Validate an ``aseprite_mcp.asset_spec.v1`` document (does the *spec* make sense?).
 
 Checks the schema, kind, canvas, per-kind fields, palette, layers, animations
-(`frame_count`, not `frames`), slices, and export formats. Returns a
-``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
+(`frame_count`, not `frames`), slices, export formats, and that the work the plan
+would produce fits one build. `name` may already carry a `.aseprite`/`.ase`
+extension: it is normalised, not doubled, so `hero` and `hero.aseprite` name the same
+file. Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
 `{passed, checks, errors, warnings}`. This does **not** check a finished sprite against
 the spec - that's a separate future tool.
 
@@ -1848,19 +1872,43 @@ the spec - that's a separate future tool.
 
 Apply a list of edit operations to a sprite in one atomic, single-process batch.
 
-Each operation is `{"op": "<name>", "args": {...}}`. Supported ops (v1):
-add_layer, rename_layer, set_layer_visible, set_layer_opacity, remove_layer,
-add_frame, duplicate_frame, set_frame_duration, add_tag, remove_tag, set_pixel,
-draw_line, draw_rectangle, fill_rectangle, draw_ellipse, fill_ellipse, fill_layer,
-clear_layer, add_slice, remove_slice, replace_color. Ops run **in order against the
+Each operation is `{"op": "<name>", "args": {...}}`. Ops run **in order against the
 same open sprite**, so later ops see earlier ones (e.g. add a layer then draw on it).
+Arguments not listed for an op are rejected rather than ignored.
 
 Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
 error names the failing op index. `dry_run=True` validates the op list and returns
 the plan **without launching Aseprite** (shape checks only — runtime issues like a
 missing layer surface on a real run).
 
+Frames are 1-based, and an `arg=frame` argument must name a frame that already
+exists: an out-of-range frame is rejected with the sprite's valid range rather than
+clamped, so a per-op `summary` always describes the frames actually touched.
+
 Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
+
+Operations and their arguments ('?' marks an optional argument):
+  add_frame(duration_ms=int?, copy_from=frame?)
+  add_layer(name=str, group=str?, opacity=int?, blend_mode=str?, visible=bool?)
+  add_slice(name=str, x=int, y=int, width=int, height=int, color=color?)
+  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?)  [also accepts from_frame for from, to_frame for to]
+  clear_layer(layer=str?, frame=frame?)
+  draw_ellipse(layer=str?, frame=frame?, cx=int, cy=int, rx=int, ry=int, color=color)
+  draw_line(layer=str?, frame=frame?, x1=int, y1=int, x2=int, y2=int, color=color)
+  draw_rectangle(layer=str?, frame=frame?, x=int, y=int, width=int, height=int, color=color)
+  duplicate_frame(frame=frame)
+  fill_ellipse(layer=str?, frame=frame?, cx=int, cy=int, rx=int, ry=int, color=color)
+  fill_layer(layer=str?, frame=frame?, color=color)
+  fill_rectangle(layer=str?, frame=frame?, x=int, y=int, width=int, height=int, color=color)
+  remove_layer(layer=str)
+  remove_slice(name=str)
+  remove_tag(name=str)
+  rename_layer(layer=str, new_name=str)
+  replace_color(layer=str?, frame=frame?, from=color, to=color, tolerance=int?)  [also accepts from_color for from, to_color for to]
+  set_frame_duration(frame=frame, duration_ms=int)
+  set_layer_opacity(layer=str, opacity=int)
+  set_layer_visible(layer=str, visible=bool)
+  set_pixel(layer=str?, frame=frame?, x=int, y=int, color=color)
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

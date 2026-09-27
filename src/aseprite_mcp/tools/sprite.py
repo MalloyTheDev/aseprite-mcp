@@ -102,7 +102,7 @@ def set_color_mode(filename: str, color_mode: str, dithering: str = "none") -> d
     if mode in ("grayscale", "grey"):
         mode = "gray"
     if mode not in ("rgb", "indexed", "gray"):
-        raise ValueError('color_mode must be "rgb", "indexed", or "gray".')
+        raise ValidationFailed('color_mode must be "rgb", "indexed", or "gray".')
     src = resolve_path(filename)
     args = {"src": lua_path(src), "mode": mode, "dither": dithering}
     body = """
@@ -190,7 +190,7 @@ def scale_sprite(
     """
     src = resolve_path(filename)
     if factor is None and width is None and height is None:
-        raise ValueError("Provide either factor or width/height.")
+        raise ValidationFailed("Provide either factor or width/height.")
     if factor is not None:
         factor = float(factor)
         if factor != factor or factor <= 0 or factor == float("inf"):

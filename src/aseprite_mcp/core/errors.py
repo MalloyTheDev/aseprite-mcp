@@ -12,6 +12,8 @@ checks keep working for every error type below.
 
 from __future__ import annotations
 
+import re
+
 
 class AsepriteMCPError(RuntimeError):
     """Base error for all aseprite-mcp failures."""
@@ -75,3 +77,35 @@ class UnknownArgumentError(AsepriteMCPError):
     runs with its defaults and reports success. With 117 tools and 125 parameter names used
     by exactly one tool each, that is a large surface to guess at with no feedback.
     """
+
+
+# --------------------------------------------------------------------------- #
+# Message hygiene                                                             #
+# --------------------------------------------------------------------------- #
+# A Lua `error("msg")` raised without level 0 is prefixed by the interpreter with the
+# script's own location, and the script is a temp file this server wrote:
+#     C:\Users\me\AppData\Local\Temp\asemcp_vqwcklpp.lua:264: No layer named 'ghost'
+# The line number refers to a file that has already been deleted, and the directory is
+# a host path the caller has no business seeing. The message after it is the useful
+# part, so strip the prefix and keep the text.
+#
+# Scoped to this server's own `asemcp_*.lua` temp scripts on purpose: a path that some
+# other part of the message legitimately mentions (a sprite, an export target) must
+# survive.
+_SCRIPT_LOCATION = re.compile(
+    r"""(?:[A-Za-z]:[\\/]|[\\/])?   # optional drive letter, or a POSIX root
+        (?:[^\n:]*[\\/])?           # optional directory part (may contain spaces)
+        asemcp_[A-Za-z0-9_]+\.lua
+        :\d+:[ \t]*                 # ":<line>: "
+    """,
+    re.VERBOSE,
+)
+
+
+def strip_script_location(message: str) -> str:
+    """Remove `<temp script>.lua:<line>:` prefixes from a Lua error message.
+
+    Every occurrence is removed, not just a leading one, because the batch runner
+    embeds one op's error inside its own summary line.
+    """
+    return _SCRIPT_LOCATION.sub("", str(message)).strip()

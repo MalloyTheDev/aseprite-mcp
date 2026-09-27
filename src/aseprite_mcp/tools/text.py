@@ -132,7 +132,7 @@ def draw_text(
 
     coords, w, h = _render_text_pixels(text, scale, font, max(0, int(spacing)), int(threshold))
     if not coords:
-        raise ValueError("Text rendered no pixels (empty string or threshold too high).")
+        raise ValidationFailed("Text rendered no pixels (empty string or threshold too high).")
     check_list_length(
         "text pixels", coords, MAX_TEXT_PIXELS,
         remedy="Reduce scale/font_size or shorten the text.",

@@ -7,7 +7,8 @@ same workspace rules as everything else.
 from __future__ import annotations
 
 from ..app import mcp
-from ..core.errors import ExportError
+from ..core.errors import ExportError, ValidationFailed
+from ..core.models import FRAME_GUARD_LUA
 from ..core.paths import ensure_output_path, ensure_output_pattern
 from ..core.runner import run_cli, run_lua
 from .common import lua_path, resolve_path
@@ -178,7 +179,7 @@ def export_spritesheet(
             data_output is given, both files are checked before anything is written.
     """
     if sheet_type not in _SHEET_TYPES:
-        raise ValueError(f"sheet_type must be one of {sorted(_SHEET_TYPES)}")
+        raise ValidationFailed(f"sheet_type must be one of {sorted(_SHEET_TYPES)}")
     src = resolve_path(filename)
     # Validate every target up front so a multi-file export fails before writing any file.
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
@@ -263,7 +264,7 @@ def export_layers(
     file matching the pattern already exists.
     """
     if "{layer}" not in output_pattern:
-        raise ValueError('output_pattern must contain "{layer}".')
+        raise ValidationFailed('output_pattern must contain "{layer}".')
     src = resolve_path(filename)
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     cli = [str(src), "--split-layers", "--scale", str(max(1, int(scale)))]
@@ -286,7 +287,7 @@ def export_tags(
     overwrite: Replace files the pattern would expand onto (default False = no-clobber).
     """
     if "{tag}" not in output_pattern:
-        raise ValueError('output_pattern must contain "{tag}".')
+        raise ValidationFailed('output_pattern must contain "{tag}".')
     src = resolve_path(filename)
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     run_cli([
@@ -327,9 +328,9 @@ def export_onion_skin(
         "ghost_opacity": max(0, min(255, int(ghost_opacity))),
         "scale": max(1, int(scale)),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
-    local cur = clamp_frame(spr, ARG.frame)
+    local cur = require_frame(spr, ARG.frame, "frame")
     local W, H = spr.width, spr.height
     local out = Image(ImageSpec{ width = W, height = H, colorMode = ColorMode.RGB })
     out:clear()
@@ -373,7 +374,7 @@ def export_frames(
     overwrite: Replace files the pattern would expand onto (default False = no-clobber).
     """
     if "{frame}" not in output_pattern:
-        raise ValueError('output_pattern must contain "{frame}", e.g. "out_{frame}.png".')
+        raise ValidationFailed('output_pattern must contain "{frame}", e.g. "out_{frame}.png".')
     src = resolve_path(filename)
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     run_cli([str(src), "--scale", str(max(1, int(scale))), "--save-as", str(out)])

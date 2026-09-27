@@ -10,6 +10,9 @@ every Aseprite version.
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
+from ..core.limits import MAX_OUTLINE_THICKNESS, check_count, check_region_size
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 from .drawing import _draw
@@ -43,11 +46,12 @@ def fill_gradient(
         x, y, width, height: Region (defaults to the whole canvas).
     """
     if gradient_type not in _GRAD_TYPES:
-        raise ValueError(f"gradient_type must be one of {sorted(_GRAD_TYPES)}")
+        raise ValidationFailed(f"gradient_type must be one of {sorted(_GRAD_TYPES)}")
     if len(colors) < 2:
-        raise ValueError("Provide at least 2 colour stops.")
+        raise ValidationFailed("Provide at least 2 colour stops.")
     if dither and len(colors) != 2:
-        raise ValueError("Dithered gradients require exactly 2 colours.")
+        raise ValidationFailed("Dithered gradients require exactly 2 colours.")
+    check_region_size(width, height, field="gradient region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
@@ -132,14 +136,18 @@ def add_outline(
             (recolour the shape's border pixels).
     """
     if connectivity not in (4, 8):
-        raise ValueError("connectivity must be 4 or 8")
+        raise ValidationFailed("connectivity must be 4 or 8")
     if where not in ("outside", "inside"):
-        raise ValueError('where must be "outside" or "inside"')
+        raise ValidationFailed('where must be "outside" or "inside"')
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
         "color": parse_color(color),
-        "thickness": max(1, int(thickness)),
+        "thickness": check_count(
+            "thickness", max(1, int(thickness)), MAX_OUTLINE_THICKNESS, minimum=1,
+            remedy="Each pixel of thickness is another full-canvas pass; outline in "
+                   "several calls if you really need more.",
+        ),
         "connectivity": connectivity,
         "where": where,
     }
@@ -201,11 +209,11 @@ def add_drop_shadow(
         "color": parse_color(color),
         "opacity": max(0, min(255, int(opacity))),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local target = find_layer(spr, ARG.layer)
     if target.isGroup then error("Cannot shadow a group layer: " .. target.name) end
-    local framenum = clamp_frame(spr, ARG.frame)
+    local framenum = require_frame(spr, ARG.frame, "frame")
     local src = get_draw_image(spr, target, framenum)
     local shadow = Image(spr.spec); shadow:clear()
     local sc = to_pixel(spr, ARG.color)
@@ -404,6 +412,7 @@ def fill_checkerboard(
     frame: int = 1,
 ) -> dict:
     """Fill a region with a 2-colour checkerboard of `size`-pixel squares."""
+    check_region_size(width, height, field="checkerboard region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),

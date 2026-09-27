@@ -1,11 +1,16 @@
 """Cel-level operations: inspect, reposition, opacity, copy between frames, delete.
 
 A *cel* is the image of one layer at one frame. Frames and layers are 1-based.
+
+Every `frame` argument here must name a frame that already exists: an out-of-range
+number is rejected with the sprite's valid range rather than clamped into it, so the
+frame reported back is always the frame acted on.
 """
 
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
@@ -13,11 +18,11 @@ from .common import lua_path, resolve_path
 @mcp.tool()
 def get_cel(filename: str, layer: str, frame: int = 1) -> dict:
     """Inspect a cel: whether it exists, its position, bounds, and opacity."""
-    args = {"src": lua_path(resolve_path(filename)), "layer": layer, "frame": int(frame)}
-    body = """
+    args = {"src": lua_path(resolve_path(filename)), "layer": layer, "frame": FrameRef.arg("frame", frame)}
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
-    local n = clamp_frame(spr, ARG.frame)
+    local n = require_frame(spr, ARG.frame, "frame")
     local cel = layer:cel(n)
     if cel == nil then
       RESULT = { exists = false, layer = layer.name, frame = n }
@@ -39,14 +44,14 @@ def set_cel_position(filename: str, layer: str, frame: int, x: int, y: int) -> d
     """Move a cel's image to position (x, y) within the canvas."""
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame), "x": int(x), "y": int(y),
+        "layer": layer, "frame": FrameRef.arg("frame", frame), "x": int(x), "y": int(y),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
-    local n = clamp_frame(spr, ARG.frame)
+    local n = require_frame(spr, ARG.frame, "frame")
     local cel = layer:cel(n)
-    if cel == nil then error("No cel on layer '" .. layer.name .. "' at frame " .. n) end
+    if cel == nil then error("No cel on layer '" .. layer.name .. "' at frame " .. n, 0) end
     cel.position = Point(ARG.x, ARG.y)
     save_sprite(spr)
     RESULT = { ok = true, layer = layer.name, frame = n,
@@ -60,15 +65,15 @@ def set_cel_opacity(filename: str, layer: str, frame: int, opacity: int) -> dict
     """Set a cel's opacity (0-255)."""
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame),
+        "layer": layer, "frame": FrameRef.arg("frame", frame),
         "opacity": max(0, min(255, int(opacity))),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
-    local n = clamp_frame(spr, ARG.frame)
+    local n = require_frame(spr, ARG.frame, "frame")
     local cel = layer:cel(n)
-    if cel == nil then error("No cel on layer '" .. layer.name .. "' at frame " .. n) end
+    if cel == nil then error("No cel on layer '" .. layer.name .. "' at frame " .. n, 0) end
     cel.opacity = ARG.opacity
     save_sprite(spr)
     RESULT = { ok = true, layer = layer.name, frame = n, opacity = cel.opacity }
@@ -81,15 +86,16 @@ def copy_cel(filename: str, layer: str, from_frame: int, to_frame: int) -> dict:
     """Copy a cel's image (and position) from one frame to another on the same layer."""
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "from": int(from_frame), "to": int(to_frame),
+        "layer": layer, "from": FrameRef.arg("from_frame", from_frame),
+        "to": FrameRef.arg("to_frame", to_frame),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
-    local a = clamp_frame(spr, ARG["from"])
-    local b = clamp_frame(spr, ARG.to)
+    local a = require_frame(spr, ARG["from"], "from_frame")
+    local b = require_frame(spr, ARG.to, "to_frame")
     local src_cel = layer:cel(a)
-    if src_cel == nil then error("No cel to copy on layer '" .. layer.name .. "' at frame " .. a) end
+    if src_cel == nil then error("No cel to copy on layer '" .. layer.name .. "' at frame " .. a, 0) end
     local img = Image(src_cel.image)
     local dst = layer:cel(b)
     if dst ~= nil then
@@ -107,11 +113,11 @@ def copy_cel(filename: str, layer: str, from_frame: int, to_frame: int) -> dict:
 @mcp.tool()
 def delete_cel(filename: str, layer: str, frame: int) -> dict:
     """Delete a cel (the layer becomes empty at that frame)."""
-    args = {"src": lua_path(resolve_path(filename)), "layer": layer, "frame": int(frame)}
-    body = """
+    args = {"src": lua_path(resolve_path(filename)), "layer": layer, "frame": FrameRef.arg("frame", frame)}
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
-    local n = clamp_frame(spr, ARG.frame)
+    local n = require_frame(spr, ARG.frame, "frame")
     local cel = layer:cel(n)
     if cel ~= nil then spr:deleteCel(cel) end
     save_sprite(spr)

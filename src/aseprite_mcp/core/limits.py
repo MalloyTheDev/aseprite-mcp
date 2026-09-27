@@ -6,12 +6,16 @@ There is intentionally **no environment/config override**: raise the relevant co
 (and document it) only if real demand appears. Exceeding a limit raises ``ValidationFailed``
 with the field name, the received size, the cap, and how to recover.
 
-Two families live here:
+Three families live here:
 
 * **Collection limits**: how many items a single call may carry (``check_list_length``).
 * **Geometry limits**: how big a canvas a single call may ask Aseprite to allocate
   (``check_canvas_size``). A dimension alone is a weak guard: 65535x65535 is within any
   per-axis bound yet is ~17 GB of RGBA pixels, so the *area* is capped too.
+* **Scalar limits**: how large a loop bound, repetition count or index a single call may
+  set (``check_count``). A scalar is as expensive as a list of the same length: it *is*
+  the bound the generated Lua loop runs to, so one integer buys the same work as 1e9
+  list items without carrying them over the wire.
 """
 
 from __future__ import annotations
@@ -27,8 +31,62 @@ MAX_BATCH_OPERATIONS = 500
 MAX_PIXEL_LIST_LENGTH = 65_536
 # Maximum number of tile placements in one set_tiles call.
 MAX_TILE_LIST_LENGTH = 65_536
-# Maximum number of palette colours in one set_palette call (indexed-palette ceiling).
+# Maximum number of palette colours in one call (indexed-palette ceiling). This is the
+# palette ceiling for *every* route to a palette, not just the one tool that takes a
+# list: `resize_palette(size)` and `set_palette_color(index)` reach the same palette
+# through a single integer, so they are bounded by the same number.
 MAX_COLOR_LIST_LENGTH = 256
+
+# --- Scalars that multiply into work --------------------------------------- #
+# A brush is a stamp, not an image. 65,536 cells is a 256x256 stamp: far larger than
+# anything anyone writes out as rows of characters, and already the whole pixel budget
+# of a 256x256 sprite. Bigger belongs in stamp_pattern or draw_image_base64. The same
+# number bounds the row count, since a 1-cell-wide brush of N rows is N cells.
+MAX_BRUSH_CELLS = 65_536
+# Maximum cell plots one draw_brush may perform: filled cells times stamp points. The
+# two list caps do not bound this product, and the product is the work. Generous by
+# construction: a 16x16 brush over 65,536 points, or a 64x64 brush over 4,096 points.
+MAX_BRUSH_PLOTS = 16_777_216
+# Maximum outline width in pixels. Each unit of thickness is a full-canvas scan times
+# 8 neighbours, so thickness is a repeat count, not a size. A chunky pixel-art outline
+# is 1-3px; 64 is wider than any sprite this server draws is likely to be tall.
+MAX_OUTLINE_THICKNESS = 64
+# Maximum sample steps for one quadratic Bezier. Steps beyond the curve's own length in
+# pixels add nothing visible, and the longest on-canvas curve is ~23,000px end to end;
+# 4,096 is smooth for any curve that fits in a sprite (the default is 32).
+MAX_CURVE_STEPS = 4_096
+
+# --- Workflow scaffolding -------------------------------------------------- #
+# These bound the most expensive calls in the server: one integer asks for frames, and
+# each frame used to cost two Aseprite launches.
+# 8 is the classic direction set and 16 is as fine-grained as directional sprite sheets
+# get drawn; 32 is double the finest.
+MAX_WALK_DIRECTIONS = 32
+# A hand-drawn walk cycle is 4-12 frames; 32 covers the most detailed run cycle. With
+# the direction cap this bounds a template at 1,024 frames.
+MAX_FRAMES_PER_DIRECTION = 32
+# Maximum cells in a scaffolded grid sheet (icon set / item sheet / tileset starter).
+# Each cell is a placeholder plus a named slice, so cells cost launches. 1,024 cells is
+# a 32x32 grid: a larger atlas than any of these scaffolds is meant to start.
+MAX_GRID_CELLS = 1_024
+
+# --- Declarative asset specs ----------------------------------------------- #
+# The spec layer amplifies harder than any tool: one integer becomes two batch operations
+# per frame, and one list entry becomes a whole Aseprite launch at build time. Uncapped,
+# `frame_count: 200000` planned 400,000 operations in a third of a second and returned
+# every one of them inside the manifest, so the dry run that exists to be a cheap
+# pre-flight was neither cheap nor safe to point at an untrusted document.
+#
+# The frame caps sit well under MAX_BATCH_OPERATIONS (two operations per frame) so a spec
+# inside them normally fits one structural batch; the planner still checks the aggregate,
+# because per-field caps do not bound the sum.
+MAX_SPEC_ANIMATION_FRAMES = 120
+MAX_SPEC_TOTAL_FRAMES = 240
+MAX_SPEC_LAYERS = 64
+# Slices and exports each cost a separate Aseprite launch rather than one batch operation,
+# so a long list costs process launches, not memory.
+MAX_SPEC_SLICES = 256
+MAX_SPEC_EXPORTS = 32
 
 # --- Geometry -------------------------------------------------------------- #
 # Maximum length of either canvas axis. Aseprite's own file format tops out at
@@ -85,6 +143,35 @@ def check_list_length(
         )
 
 
+def check_count(
+    field: str,
+    value: int,
+    maximum: int,
+    *,
+    minimum: int = 0,
+    remedy: str = "Use a smaller value.",
+) -> int:
+    """Validate a scalar count and return it as an int.
+
+    The scalar counterpart of :func:`check_list_length`, with the same message shape
+    (field, received value, cap, how to recover), e.g.
+    ``thickness is 4096; maximum is 64. Outline in several calls if you need more.``
+    A loop bound or repetition count costs whatever a list of that length would, so it
+    is checked the same way.
+    """
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise ValidationFailed(
+            f"{field} must be a whole number, got {value!r}."
+        ) from None
+    if n < minimum:
+        raise ValidationFailed(f"{field} is {n}; minimum is {minimum}.")
+    if n > maximum:
+        raise ValidationFailed(f"{field} is {n}; maximum is {maximum}. {remedy}")
+    return n
+
+
 def check_size_bytes(
     field: str,
     size: int,
@@ -135,3 +222,27 @@ def check_canvas_size(
             f"(e.g. 4096x4096). Reduce the canvas, or split the work across sprites."
         )
     return w, h
+
+
+def check_region_size(
+    width: int | None,
+    height: int | None,
+    *,
+    field: str = "region",
+) -> None:
+    """Validate an optional fill region, where ``None`` on an axis means "to the edge".
+
+    A region is a canvas-shaped quantity and is bounded like one. The generated fill
+    loops read ``for yy = ry, ry + rh - 1`` with only an inner on-canvas skip, so an
+    oversized region iterates in full even when every pixel is off-canvas and nothing
+    is drawn: ``width=1e9`` is 1e9 iterations on a 16x16 sprite. When one axis is
+    omitted the canvas supplies it at run time and is already bounded, so only the
+    given axis is checked.
+    """
+    remedy = "Fill a smaller region, or leave width/height unset for the whole canvas."
+    if width is not None and height is not None:
+        check_canvas_size(width, height, field=field)
+    elif width is not None:
+        check_count(f"{field} width", width, MAX_CANVAS_DIMENSION, minimum=1, remedy=remedy)
+    elif height is not None:
+        check_count(f"{field} height", height, MAX_CANVAS_DIMENSION, minimum=1, remedy=remedy)

@@ -8,6 +8,8 @@ a normal, dimmed, locked layer instead. Exclude it at export time with
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
+from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
@@ -31,6 +33,8 @@ def add_reference_layer(
         opacity: Layer opacity (0-255); dim it so your art stands out.
         scale_to_fit: Resize the reference to the canvas size (smooth).
         x, y: Placement when not scaling to fit.
+        frame: Which existing frame to place the reference on (1-based). An
+            out-of-range frame is rejected with the sprite's valid range.
 
     Exclude this layer from exports with ignore_layer="<layer_name>".
     """
@@ -40,12 +44,12 @@ def add_reference_layer(
         "layer_name": layer_name,
         "opacity": max(0, min(255, int(opacity))),
         "scale_to_fit": bool(scale_to_fit),
-        "x": int(x), "y": int(y), "frame": int(frame),
+        "x": int(x), "y": int(y), "frame": FrameRef.arg("frame", frame),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local source = app.open(ARG.image)
-    if source == nil then error("Could not open reference image: " .. ARG.image) end
+    if source == nil then error("Could not open reference image: " .. ARG.image, 0) end
     if ARG.scale_to_fit then
       app.sprite = source
       app.command.SpriteSize{ ui = false, width = spr.width, height = spr.height, method = "bilinear" }
@@ -56,7 +60,7 @@ def add_reference_layer(
     local layer = spr:newLayer()
     layer.name = ARG.layer_name
     layer.opacity = ARG.opacity
-    local framenum = clamp_frame(spr, ARG.frame)
+    local framenum = require_frame(spr, ARG.frame, "frame")
     spr:newCel(layer, framenum, simg, Point(ARG.x, ARG.y))
     layer.isEditable = false
     save_sprite(spr)
@@ -77,11 +81,12 @@ def import_reference_sequence(
     """Import a sequence of images as per-frame references for rotoscoping.
 
     Each image is placed on its own frame in a single dimmed, locked layer
-    (frames are created as needed). Draw your animation on a layer above, then
-    exclude this layer at export with ignore_layer="<layer_name>".
+    (frames are created as needed, so `start_frame` may sit past the end). Draw your
+    animation on a layer above, then exclude this layer at export with
+    ignore_layer="<layer_name>".
     """
     if not images:
-        raise ValueError("images must be a non-empty list.")
+        raise ValidationFailed("images must be a non-empty list.")
     paths = [lua_path(resolve_path(p)) for p in images]
     args = {
         "src": lua_path(resolve_path(filename)),
@@ -89,7 +94,7 @@ def import_reference_sequence(
         "layer_name": layer_name,
         "opacity": max(0, min(255, int(opacity))),
         "scale_to_fit": bool(scale_to_fit),
-        "start_frame": max(1, int(start_frame)),
+        "start_frame": FrameRef.arg("start_frame", start_frame),
     }
     body = """
     local spr = open_sprite(ARG.src)
@@ -100,7 +105,7 @@ def import_reference_sequence(
     while #spr.frames < needed do spr:newEmptyFrame(#spr.frames + 1) end
     for i, path in ipairs(ARG.images) do
       local source = app.open(path)
-      if source == nil then error("Could not open image: " .. path) end
+      if source == nil then error("Could not open image: " .. path, 0) end
       if ARG.scale_to_fit then
         app.sprite = source
         app.command.SpriteSize{ ui = false, width = spr.width, height = spr.height, method = "bilinear" }

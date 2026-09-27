@@ -370,13 +370,6 @@ local function find_layer(spr, ref)
   return lyr
 end
 
-local function clamp_frame(spr, n)
-  n = math.floor(tonumber(n) or 1)
-  if n < 1 then n = 1 end
-  if n > #spr.frames then n = #spr.frames end
-  return n
-end
-
 -- ===== drawing primitives (operate on an Image, sprite-space coords) ======
 local function img_set(img, x, y, px)
   if x >= 0 and y >= 0 and x < img.width and y < img.height then
