@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from ..app import mcp
-from ..core.limits import MAX_COLOR_LIST_LENGTH, check_list_length
+from ..core.errors import ValidationFailed
+from ..core.limits import MAX_COLOR_LIST_LENGTH, check_count, check_list_length
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -28,7 +29,7 @@ def set_palette(filename: str, colors: list[str]) -> dict:
     colors: list of colour strings, e.g. ["#000000", "#ffffff", "255,0,0"].
     """
     if not colors:
-        raise ValueError("colors must be a non-empty list.")
+        raise ValidationFailed("colors must be a non-empty list.")
     check_list_length("colors", colors, MAX_COLOR_LIST_LENGTH)
     parsed = [parse_color(c) for c in colors]
     args = {"src": lua_path(resolve_path(filename)), "colors": parsed}
@@ -45,7 +46,15 @@ def set_palette(filename: str, colors: list[str]) -> dict:
 
 @mcp.tool()
 def set_palette_color(filename: str, index: int, color: str) -> dict:
-    """Set a single palette entry by index (0-based). Grows the palette if needed."""
+    """Set a single palette entry by index (0-based). Grows the palette if needed.
+
+    The index is bounded by the palette ceiling: the Lua below resizes the palette to
+    `index + 1`, so the index *is* a palette size.
+    """
+    check_count(
+        "index", index, MAX_COLOR_LIST_LENGTH - 1, minimum=0,
+        remedy=f"A palette holds at most {MAX_COLOR_LIST_LENGTH} colours.",
+    )
     args = {
         "src": lua_path(resolve_path(filename)),
         "index": int(index),
@@ -81,7 +90,12 @@ def add_palette_color(filename: str, color: str) -> dict:
 @mcp.tool()
 def resize_palette(filename: str, size: int) -> dict:
     """Resize the palette to `size` entries (new entries are black)."""
-    args = {"src": lua_path(resolve_path(filename)), "size": max(1, int(size))}
+    size = max(1, int(size))
+    check_count(
+        "size", size, MAX_COLOR_LIST_LENGTH, minimum=1,
+        remedy=f"A palette holds at most {MAX_COLOR_LIST_LENGTH} colours.",
+    )
+    args = {"src": lua_path(resolve_path(filename)), "size": size}
     body = """
     local spr = open_sprite(ARG.src)
     spr.palettes[1]:resize(ARG.size)
@@ -134,6 +148,15 @@ def extract_palette(
         "include_alpha": bool(include_alpha),
         "max_colors": max(1, int(max_colors)),
     }
+    # Scanning may report more colours than a palette can hold (that is a useful
+    # answer), but the moment the result is written back as a palette it is a palette
+    # size and takes the palette ceiling like every other route to one.
+    if args["set_as_palette"]:
+        check_count(
+            "max_colors", args["max_colors"], MAX_COLOR_LIST_LENGTH, minimum=1,
+            remedy=f"A palette holds at most {MAX_COLOR_LIST_LENGTH} colours; pass "
+                   "set_as_palette=false to just count the colours in an image.",
+        )
     body = """
     local scanpath = ARG.from_image or ARG.target
     local spr = open_sprite(scanpath)
@@ -179,7 +202,7 @@ def sort_palette(filename: str, by: str = "luminance", reverse: bool = False) ->
     For indexed sprites the pixel indices are remapped so the image looks identical.
     """
     if by not in ("hue", "luminance", "saturation", "value"):
-        raise ValueError('by must be one of: hue, luminance, saturation, value')
+        raise ValidationFailed('by must be one of: hue, luminance, saturation, value')
     args = {"src": lua_path(resolve_path(filename)), "by": by, "reverse": bool(reverse)}
     body = """
     local spr = open_sprite(ARG.src)
@@ -263,6 +286,12 @@ def generate_ramp(
     import colorsys
 
     steps = max(2, int(steps))
+    # A ramp longer than a palette is not a ramp, and every step is materialized in
+    # Python before anything is launched, so this one is spent locally either way.
+    check_count(
+        "steps", steps, MAX_COLOR_LIST_LENGTH, minimum=2,
+        remedy=f"A ramp of more than {MAX_COLOR_LIST_LENGTH} shades exceeds a palette.",
+    )
     base = parse_color(base_color)
     r, g, b = base["r"] / 255, base["g"] / 255, base["b"] / 255
     h, lum, sat = colorsys.rgb_to_hls(r, g, b)
@@ -278,9 +307,9 @@ def generate_ramp(
     result = {"steps": steps, "colors": colors}
     if apply != "none":
         if apply not in ("append", "replace"):
-            raise ValueError('apply must be "none", "append", or "replace"')
+            raise ValidationFailed('apply must be "none", "append", or "replace"')
         if not filename:
-            raise ValueError("filename is required when apply is not 'none'.")
+            raise ValidationFailed("filename is required when apply is not 'none'.")
         parsed = [parse_color(c) for c in colors]
         args = {
             "src": lua_path(resolve_path(filename)),

@@ -4,6 +4,7 @@ import threading
 
 import pytest
 
+from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.runner import AsepriteError
 from aseprite_mcp.tools import (
     brushes,
@@ -51,8 +52,31 @@ def test_stamp_pattern_negative_spacing_does_not_hang():
 
 def test_set_color_mode_validates_input():
     sprite.create_sprite("r/cm.aseprite", 8, 8, "rgb")
-    with pytest.raises(ValueError, match="color_mode"):
+    # ValidationFailed, not bare ValueError: argument rejection belongs to the typed
+    # hierarchy so `except AsepriteError` catches it. Kept as a raises() on the typed
+    # class rather than loosened, since the point is that the type is now specific.
+    with pytest.raises(ValidationFailed, match="color_mode"):
         sprite.set_color_mode("r/cm.aseprite", "rgba")  # not a real mode
+
+
+def test_an_out_of_range_frame_is_rejected_rather_than_clamped():
+    """Drawing and reading tools used to fold a bad frame into range and report success.
+
+    `clamp_frame` turned frame=999 on a one-frame sprite into frame 1, drew there, and
+    returned ok, so a caller was told it had edited a frame that does not exist. The
+    prelude no longer offers a clamping helper at all, so this cannot regress by a new
+    tool picking the wrong one.
+    """
+    name = "r/frame_guard.aseprite"
+    sprite.create_sprite(name, 16, 16)
+
+    with pytest.raises(AsepriteError, match="does not exist"):
+        drawing.draw_line(name, 0, 0, 5, 5, "#ff0000", frame=999)
+    with pytest.raises(AsepriteError, match="does not exist"):
+        inspect.get_pixels(name, 0, 0, 4, 4, frame=999)
+
+    # The guard must not refuse a frame that does exist.
+    assert drawing.draw_line(name, 0, 0, 5, 5, "#00ff00", frame=1)
 
 
 def test_replace_color_accepts_index_spec():

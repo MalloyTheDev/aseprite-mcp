@@ -151,6 +151,14 @@ is not strictly required — but setting it explicitly is the most reliable.
 
 ## Register with an MCP client
 
+**Using something other than Claude?** [`docs/CLIENTS.md`](docs/CLIENTS.md) has a
+copy-paste config block per client format (Codex CLI's TOML, Continue's `config.yaml`,
+Zed's `context_servers`, Goose's `extensions`, and the `mcpServers` JSON that Claude
+Desktop, Cursor, Cline, Roo Code, Windsurf and LM Studio share), the config file path for
+each one, the launch form that avoids the Windows venv lock, and the strict-mode notes for
+OpenAI or Grok style function-calling bridges. The two quick starts below cover the common
+case.
+
 Replace `/ABSOLUTE/PATH/TO/aseprite-mcp` below with the absolute path to your clone.
 
 ### Claude Code (CLI)
@@ -188,8 +196,11 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 117 tools will be available. Ask the
-agent to run `health_check` to confirm Aseprite is wired up correctly.
+Restart the client; the `aseprite` server and its full tool set will be available (the
+current count is at the top of [`docs/TOOLS.md`](docs/TOOLS.md)). Ask the agent to run
+`health_check` to confirm Aseprite is wired up correctly, and see
+[`docs/CLIENTS.md`](docs/CLIENTS.md#4-verify-it-works) for what the answer should look
+like.
 
 ---
 
@@ -550,6 +561,11 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
   it usually names the bad argument (e.g. a missing layer/frame).
 - **Tests all skip.** That's expected when Aseprite isn't installed/found; set
   `ASEPRITE_PATH` to run them for real.
+
+Client-side problems (sprites landing in a venv directory, a text-only model that cannot
+see `render_preview`, the Windows lock on `.venv\Scripts\aseprite-mcp.exe` that blocks
+`uv sync`, a server that never appears) are covered in
+[`docs/CLIENTS.md`](docs/CLIENTS.md#5-troubleshooting).
 
 ## Development
 

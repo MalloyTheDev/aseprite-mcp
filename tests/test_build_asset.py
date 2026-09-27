@@ -1,10 +1,11 @@
-"""Integration tests for build_asset_from_spec — require Aseprite (--run-aseprite)."""
+"""Integration tests for build_asset_from_spec: require Aseprite (--run-aseprite)."""
 
 import json
 from pathlib import Path
 
 import pytest
 
+from aseprite_mcp.core import config as core_config
 from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.tools import asset_spec, inspect
 
@@ -60,3 +61,37 @@ def test_build_icon_set_makes_named_slices():
 def test_build_rejects_invalid_spec_without_launching():
     with pytest.raises(ValidationFailed, match="Invalid asset spec"):
         asset_spec.build_asset_from_spec({"name": "w/bad", "kind": "character"})  # no canvas
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("w/ext_plain", "ext_plain.aseprite"),
+    ("w/ext_double.aseprite", "ext_double.aseprite"),
+    ("w/ext_short.ase", "ext_short.ase"),
+])
+def test_build_targets_one_file_whatever_the_name_carries(name, expected):
+    """A `name` that already ends in the extension used to create one file and then edit
+    another: the scaffold wrote `hero.aseprite`, every later step targeted
+    `hero.aseprite.aseprite`, and the build died on a missing sprite with the first file
+    already on disk and no manifest to say so.
+    """
+    spec = {"name": name, "kind": "character", "canvas": {"width": 8, "height": 8},
+            "animations": [{"name": "idle", "frame_count": 2, "duration_ms": 120}]}
+    m = asset_spec.build_asset_from_spec(spec)
+
+    source = Path(next(f["path"] for f in m["created_files"] if f["role"] == "source_sprite"))
+    assert source.name == expected
+    assert source.is_file()
+    # The doubled-extension twin is the file the broken plan aimed at; nothing may create it.
+    assert not source.with_name(expected + ".aseprite").exists()
+    assert m["sprite"]["frames"] == 2                      # the frames landed in *this* file
+    assert {t["name"] for t in m["sprite"]["tags"]} == {"idle"}
+
+
+def test_build_refuses_an_over_cap_spec_before_creating_the_sprite():
+    """Pre-flight: the batch cap is checked against the plan, not discovered mid-build."""
+    spec = {"name": "w/over_cap_build", "kind": "character",
+            "canvas": {"width": 8, "height": 8},
+            "animations": [{"name": "idle", "frame_count": 400}]}
+    with pytest.raises(ValidationFailed, match="structural operations"):
+        asset_spec.build_asset_from_spec(spec)
+    assert not core_config.resolve("w/over_cap_build.aseprite").exists()

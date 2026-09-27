@@ -3,6 +3,16 @@
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
+from ..core.limits import (
+    MAX_BRUSH_CELLS,
+    MAX_BRUSH_PLOTS,
+    MAX_PIXEL_LIST_LENGTH,
+    check_count,
+    check_list_length,
+    check_region_size,
+)
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 from .drawing import _draw
@@ -28,7 +38,11 @@ def draw_brush(
         anchor: "center" (default) or "topleft" — where each point sits in the brush.
     """
     if not brush or not points:
-        raise ValueError("brush and points must be non-empty.")
+        raise ValidationFailed("brush and points must be non-empty.")
+    # Three quantities, because capping the two lists does not cap the work: the brush
+    # is stamped once per point, so the plots are the product.
+    check_list_length("brush", brush, MAX_BRUSH_CELLS, remedy="Use a smaller brush.")
+    check_list_length("points", points, MAX_PIXEL_LIST_LENGTH)
     h = len(brush)
     w = max(len(r) for r in brush)
     cells = []
@@ -37,7 +51,15 @@ def draw_brush(
             if ch not in (" ", ".", "0"):
                 cells.append((cx, ry))
     if not cells:
-        raise ValueError("Brush has no filled cells.")
+        raise ValidationFailed("Brush has no filled cells.")
+    check_count(
+        "brush cells", len(cells), MAX_BRUSH_CELLS,
+        remedy="Use a smaller brush, or stamp an image with stamp_pattern.",
+    )
+    check_count(
+        "brush cells x points", len(cells) * len(points), MAX_BRUSH_PLOTS,
+        remedy="Stamp fewer points, or use a smaller brush.",
+    )
     ax = (w // 2) if anchor == "center" else 0
     ay = (h // 2) if anchor == "center" else 0
     offsets = [[cx - ax, ry - ay] for cx, ry in cells]
@@ -82,6 +104,7 @@ def stamp_pattern(
         spacing_x, spacing_y: Gap between tiles.
         opacity, blend_mode: Compositing of each tile.
     """
+    check_region_size(width, height, field="pattern region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "source": lua_path(resolve_path(source)),
@@ -91,11 +114,11 @@ def stamp_pattern(
         "opacity": max(0, min(255, int(opacity))),
         "blend_mode": blend_mode,
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
     if layer.isGroup then error("Cannot stamp onto a group layer: " .. layer.name) end
-    local framenum = clamp_frame(spr, ARG.frame)
+    local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
 
     local source = app.open(ARG.source)
@@ -144,9 +167,9 @@ def mirror_layer(
         axis: mirror line position (x for horizontal, y for vertical); default = centre.
     """
     if direction not in ("horizontal", "vertical"):
-        raise ValueError('direction must be "horizontal" or "vertical"')
+        raise ValidationFailed('direction must be "horizontal" or "vertical"')
     if source_side not in ("first", "second"):
-        raise ValueError('source_side must be "first" or "second"')
+        raise ValidationFailed('source_side must be "first" or "second"')
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
@@ -195,9 +218,12 @@ def draw_symmetric_pixels(
     or "both" (4-way radial symmetry). Axes default to the canvas centre.
     """
     if mode not in ("horizontal", "vertical", "both"):
-        raise ValueError('mode must be "horizontal", "vertical", or "both"')
+        raise ValidationFailed('mode must be "horizontal", "vertical", or "both"')
     if not pixels:
-        raise ValueError("pixels must be non-empty.")
+        raise ValidationFailed("pixels must be non-empty.")
+    # Same cap as draw_pixels: the mirroring is a constant factor (up to 4 plots each)
+    # on top of the same list, so the list is what needs bounding.
+    check_list_length("pixels", pixels, MAX_PIXEL_LIST_LENGTH)
     pts = [[int(p["x"]), int(p["y"])] for p in pixels]
     args = {
         "src": lua_path(resolve_path(filename)),

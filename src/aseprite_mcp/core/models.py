@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .errors import ValidationFailed
+
 
 # --------------------------------------------------------------------------- #
 # Geometry                                                                    #
@@ -206,6 +208,50 @@ class FrameRef:
         if n < 1:
             raise ValueError(f"frame number is 1-based and must be >= 1, got {n}")
         return cls(n)
+
+    @classmethod
+    def arg(cls, name: str, number) -> int:
+        """Validate a caller-supplied frame argument and return it as an int.
+
+        Raises `ValidationFailed` (inside the typed hierarchy) rather than `ValueError`,
+        because this one is reached directly from tool arguments; `of` keeps raising
+        `ValueError` for internal use.
+
+        Only the *lower* bound is checkable here: whether frame N exists depends on the
+        sprite, which is not open yet. `FRAME_GUARD_LUA` re-checks the upper bound inside
+        Aseprite. Doing the cheap half in Python means the common mistake (a 0-based
+        frame number) fails without launching Aseprite at all.
+        """
+        try:
+            return cls.of(number).number
+        except (TypeError, ValueError) as exc:
+            raise ValidationFailed(
+                f"{name} must be a 1-based frame number (>= 1); got {number!r}. "
+                "Frame 1 is the first frame."
+            ) from exc
+
+
+# The Lua half of `FrameRef`. A tool body that takes a frame prepends this and calls
+# `require_frame(spr, ARG.frame, "frame")` instead of the prelude's `clamp_frame`.
+#
+# `clamp_frame` folded an out-of-range number into 1..#frames and said nothing, so
+# `set_frame_duration(frame=999)` on a one-frame sprite edited frame 1, and the batch
+# summary went on to quote 999. Rejecting matches what the export tools already do
+# (`export._require_frame`) and what `FrameRef` already encodes.
+#
+# `error(..., 0)` is deliberate: level 0 omits the script position, so the message the
+# caller sees does not carry this server's temp script path (see
+# `errors.strip_script_location` for the ones that still do).
+FRAME_GUARD_LUA = r"""
+local function require_frame(spr, n, what)
+  local num = math.floor(tonumber(n) or 0)
+  if num < 1 or num > #spr.frames then
+    error((what or "frame") .. " " .. tostring(n) .. " does not exist; the sprite has " ..
+          #spr.frames .. " frame(s), numbered 1-" .. #spr.frames .. ".", 0)
+  end
+  return num
+end
+"""
 
 
 @dataclass(frozen=True)

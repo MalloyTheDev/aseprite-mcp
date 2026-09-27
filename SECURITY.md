@@ -20,15 +20,46 @@ the workspace — see *Out of scope* below.
 
 ## Protections in place
 
-- **Workspace sandbox.** Relative paths resolve under `ASEPRITE_MCP_WORKSPACE`. Absolute
+- **Workspace sandbox.** Relative paths resolve under `ASEPRITE_MCP_WORKSPACE`, and under
+  it only: they are joined to the workspace on both the default and the
+  `ASEPRITE_MCP_ALLOW_ABSOLUTE=1` branch, never to the process working directory. Absolute
   paths, `..` escapes, and symlinks that point outside the workspace are **rejected**
-  (`config.resolve` calls `.resolve()` before checking containment). Opt out only with
+  (`config.resolve` calls `.resolve()` before checking containment, and now does so on the
+  permissive branch too, so a returned path never still contains `..`). Opt out only with
   `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
+  - **Junctions, and directory listings (unreleased).** An NTFS junction is not a symlink to
+    Python (`Path.is_symlink()` is False), so through v0.7.1 `list_sprites` walked through
+    one and reported filenames and byte sizes from outside the workspace. It now re-checks
+    every directory and every file with `os.path.realpath` before including it, which also
+    stops a junction aimed at a drive root from walking the drive. Opening those paths was
+    always refused, so the exposure was names and sizes, not content.
+  - **No directory creation on reads (unreleased).** `config.resolve` no longer creates the
+    parent directory; only the output helpers (`core/paths.py`) do, via
+    `create_parent=True`. Through v0.7.1 a read of `a/b/c/d/e/absent.png` left five
+    directories behind, so a caller could build arbitrary trees inside the workspace out of
+    nothing but failing calls.
+  - **Windows-hostile path components (unreleased).** On Windows, each component of a caller
+    path is rejected if it is a reserved device name (`NUL`, `CON`, `COM1`, `LPT1`, ...,
+    checked on the stem so `NUL.png` is refused too), contains `:` (an NTFS alternate data
+    stream, which is invisible to every listing and export tool here), or ends with a space
+    or a dot (Windows strips those, so the path reported back would not be the path on
+    disk). On every platform, input that names no file (empty, `.`, `a/..`) is rejected
+    instead of silently resolving to the workspace directory. A write to `NUL` previously
+    succeeded, wrote nothing, and reported the path as created.
+- **Workspace default (unreleased).** With `ASEPRITE_MCP_WORKSPACE` unset, the default is a
+  sibling `workspace/` directory *only* when the package runs from a source checkout.
+  Installed (`uvx aseprite-mcp`), it is a per-user data directory
+  (`%LOCALAPPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME`); through v0.7.1 the
+  same path arithmetic aimed it inside the Python installation. An unusable workspace
+  raises `WorkspaceError` naming `ASEPRITE_MCP_WORKSPACE`, never a raw `PermissionError`.
 - **No-clobber output (v0.6.1+, completed in v0.7.1).** Every output-writing tool refuses
   to overwrite an existing file unless `overwrite=True`; multi-file exports validate every
   target before writing any of them. Pattern exports (`frames/walk_{frame}.png`) are
   expanded by Aseprite itself, so they are checked against everything the pattern could
-  match. (Through v0.7.0, six tools bypassed this and wrote silently: `export_layer`,
+  match. `export_minecraft_texture` was the last exception to the "validate every target
+  first" half: it wrote the PNG and only then checked the `.png.mcmeta` sidecar, leaving
+  half a texture behind when the sidecar was the conflict. (Through v0.7.0, six tools
+  bypassed this and wrote silently: `export_layer`,
   `export_layers`, `export_tags`, `export_frames`, `export_onion_skin`, `import_image`.)
 - **No shell, no Lua injection.** Aseprite is invoked with list-form arguments (never a
   shell string). Every user value is passed into generated Lua through an **escaped `ARG`

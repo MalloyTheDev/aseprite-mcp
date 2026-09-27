@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..app import mcp
-from ..core.asset_spec import plan_spec, validate_spec
+from ..core.asset_spec import plan_spec, sprite_filename, validate_spec
 from ..core.errors import ValidationFailed
 from ..core.manifest import file_entry, sprite_summary, workflow_manifest
 from . import (
@@ -56,8 +56,10 @@ def validate_asset_spec(spec: dict) -> dict:
     """Validate an ``aseprite_mcp.asset_spec.v1`` document (does the *spec* make sense?).
 
     Checks the schema, kind, canvas, per-kind fields, palette, layers, animations
-    (`frame_count`, not `frames`), slices, and export formats. Returns a
-    ``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
+    (`frame_count`, not `frames`), slices, export formats, and that the work the plan
+    would produce fits one build. `name` may already carry a `.aseprite`/`.ase`
+    extension: it is normalised, not doubled, so `hero` and `hero.aseprite` name the same
+    file. Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
     `{passed, checks, errors, warnings}`. This does **not** check a finished sprite against
     the spec - that's a separate future tool.
     """
@@ -124,8 +126,7 @@ def build_asset_from_spec(spec: dict, overwrite: bool = False) -> dict:
         raise ValidationFailed("Invalid asset spec: " + "; ".join(report["errors"]))
 
     steps = plan_spec(spec)
-    name = spec["name"]
-    fname = f"{name}.aseprite"
+    fname = sprite_filename(spec["name"])
 
     created: list[dict] = []
     for st in steps:

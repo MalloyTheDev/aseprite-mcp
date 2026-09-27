@@ -89,7 +89,11 @@ def test_resolve_relative_under_workspace(tmp_path, monkeypatch):
     monkeypatch.delenv("ASEPRITE_MCP_ALLOW_ABSOLUTE", raising=False)
     out = config.resolve("sub/sprite.aseprite")
     assert out == (tmp_path / "sub" / "sprite.aseprite").resolve()
-    assert out.parent.exists()
+    # Resolving creates nothing. It used to mkdir the parent on every call, including
+    # pure reads, so a caller could build arbitrary directory trees inside the workspace
+    # out of calls that then failed. Directory creation now belongs to the output
+    # helpers, which know a write is actually coming.
+    assert not out.parent.exists()
 
 
 def test_resolve_rejects_absolute_by_default(tmp_path, monkeypatch):

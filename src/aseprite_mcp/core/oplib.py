@@ -5,35 +5,37 @@ against a curated registry, then provides the Lua body that runs them all in a s
 process inside one `app.transaction` (open once -> all ops -> save once, atomically).
 
 Validation happens before any Aseprite launch and is the basis of `dry_run`. It checks
-*shape* (unknown op, missing/typed args, bad colour/number) — not runtime sprite state
-(a missing layer/frame is an execute-time failure).
+*shape*: unknown op, unknown/missing/mistyped args, bad colour or number, and a frame
+number below 1. What needs the open sprite stays an execute-time failure (a missing
+layer, or a frame past the end, which `FRAME_GUARD_LUA` rejects inside Aseprite).
 """
 
 from __future__ import annotations
 
 from .errors import ValidationFailed
 from .limits import MAX_BATCH_OPERATIONS, check_list_length
-from .models import ColorSpec
+from .models import FRAME_GUARD_LUA, ColorSpec, FrameRef
 
-# Arg kinds.
-_INT, _STR, _BOOL, _COLOR = "int", "str", "bool", "color"
+# Arg kinds. `frame` is an int that must name an existing 1-based frame: the lower bound
+# is checked here, the upper bound inside Aseprite (see FRAME_GUARD_LUA).
+_INT, _STR, _BOOL, _COLOR, _FRAME = "int", "str", "bool", "color", "frame"
 
 # Curated v1 op set. Each entry maps arg name -> (kind, required).
-_DRAW_TARGET = {"layer": (_STR, False), "frame": (_INT, False)}
+_DRAW_TARGET = {"layer": (_STR, False), "frame": (_FRAME, False)}
 OP_SPECS: dict[str, dict] = {
     # layers
-    "add_layer": {"name": (_STR, True), "opacity": (_INT, False),
+    "add_layer": {"name": (_STR, True), "group": (_STR, False), "opacity": (_INT, False),
                   "blend_mode": (_STR, False), "visible": (_BOOL, False)},
     "rename_layer": {"layer": (_STR, True), "new_name": (_STR, True)},
     "set_layer_visible": {"layer": (_STR, True), "visible": (_BOOL, True)},
     "set_layer_opacity": {"layer": (_STR, True), "opacity": (_INT, True)},
     "remove_layer": {"layer": (_STR, True)},
     # frames
-    "add_frame": {"duration_ms": (_INT, False), "copy_from": (_INT, False)},
-    "duplicate_frame": {"frame": (_INT, True)},
-    "set_frame_duration": {"frame": (_INT, True), "duration_ms": (_INT, True)},
+    "add_frame": {"duration_ms": (_INT, False), "copy_from": (_FRAME, False)},
+    "duplicate_frame": {"frame": (_FRAME, True)},
+    "set_frame_duration": {"frame": (_FRAME, True), "duration_ms": (_INT, True)},
     # tags
-    "add_tag": {"name": (_STR, True), "from": (_INT, True), "to": (_INT, True),
+    "add_tag": {"name": (_STR, True), "from": (_FRAME, True), "to": (_FRAME, True),
                 "direction": (_STR, False), "color": (_COLOR, False)},
     "remove_tag": {"name": (_STR, True)},
     # drawing
@@ -59,6 +61,58 @@ OP_SPECS: dict[str, dict] = {
                       "tolerance": (_INT, False)},
 }
 
+# Accepted spellings for an argument whose canonical op name differs from the equivalent
+# standalone tool's parameter name (`add_tag(from_frame=...)`, `replace_color(from_color=...)`).
+#
+# Aliases rather than a rename: undeclared arguments are now rejected outright, so
+# dropping `from`/`to` would turn every working batch call into a hard failure. Aliases
+# make the tool spelling work too, and cost one lookup. The canonical names stay as they
+# are, and `operations_reference()` lists both.
+OP_ARG_ALIASES: dict[str, dict[str, str]] = {
+    "add_tag": {"from_frame": "from", "to_frame": "to"},
+    "replace_color": {"from_color": "from", "to_color": "to"},
+}
+
+
+def operations_reference() -> str:
+    """A generated listing of every operation and its argument names/kinds.
+
+    Generated, not hand-written: the docstring's hand-written list of op *names* had
+    already drifted from this registry, and the argument names were never documented at
+    all, which is how a caller ends up guessing `from_frame` inside a batch. A test
+    asserts this listing covers OP_SPECS exactly, so it cannot go stale.
+    """
+    lines = []
+    for name in sorted(OP_SPECS):
+        args = ", ".join(
+            f"{arg}={kind}" if required else f"{arg}={kind}?"
+            for arg, (kind, required) in OP_SPECS[name].items()
+        )
+        line = f"  {name}({args})"
+        aliases = OP_ARG_ALIASES.get(name)
+        if aliases:
+            spellings = ", ".join(f"{alias} for {target}" for alias, target in sorted(aliases.items()))
+            line += f"  [also accepts {spellings}]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _canonical_args(index: int, name: str, args: dict) -> dict:
+    """Rewrite accepted alias spellings to their canonical arg names."""
+    aliases = OP_ARG_ALIASES.get(name)
+    if not aliases or not any(alias in args for alias in aliases):
+        return args
+    out = dict(args)
+    for alias, target in aliases.items():
+        if alias not in out:
+            continue
+        if target in out:
+            raise ValidationFailed(
+                f"op {index} ({name}): pass either '{target}' or '{alias}', not both."
+            )
+        out[target] = out.pop(alias)
+    return out
+
 
 def validate_operations(operations) -> list[dict]:
     """Validate + normalize a list of operations. Raises ValidationFailed (with the
@@ -83,6 +137,7 @@ def validate_operations(operations) -> list[dict]:
         args = op.get("args", {})
         if not isinstance(args, dict):
             raise ValidationFailed(f"op {i} ({name}): 'args' must be an object.")
+        args = _canonical_args(i, name, args)
 
         # The loop below walks the SPEC, so anything the caller sent that is not in the spec
         # simply never gets looked at. A misspelled optional arg -- "blendmode" for
@@ -90,9 +145,10 @@ def validate_operations(operations) -> list[dict]:
         # success having ignored it. Required args were caught; optional ones were not.
         unknown = sorted(set(args) - set(spec))
         if unknown:
+            accepted = sorted(set(spec) | set(OP_ARG_ALIASES.get(name, {})))
             raise ValidationFailed(
                 f"op {i} ({name}): unknown arg(s) {', '.join(repr(u) for u in unknown)}. "
-                f"Accepted: {', '.join(sorted(spec))}."
+                f"Accepted: {', '.join(accepted)}."
             )
 
         norm: dict = {}
@@ -105,12 +161,17 @@ def validate_operations(operations) -> list[dict]:
             try:
                 if kind == _INT:
                     norm[arg] = int(value)
+                elif kind == _FRAME:
+                    norm[arg] = FrameRef.arg(f"'{arg}'", value)
                 elif kind == _STR:
                     norm[arg] = str(value)
                 elif kind == _BOOL:
                     norm[arg] = bool(value)
                 elif kind == _COLOR:
                     norm[arg] = ColorSpec.parse(value).as_dict()
+            except ValidationFailed as exc:
+                # Already a full sentence from FrameRef; just place it in the batch.
+                raise ValidationFailed(f"op {i} ({name}): {exc}") from exc
             except (ValueError, TypeError) as exc:
                 raise ValidationFailed(f"op {i} ({name}): bad value for '{arg}': {exc}") from exc
         normalized.append({"op": name, "args": norm})
@@ -128,7 +189,7 @@ def summarize(op: dict) -> str:
 # {op, args}) and applies them atomically. On any op failure it raises a JSON-encoded
 # error (level 0, no position prefix) so Python can surface a structured message; the
 # transaction rolls back and the file is never saved.
-BATCH_LUA_BODY = r"""
+BATCH_LUA_BODY = FRAME_GUARD_LUA + r"""
 local spr = open_sprite(ARG.src)
 local applied = {}
 
@@ -141,6 +202,12 @@ local function run_op(op)
     if a.opacity ~= nil then l.opacity = a.opacity end
     if a.blend_mode ~= nil then l.blendMode = blendmode_from(a.blend_mode) end
     if a.visible ~= nil then l.isVisible = a.visible end
+    if a.group ~= nil then
+      local grp = find_layer(spr, a.group)
+      if not grp.isGroup then error("'" .. tostring(a.group) .. "' is not a group layer", 0) end
+      l.parent = grp
+      return "added layer '" .. a.name .. "' in group '" .. a.group .. "'"
+    end
     return "added layer '" .. a.name .. "'"
   elseif name == "rename_layer" then
     find_layer(spr, a.layer).name = a.new_name
@@ -158,24 +225,26 @@ local function run_op(op)
   -- frames
   elseif name == "add_frame" then
     local fr
-    if a.copy_from ~= nil then fr = spr:newFrame(clamp_frame(spr, a.copy_from))
+    if a.copy_from ~= nil then fr = spr:newFrame(require_frame(spr, a.copy_from, "copy_from"))
     else fr = spr:newEmptyFrame(#spr.frames + 1) end
     if a.duration_ms ~= nil then fr.duration = a.duration_ms / 1000.0 end
     return "added frame " .. fr.frameNumber
   elseif name == "duplicate_frame" then
-    local fr = spr:newFrame(clamp_frame(spr, a.frame))
+    local fr = spr:newFrame(require_frame(spr, a.frame, "frame"))
     return "duplicated frame -> " .. fr.frameNumber
   elseif name == "set_frame_duration" then
-    spr.frames[clamp_frame(spr, a.frame)].duration = a.duration_ms / 1000.0
-    return "set frame " .. a.frame .. " duration"
+    local n = require_frame(spr, a.frame, "frame")
+    spr.frames[n].duration = a.duration_ms / 1000.0
+    return "set frame " .. n .. " duration to " .. a.duration_ms .. "ms"
   -- tags
   elseif name == "add_tag" then
-    local f1, f2 = clamp_frame(spr, a["from"]), clamp_frame(spr, a.to)
+    local f1 = require_frame(spr, a["from"], "from")
+    local f2 = require_frame(spr, a.to, "to")
     if f1 > f2 then f1, f2 = f2, f1 end
     local t = spr:newTag(f1, f2); t.name = a.name
     if a.direction ~= nil then t.aniDir = anidir_from(a.direction) end
     if a.color ~= nil then t.color = mkcolor(a.color) end
-    return "added tag '" .. a.name .. "'"
+    return "added tag '" .. a.name .. "' on frames " .. f1 .. "-" .. f2
   elseif name == "remove_tag" then
     local found = nil
     for _, tg in ipairs(spr.tags) do if tg.name == a.name then found = tg end end
@@ -197,7 +266,7 @@ local function run_op(op)
   elseif name == "replace_color" then
     local layer = find_layer(spr, a.layer)
     if layer.isGroup then error("cannot edit a group layer: " .. layer.name, 0) end
-    local n = clamp_frame(spr, a.frame or 1)
+    local n = require_frame(spr, a.frame or 1, "frame")
     local img = get_draw_image(spr, layer, n)
     local fr, fg, fb, fa = a["from"].r, a["from"].g, a["from"].b, a["from"].a or 255
     local tol = a.tolerance or 0
@@ -217,7 +286,7 @@ local function run_op(op)
   else
     local layer = find_layer(spr, a.layer)
     if layer.isGroup then error("cannot draw on a group layer: " .. layer.name, 0) end
-    local n = clamp_frame(spr, a.frame or 1)
+    local n = require_frame(spr, a.frame or 1, "frame")
     local img = get_draw_image(spr, layer, n)
     if name == "set_pixel" then
       img_set(img, a.x, a.y, to_pixel(spr, a.color))

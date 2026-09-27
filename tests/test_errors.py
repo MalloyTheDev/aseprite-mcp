@@ -1,5 +1,6 @@
 """Pure-Python tests for the typed error hierarchy — no Aseprite (always run)."""
 
+import json
 import subprocess
 
 import pytest
@@ -181,3 +182,70 @@ def test_lua_timeout_raises_timeout_error(monkeypatch):
 def test_validation_failed_exists():
     assert issubclass(ValidationFailed, AsepriteMCPError)
     assert isinstance(errors.ValidationFailed("nope"), AsepriteError)
+
+
+# ------------------------------------------------ temp script path hygiene (#62)
+# A Lua `error("msg")` without level 0 is prefixed by the interpreter with the script's
+# own path, and that script is a temp file this server wrote and has already deleted.
+# It reached the caller verbatim:
+#   Batch aborted at op 0 (rename_layer): C:\...\Temp\asemcp_vqwcklpp.lua:264: No layer
+def test_strip_script_location_removes_windows_temp_prefix():
+    msg = r"C:\Users\me\AppData\Local\Temp\asemcp_vqwcklpp.lua:264: No layer named 'ghost'"
+    assert errors.strip_script_location(msg) == "No layer named 'ghost'"
+
+
+def test_strip_script_location_removes_posix_prefix():
+    assert errors.strip_script_location("/tmp/asemcp_ab12cd.lua:7: boom") == "boom"
+
+
+def test_strip_script_location_handles_a_directory_with_spaces():
+    msg = r"C:\Program Files\tmp dir\asemcp_ab12.lua:12: No tag named 'walk'"
+    assert errors.strip_script_location(msg) == "No tag named 'walk'"
+
+
+def test_strip_script_location_removes_an_embedded_occurrence():
+    msg = (
+        "Batch aborted at op 0 (rename_layer): "
+        r"C:\Temp\asemcp_x1.lua:264: No layer named 'ghost'"
+        " - the sprite was not modified (rolled back)."
+    )
+    cleaned = errors.strip_script_location(msg)
+    assert "asemcp_" not in cleaned and ".lua" not in cleaned
+    assert cleaned.startswith("Batch aborted at op 0 (rename_layer): No layer named 'ghost'")
+
+
+def test_strip_script_location_keeps_paths_that_are_part_of_the_message():
+    # A sprite/export path the caller passed in must survive; only this server's own
+    # temp scripts are stripped.
+    for msg in (
+        "Could not open sprite: C:/sprites/hero.aseprite",
+        "export failed: /home/me/out.lua:3: nope",
+        "No layer named 'asemcp_x.lua'",
+    ):
+        assert errors.strip_script_location(msg) == msg
+
+
+def test_decode_error_strips_the_generated_script_location():
+    """Lua error() at level 1 prepends `<script>:<line>:`, which is noise and a path leak.
+
+    Stripping happens in the runner's one decode seam rather than per call site, so it
+    covers standalone tools and not only the batch runner. The temp file is gone by the
+    time anyone reads the message, and the line number refers to generated code.
+    """
+    payload = json.dumps(
+        r"C:\Users\someone\AppData\Local\Temp\asemcp_i5f2dp0f.lua:264: "
+        r"No layer named 'ghost'"
+    )
+    assert runner._decode_error(payload) == "No layer named 'ghost'"
+
+
+def test_decode_error_strips_the_location_from_an_unencoded_message():
+    """The tolerant branch (a message that is not valid JSON) must strip it too."""
+    raw = r"C:\Temp\asemcp_abc.lua:12: boom"
+    assert runner._decode_error(raw) == "boom"
+
+
+def test_decode_error_leaves_an_ordinary_message_alone():
+    assert runner._decode_error(json.dumps("No layer named 'ghost'")) == (
+        "No layer named 'ghost'"
+    )

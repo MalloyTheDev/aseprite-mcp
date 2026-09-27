@@ -16,14 +16,15 @@ from ..core.limits import (
     MAX_IMAGE_BYTES,
     check_size_bytes,
 )
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
-_STAMP_BODY = """
+_STAMP_BODY = FRAME_GUARD_LUA + """
 local spr = open_sprite(ARG.src)
 local layer = find_layer(spr, ARG.layer)
 if layer.isGroup then error("Cannot stamp onto a group layer: " .. layer.name) end
-local framenum = clamp_frame(spr, ARG.frame)
+local framenum = require_frame(spr, ARG.frame, "frame")
 local img = get_draw_image(spr, layer, framenum)
 
 local source = app.open(ARG.source)
@@ -166,7 +167,7 @@ def draw_image_base64(
     try:
         raw = base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise ValueError(f"image_base64 is not valid base64: {exc}") from exc
+        raise ValidationFailed(f"image_base64 is not valid base64: {exc}") from exc
     check_size_bytes(
         "image_base64 (decoded)", len(raw), MAX_IMAGE_BYTES,
         remedy="Write the image into the workspace and use stamp_file instead.",

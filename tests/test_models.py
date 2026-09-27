@@ -2,7 +2,9 @@
 
 import pytest
 
+from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.core.models import (
+    FRAME_GUARD_LUA,
     ColorSpec,
     FrameRange,
     FrameRef,
@@ -78,3 +80,36 @@ def test_pixel():
 def test_sprite_path_lua():
     assert SpritePath("C:\\a\\b.aseprite").lua() == "C:/a/b.aseprite"
     assert SpritePath("rel/x.png").lua() == "rel/x.png"
+
+
+# ------------------------------------------------- frame arguments (issue #61)
+def test_frame_arg_returns_the_int():
+    assert FrameRef.arg("frame", 3) == 3
+    assert FrameRef.arg("frame", "4") == 4  # the Lua/JSON boundary hands over strings
+
+
+def test_frame_arg_rejects_below_one_with_a_typed_error():
+    # Tools reach this directly from caller arguments, so it must land inside the
+    # typed hierarchy (issue #60) rather than raising a bare ValueError.
+    for bad in (0, -5):
+        with pytest.raises(ValidationFailed, match="1-based frame number"):
+            FrameRef.arg("frame", bad)
+
+
+def test_frame_arg_names_the_argument_it_rejected():
+    with pytest.raises(ValidationFailed, match="from_frame"):
+        FrameRef.arg("from_frame", 0)
+
+
+def test_frame_arg_rejects_a_non_number():
+    with pytest.raises(ValidationFailed):
+        FrameRef.arg("frame", "last")
+
+
+def test_frame_guard_lua_defines_require_frame_and_names_the_range():
+    # The upper bound needs the open sprite, so it is enforced in Lua; the Python half
+    # only covers `< 1`. Keep the two halves in the same file and assert the contract.
+    assert "local function require_frame(spr, n, what)" in FRAME_GUARD_LUA
+    assert "does not exist; the sprite has" in FRAME_GUARD_LUA
+    # level 0 => no script position, so the temp script path never reaches the caller.
+    assert FRAME_GUARD_LUA.count("#spr.frames .. \".\", 0)") == 1
