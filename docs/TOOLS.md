@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **113 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **117 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -1796,13 +1796,13 @@ Build the asset described by an ``aseprite_mcp.asset_spec.v1`` document.
 
 Executes the (validated) plan by dispatching each step to an existing tool: scaffolds
 the sprite for its `kind`, applies palette / extra layers / animation frames+tags /
-slices, and runs the requested exports. **Structure only — no pixels are drawn;** the
+slices, and runs the requested exports. **Structure only - no pixels are drawn;** the
 returned manifest's `suggested_next_actions` hand the actual art back to you.
 
 Args:
     overwrite: Passed to the export steps (replace existing export files). The sprite
         itself is created no-clobber, so building over an existing ``<name>.aseprite``
-        raises — build to a new name or remove the old file.
+        raises - build to a new name or remove the old file.
 
 Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with the created files, the
 executed `plan`, and next actions. Raises ``ValidationFailed`` if the spec is invalid.
@@ -1835,7 +1835,7 @@ Checks the schema, kind, canvas, per-kind fields, palette, layers, animations
 (`frame_count`, not `frames`), slices, and export formats. Returns a
 ``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
 `{passed, checks, errors, warnings}`. This does **not** check a finished sprite against
-the spec — that's a separate future tool.
+the spec - that's a separate future tool.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

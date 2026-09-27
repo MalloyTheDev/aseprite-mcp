@@ -26,7 +26,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **108 tools** — including high-level **workflow** tools that scaffold and validate whole
+- **117 tools**, including high-level **workflow** tools that scaffold and validate whole
   assets in one call, and a **batch op-runner** that applies many edits atomically in a
   single Aseprite process — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
@@ -180,7 +180,7 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 108 tools will be available. Ask the
+Restart the client; the `aseprite` server and its 117 tools will be available. Ask the
 agent to run `health_check` to confirm Aseprite is wired up correctly.
 
 ---

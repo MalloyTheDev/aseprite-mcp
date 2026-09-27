@@ -24,8 +24,12 @@ PURE_PYTHON_TESTS = (
     "test_unit", "test_manifest", "test_validation", "test_errors", "test_models",
     "test_imports", "test_oplib", "test_output_paths", "test_limits", "test_properties",
     "test_engine_godot", "test_slice_metadata", "test_asset_spec", "test_hardening",
-    "test_concurrency",
+    "test_concurrency", "test_minecraft", "test_minecraft_tools", "test_strict_args",
 )
+
+# NOTE: this is an ALLOWLIST, so a new pure-Python test file defaults to SKIPPED until it is
+# added here -- which looks identical to passing in a summary line. If you add a test file
+# that does not need Aseprite, add it above.
 
 
 def pytest_addoption(parser):

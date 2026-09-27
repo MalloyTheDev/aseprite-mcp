@@ -20,6 +20,7 @@ from .tools import (
     image,
     inspect,
     layers,
+    minecraft,
     palette,
     reference,
     slices,
