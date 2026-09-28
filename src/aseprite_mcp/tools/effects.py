@@ -33,8 +33,9 @@ def fill_gradient(
     height: int | None = None,
     layer: str | None = None,
     frame: int = 1,
+    respect_alpha: bool = True,
 ) -> dict:
-    """Fill a region with a gradient.
+    """Fill a region with a gradient, by default only where pixels already exist.
 
     Args:
         colors: 2+ colour stops, e.g. ["#000000", "#ff004d", "#ffec27"], spread
@@ -44,6 +45,12 @@ def fill_gradient(
         dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
             interpolation — great for limited palettes / retro looks.
         x, y, width, height: Region (defaults to the whole canvas).
+        respect_alpha: Leave transparent pixels transparent (default). The gradient
+            then shades the artwork inside the region rather than filling the region.
+            Pass False to paint the whole rectangle, background included.
+
+    Returns `pixels_written` and `pixels_skipped` so the caller can tell how much of
+    the region was actually covered.
     """
     if gradient_type not in _GRAD_TYPES:
         raise ValidationFailed(f"gradient_type must be one of {sorted(_GRAD_TYPES)}")
@@ -60,6 +67,7 @@ def fill_gradient(
         "angle": float(angle),
         "dither": bool(dither),
         "x": int(x), "y": int(y), "width": width, "height": height,
+        "respect_alpha": bool(respect_alpha),
     }
     snippet = """
     local stops = ARG.colors
@@ -91,6 +99,7 @@ def fill_gradient(
     local maxr = math.sqrt((rw / 2) ^ 2 + (rh / 2) ^ 2)
     if maxr == 0 then maxr = 1 end
     local BAYER = { {0,8,2,10}, {12,4,14,6}, {3,11,1,9}, {15,7,13,5} }
+    written, skipped = 0, 0
     for yy = ry, ry + rh - 1 do
       for xx = rx, rx + rw - 1 do
         if xx >= 0 and yy >= 0 and xx < spr.width and yy < spr.height then
@@ -108,7 +117,16 @@ def fill_gradient(
           else
             px = to_pixel(spr, color_at(t))
           end
-          img_set(img, xx, yy, px)
+          -- Guarded on the pixel's existing alpha. Writing unconditionally filled
+          -- the transparent area around the artwork as well as the artwork, so the
+          -- most natural way to shade a sprite silently destroyed its silhouette:
+          -- a 32x32 sphere of 477 opaque pixels came back with 584.
+          if (not ARG.respect_alpha) or img_solid(spr, img, xx, yy) then
+            img_set(img, xx, yy, px)
+            written = written + 1
+          else
+            skipped = skipped + 1
+          end
         end
       end
     end

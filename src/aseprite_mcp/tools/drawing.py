@@ -27,6 +27,11 @@ local layer = find_layer(spr, ARG.layer)
 if layer.isGroup then error("Cannot draw on a group layer: " .. layer.name) end
 local framenum = require_frame(spr, ARG.frame, "frame")
 local img = get_draw_image(spr, layer, framenum)
+-- Optional per-tool counters. _OPEN, the tool snippet and _CLOSE are concatenated
+-- into one Lua chunk, so a snippet that increments these gets them reported without
+-- needing its own RESULT. Left nil by tools that do not count, and omitted from the
+-- result in that case rather than reported as zero, which would be a lie.
+local written, skipped = nil, nil
 """
 
 _CLOSE = """
@@ -34,6 +39,8 @@ commit_image(spr, layer, framenum, img)
 save_sprite(spr)
 RESULT = { ok = true, filename = spr.filename, layer = layer.name,
            frame = framenum, width = spr.width, height = spr.height }
+if written ~= nil then RESULT.pixels_written = written end
+if skipped ~= nil then RESULT.pixels_skipped = skipped end
 """
 
 

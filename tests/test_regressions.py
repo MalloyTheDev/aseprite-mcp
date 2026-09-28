@@ -11,10 +11,12 @@ from aseprite_mcp.tools import (
     drawing,
     effects,
     export,
+    frames,
     inspect,
     layers,
     palette,
     sprite,
+    tags,
     tilemap,
 )
 
@@ -151,3 +153,74 @@ def test_layer_name_cannot_forge_a_result_line(case, payload):
     info = inspect.get_sprite_info(name)
     assert len(info["layers"]) == before + 1
     assert payload in {layer["name"] for layer in info["layers"]}
+
+
+def test_fill_gradient_preserves_the_silhouette():
+    """A gradient must shade the artwork, not fill the rectangle around it.
+
+    fill_gradient wrote every pixel in its region regardless of alpha, so the most
+    natural way to shade a sprite silently destroyed it: a 32x32 sphere of 477 opaque
+    pixels came back with 584, the extra 107 being background that had been painted in.
+    The call reported ok either way.
+    """
+    name = "r/grad.aseprite"
+    sprite.create_sprite(name, 32, 32)
+    drawing.draw_ellipse(name, 16, 16, 12, 12, "#c04040", filled=True)
+
+    def opaque() -> int:
+        rows = inspect.get_pixels(name, 0, 0, 32, 32)["pixels"]
+        return sum(1 for row in rows for p in row if not p.lower().endswith("00"))
+
+    before = opaque()
+    result = effects.fill_gradient(name, ["#ffffff", "#000000"], x=4, y=4, width=24, height=24)
+
+    assert opaque() == before, "the gradient painted over transparent pixels"
+    assert result["pixels_skipped"] > 0, "nothing was skipped, so the guard did not run"
+    assert result["pixels_written"] > 0, "the gradient wrote nothing at all"
+
+
+def test_fill_gradient_can_still_fill_the_whole_rectangle():
+    """The old behaviour stays reachable, because filling a rect is a real intent."""
+    name = "r/grad_opt.aseprite"
+    sprite.create_sprite(name, 32, 32)
+    drawing.draw_ellipse(name, 16, 16, 12, 12, "#c04040", filled=True)
+
+    def opaque() -> int:
+        rows = inspect.get_pixels(name, 0, 0, 32, 32)["pixels"]
+        return sum(1 for row in rows for p in row if not p.lower().endswith("00"))
+
+    before = opaque()
+    result = effects.fill_gradient(
+        name, ["#ffffff", "#000000"], x=4, y=4, width=24, height=24, respect_alpha=False
+    )
+    assert opaque() > before, "respect_alpha=False should paint the background too"
+    assert result["pixels_skipped"] == 0
+
+
+def test_export_gif_reports_a_direction_it_cannot_honour():
+    """A ping-pong tag exports forward, and the caller must be told.
+
+    The direction is stored in the .aseprite file, but a GIF is a flat frame sequence:
+    a 4-frame ping-pong is 6 frames of playback and exports as 4. Saying nothing meant
+    the tool claimed a loop it had not produced.
+    """
+    name = "r/pingpong.aseprite"
+    sprite.create_sprite(name, 8, 8)
+    for _ in range(3):
+        frames.add_frame(name)
+    tags.add_tag(name, "bounce", 1, 4, direction="pingpong")
+
+    result = export.export_gif(name, "r/pingpong.gif")
+    assert "warnings" in result, "a ping-pong tag exported with no warning"
+    assert any("pingpong" in w for w in result["warnings"])
+    assert any("bounce" in w for w in result["warnings"])
+
+
+def test_export_gif_is_quiet_about_ordinary_forward_tags():
+    """The warning must not become noise on every export."""
+    name = "r/forward.aseprite"
+    sprite.create_sprite(name, 8, 8)
+    for _ in range(3):
+        frames.add_frame(name)
+    tags.add_tag(name, "run", 1, 4)
+    assert "warnings" not in export.export_gif(name, "r/forward.gif")

@@ -874,7 +874,7 @@ Fill a region with a 2-colour checkerboard of `size`-pixel squares.
 
 ### `fill_gradient`
 
-Fill a region with a gradient.
+Fill a region with a gradient, by default only where pixels already exist.
 
 Args:
     colors: 2+ colour stops, e.g. ["#000000", "#ff004d", "#ffec27"], spread
@@ -884,6 +884,12 @@ Args:
     dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
         interpolation — great for limited palettes / retro looks.
     x, y, width, height: Region (defaults to the whole canvas).
+    respect_alpha: Leave transparent pixels transparent (default). The gradient
+        then shades the artwork inside the region rather than filling the region.
+        Pass False to paint the whole rectangle, background included.
+
+Returns `pixels_written` and `pixels_skipped` so the caller can tell how much of
+the region was actually covered.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -898,6 +904,7 @@ Args:
 | `height` | integer | no | _none_ |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
+| `respect_alpha` | boolean | no | True |
 
 
 ### `invert_colors`
@@ -1181,6 +1188,10 @@ Returns the ramp as a list of "#RRGGBB" colours (darkest first).
 | `light_range` | number | no | 0.6 |
 | `filename` | string | no | _none_ |
 | `apply` | string | no | none |
+| `shadow_hue` | string | no | _none_ |
+| `light_hue` | string | no | _none_ |
+| `sat_curve` | string | no | linear |
+| `easing` | string | no | linear |
 
 
 ### `get_palette`
@@ -1371,7 +1382,11 @@ overwrite: Replace files the pattern would expand onto (default False = no-clobb
 
 ### `export_gif`
 
-Export the full animation as an animated GIF (honours frame durations & tags).
+Export the full animation as an animated GIF (honours frame durations).
+
+Tag *ranges* are honoured, but a tag's playback direction is not: a GIF is a flat
+frame sequence. A ping-pong tag exports forward, and the result says so in
+`warnings` rather than letting the caller find out in-engine.
 
 overwrite: Replace `output` if it already exists (default False = no-clobber).
 
