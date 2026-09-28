@@ -99,7 +99,6 @@ def fill_gradient(
     local maxr = math.sqrt((rw / 2) ^ 2 + (rh / 2) ^ 2)
     if maxr == 0 then maxr = 1 end
     local BAYER = { {0,8,2,10}, {12,4,14,6}, {3,11,1,9}, {15,7,13,5} }
-    written, skipped = 0, 0
     for yy = ry, ry + rh - 1 do
       for xx = rx, rx + rw - 1 do
         if xx >= 0 and yy >= 0 and xx < spr.width and yy < spr.height then
@@ -123,9 +122,8 @@ def fill_gradient(
           -- a 32x32 sphere of 477 opaque pixels came back with 584.
           if (not ARG.respect_alpha) or img_solid(spr, img, xx, yy) then
             img_set(img, xx, yy, px)
-            written = written + 1
           else
-            skipped = skipped + 1
+            note_skipped()
           end
         end
       end

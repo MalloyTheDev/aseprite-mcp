@@ -183,10 +183,22 @@ Auto-crop the canvas to the bounding box of all non-transparent content
 
 ### `get_pixels`
 
-Read the composited (all visible layers) pixel colours of a region.
+Read the pixel colours of a region.
 
-Returns rows of "#RRGGBBAA" hex strings. The region is capped at 64x64
-(4096 pixels) per call to keep responses small — read in tiles for bigger areas.
+Args:
+    layer: Read this layer alone instead of the composite. This matters more than
+        it sounds: drawing tools write to ONE layer, so the composite is not the
+        surface your next edit will act on. A fill whose boundary is drawn on a
+        different layer will flood the whole canvas while the composite looks as
+        though it should have stopped.
+    format: "rows" (default) gives rows of "#RRGGBBAA" strings. "map" gives a
+        `legend` of symbol to colour plus one string per row, which is around a
+        tenth the size: a 16x16 icon of three colours costs roughly 3,400
+        characters as rows and 350 as a map, and defects like a one-pixel offset
+        are visible in it at a glance.
+
+The region is capped at 64x64 (4096 pixels) per call to keep responses small, so
+read in tiles for bigger areas.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -196,6 +208,8 @@ Returns rows of "#RRGGBBAA" hex strings. The region is capped at 64x64
 | `width` | integer | no | _none_ |
 | `height` | integer | no | _none_ |
 | `frame` | integer | no | 1 |
+| `layer` | string | no | _none_ |
+| `format` | string | no | rows |
 
 
 ### `get_sprite_info`
@@ -538,6 +552,23 @@ Erase the target layer/frame cel to full transparency.
 Draw a quadratic Bézier curve from (x0,y0) to (x1,y1) bending toward the
 control point (control_x, control_y). `steps` controls smoothness.
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -561,6 +592,23 @@ For a circle, use the same value for radius_x and radius_y. filled=False
 draws a 1px outline. antialias smooths a *filled* ellipse with sub-pixel
 coverage (RGB sprites only; ignored otherwise).
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -583,6 +631,23 @@ Args:
     pixel_perfect: Remove L-shaped corner pixels for a clean 1px pixel-art line.
     antialias: Smooth (Xiaolin Wu) line with alpha blending — RGB sprites only;
         ignored on indexed/gray. Takes precedence over pixel_perfect.
+
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -609,6 +674,23 @@ Args:
     layer: Target layer name or 1-based index (default: top layer).
     frame: Target frame, 1-based (default 1).
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -626,6 +708,23 @@ points: list of {"x": int, "y": int}. Set closed=True to connect the last
 point back to the first (outline a polygon). pixel_perfect removes L-corner
 pixels across the whole path for a clean pixel-art outline.
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -640,6 +739,23 @@ pixels across the whole path for a clean pixel-art outline.
 ### `draw_rectangle`
 
 Draw a rectangle. filled=False draws a 1px outline, True fills it.
+
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -658,6 +774,23 @@ Draw a rectangle. filled=False draws a 1px outline, True fills it.
 
 Flood fill (paint bucket): replace the contiguous region of matching
 colour starting at (x,y) on the target layer with `color`.
+
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

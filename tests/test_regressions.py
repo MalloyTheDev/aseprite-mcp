@@ -194,7 +194,10 @@ def test_fill_gradient_can_still_fill_the_whole_rectangle():
         name, ["#ffffff", "#000000"], x=4, y=4, width=24, height=24, respect_alpha=False
     )
     assert opaque() > before, "respect_alpha=False should paint the background too"
-    assert result["pixels_skipped"] == 0
+    # Absent, not zero: the counts are attached only when something was actually
+    # skipped, so a key's presence is itself information rather than noise.
+    assert "pixels_skipped" not in result
+    assert result["pixels_written"] > 0
 
 
 def test_export_gif_reports_a_direction_it_cannot_honour():
@@ -224,3 +227,88 @@ def test_export_gif_is_quiet_about_ordinary_forward_tags():
         frames.add_frame(name)
     tags.add_tag(name, "run", 1, 4)
     assert "warnings" not in export.export_gif(name, "r/forward.gif")
+
+
+def test_drawing_reports_what_it_actually_wrote():
+    """A draw that falls off the canvas must not report a bare ok.
+
+    draw_rectangle(10, 10, 20, 20) on a 16x16 canvas asked for 400 pixels and landed
+    36. The return carried no count, so the caller had no way to notice, and built on
+    a sprite that did not contain what it thought.
+    """
+    name = "r/clip.aseprite"
+    sprite.create_sprite(name, 16, 16)
+
+    partly = drawing.draw_rectangle(name, 10, 10, 20, 20, "#ff0000", filled=True)
+    assert partly["pixels_written"] == 36
+    assert partly["pixels_clipped"] == 364
+    assert partly["pixels_written"] + partly["pixels_clipped"] == 400
+
+    off = drawing.draw_rectangle(name, 100, 100, 4, 4, "#00ff00", filled=True)
+    assert off["pixels_written"] == 0 and off["pixels_clipped"] == 16
+
+    inside = drawing.draw_rectangle(name, 2, 2, 4, 4, "#0000ff", filled=True)
+    assert inside["pixels_written"] == 16
+    assert "pixels_clipped" not in inside, "a clean draw should not grow a zero count"
+
+
+def test_a_read_only_tool_grows_no_pixel_counts():
+    """The counts are attached only when a run touched pixels."""
+    name = "r/counts.aseprite"
+    sprite.create_sprite(name, 8, 8)
+    info = inspect.get_sprite_info(name)
+    assert not [k for k in info if k.startswith("pixels_")]
+
+
+def test_get_pixels_can_read_one_layer_instead_of_the_composite():
+    """Drawing targets one layer, so the composite is not the surface being edited.
+
+    A fill whose boundary is drawn on another layer floods the whole canvas while the
+    composite looks as though it should have stopped. Reading the target layer is the
+    only way for a caller to see that coming.
+    """
+    name = "r/layerread.aseprite"
+    sprite.create_sprite(name, 16, 16)
+    drawing.draw_rectangle(name, 3, 3, 10, 10, "#000000", filled=False, layer="Layer 1")
+    layers.add_layer(name, "paint")
+
+    composite = inspect.get_pixels(name, 0, 0, 16, 16)
+    target = inspect.get_pixels(name, 0, 0, 16, 16, layer="paint")
+
+    def opaque(result):
+        return sum(1 for row in result["pixels"] for p in row if not p.lower().endswith("00"))
+
+    assert opaque(composite) > 0, "the composite should show the outline"
+    assert opaque(target) == 0, "the paint layer is empty and must read as empty"
+    assert target["layer"] == "paint"
+
+
+def test_get_pixels_map_format_is_far_smaller_and_round_trips():
+    """A 16x16 of three colours costs ~3,400 characters as rows and ~350 as a map."""
+    import json
+
+    name = "r/mapfmt.aseprite"
+    sprite.create_sprite(name, 16, 16)
+    drawing.draw_ellipse(name, 8, 8, 5, 5, "#c04040", filled=True)
+
+    rows = inspect.get_pixels(name, 0, 0, 16, 16)
+    mapped = inspect.get_pixels(name, 0, 0, 16, 16, format="map")
+
+    assert len(json.dumps(mapped)) < len(json.dumps(rows)) / 3
+    assert set(mapped["legend"]) >= {"."}
+    assert len(mapped["rows"]) == 16 and all(len(r) == 16 for r in mapped["rows"])
+
+    # Same pixels, said differently: rebuilding from the legend must reproduce the rows.
+    back = [[mapped["legend"][c] for c in row] for row in mapped["rows"]]
+    expected = [
+        [p if not p.lower().endswith("00") else "transparent" for p in row]
+        for row in rows["pixels"]
+    ]
+    assert back == expected
+
+
+def test_get_pixels_rejects_an_unknown_format():
+    name = "r/badfmt.aseprite"
+    sprite.create_sprite(name, 4, 4)
+    with pytest.raises(ValidationFailed, match="format"):
+        inspect.get_pixels(name, 0, 0, 4, 4, format="ascii")

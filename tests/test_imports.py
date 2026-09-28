@@ -65,3 +65,27 @@ def test_core_does_not_import_mcp_app_or_tools():
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_geometry_tools_document_their_coordinate_conventions():
+    """The conventions must reach the model, not just the module docstring.
+
+    Only a function's own docstring becomes its tool description, so an explanation
+    living in the module header is invisible to every caller. Of 117 tools, three
+    mentioned the origin, and most geometry tools documented no argument at all, while
+    two primitives centre half a pixel apart.
+    """
+    import asyncio
+
+    from aseprite_mcp.server import mcp
+
+    tools = {t.name: (t.description or "") for t in asyncio.run(mcp.list_tools())}
+    geometry = (
+        "draw_pixels", "draw_line", "draw_polyline", "draw_curve",
+        "draw_rectangle", "draw_ellipse", "fill_area",
+    )
+    for name in geometry:
+        description = tools[name]
+        assert "top-left" in description, f"{name} does not state the origin"
+        assert "grows DOWN" in description, f"{name} does not state the y direction"
+        assert "pixels_clipped" in description, f"{name} does not mention clipping"
