@@ -72,6 +72,19 @@ def test_readme_advertises_the_real_tool_count(registered):
     assert int(claimed.group(1)) == len(registered)
 
 
+def test_every_tool_is_named_in_the_readme(registered):
+    """The front page is where a tool is found before anyone opens the reference.
+
+    It drifted the same way the reference did, and for the same reason: the catalogue is
+    written by hand, and three domains (shading, selections, Minecraft) were added without
+    it. Naming each tool in backticks is the whole requirement; the table around it is
+    prose, and prose is not something a test should have opinions about.
+    """
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    missing = sorted(name for name in registered if f"`{name}`" not in readme)
+    assert missing == [], f"registered but absent from the README: {missing}"
+
+
 def test_every_tool_module_is_grouped(registered):
     """A new tool module with no GROUPS entry is the failure that happened; catching it
     here names the module instead of leaving the tools missing."""
