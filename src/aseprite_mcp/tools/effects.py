@@ -10,6 +10,9 @@ every Aseprite version.
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
+from ..core.limits import MAX_OUTLINE_THICKNESS, check_count, check_region_size
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 from .drawing import _draw
@@ -30,8 +33,9 @@ def fill_gradient(
     height: int | None = None,
     layer: str | None = None,
     frame: int = 1,
+    respect_alpha: bool = True,
 ) -> dict:
-    """Fill a region with a gradient.
+    """Fill a region with a gradient, by default only where pixels already exist.
 
     Args:
         colors: 2+ colour stops, e.g. ["#000000", "#ff004d", "#ffec27"], spread
@@ -41,13 +45,20 @@ def fill_gradient(
         dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
             interpolation — great for limited palettes / retro looks.
         x, y, width, height: Region (defaults to the whole canvas).
+        respect_alpha: Leave transparent pixels transparent (default). The gradient
+            then shades the artwork inside the region rather than filling the region.
+            Pass False to paint the whole rectangle, background included.
+
+    Returns `pixels_written` and `pixels_skipped` so the caller can tell how much of
+    the region was actually covered.
     """
     if gradient_type not in _GRAD_TYPES:
-        raise ValueError(f"gradient_type must be one of {sorted(_GRAD_TYPES)}")
+        raise ValidationFailed(f"gradient_type must be one of {sorted(_GRAD_TYPES)}")
     if len(colors) < 2:
-        raise ValueError("Provide at least 2 colour stops.")
+        raise ValidationFailed("Provide at least 2 colour stops.")
     if dither and len(colors) != 2:
-        raise ValueError("Dithered gradients require exactly 2 colours.")
+        raise ValidationFailed("Dithered gradients require exactly 2 colours.")
+    check_region_size(width, height, field="gradient region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
@@ -56,6 +67,7 @@ def fill_gradient(
         "angle": float(angle),
         "dither": bool(dither),
         "x": int(x), "y": int(y), "width": width, "height": height,
+        "respect_alpha": bool(respect_alpha),
     }
     snippet = """
     local stops = ARG.colors
@@ -77,7 +89,8 @@ def fill_gradient(
     local rad = math.rad(ARG.angle)
     local dx, dy = math.cos(rad), math.sin(rad)
     local function proj(px, py) return px * dx + py * dy end
-    local c1, c2, c3, c4 = proj(rx, ry), proj(rx + rw - 1, ry), proj(rx, ry + rh - 1), proj(rx + rw - 1, ry + rh - 1)
+    local c1, c2 = proj(rx, ry), proj(rx + rw - 1, ry)
+    local c3, c4 = proj(rx, ry + rh - 1), proj(rx + rw - 1, ry + rh - 1)
     local pmin = math.min(c1, c2, c3, c4)
     local pmax = math.max(c1, c2, c3, c4)
     local span = pmax - pmin
@@ -103,7 +116,15 @@ def fill_gradient(
           else
             px = to_pixel(spr, color_at(t))
           end
-          img_set(img, xx, yy, px)
+          -- Guarded on the pixel's existing alpha. Writing unconditionally filled
+          -- the transparent area around the artwork as well as the artwork, so the
+          -- most natural way to shade a sprite silently destroyed its silhouette:
+          -- a 32x32 sphere of 477 opaque pixels came back with 584.
+          if (not ARG.respect_alpha) or img_solid(spr, img, xx, yy) then
+            img_set(img, xx, yy, px)
+          else
+            note_skipped()
+          end
         end
       end
     end
@@ -131,14 +152,18 @@ def add_outline(
             (recolour the shape's border pixels).
     """
     if connectivity not in (4, 8):
-        raise ValueError("connectivity must be 4 or 8")
+        raise ValidationFailed("connectivity must be 4 or 8")
     if where not in ("outside", "inside"):
-        raise ValueError('where must be "outside" or "inside"')
+        raise ValidationFailed('where must be "outside" or "inside"')
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
         "color": parse_color(color),
-        "thickness": max(1, int(thickness)),
+        "thickness": check_count(
+            "thickness", max(1, int(thickness)), MAX_OUTLINE_THICKNESS, minimum=1,
+            remedy="Each pixel of thickness is another full-canvas pass; outline in "
+                   "several calls if you really need more.",
+        ),
         "connectivity": connectivity,
         "where": where,
     }
@@ -200,11 +225,11 @@ def add_drop_shadow(
         "color": parse_color(color),
         "opacity": max(0, min(255, int(opacity))),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     local target = find_layer(spr, ARG.layer)
     if target.isGroup then error("Cannot shadow a group layer: " .. target.name) end
-    local framenum = clamp_frame(spr, ARG.frame)
+    local framenum = require_frame(spr, ARG.frame, "frame")
     local src = get_draw_image(spr, target, framenum)
     local shadow = Image(spr.spec); shadow:clear()
     local sc = to_pixel(spr, ARG.color)
@@ -403,6 +428,7 @@ def fill_checkerboard(
     frame: int = 1,
 ) -> dict:
     """Fill a region with a 2-colour checkerboard of `size`-pixel squares."""
+    check_region_size(width, height, field="checkerboard region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),

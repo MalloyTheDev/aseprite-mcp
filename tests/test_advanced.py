@@ -116,6 +116,6 @@ def test_reference_layer_locked():
     sprite.create_sprite("a/ref.aseprite", 8, 8, "rgb")
     export.export_png("a/ref.aseprite", "a/refsrc.png", 1, 1)
     info = reference.add_reference_layer("a/ref.aseprite", "a/refsrc.png", "reference", opacity=100)
-    ref = next(l for l in info["layers"] if l["name"] == "reference")
+    ref = next(lyr for lyr in info["layers"] if lyr["name"] == "reference")
     assert ref["isEditable"] is False
     assert ref["opacity"] == 100

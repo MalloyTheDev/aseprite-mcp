@@ -26,7 +26,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **108 tools** — including high-level **workflow** tools that scaffold and validate whole
+- **117 tools**, including high-level **workflow** tools that scaffold and validate whole
   assets in one call, and a **batch op-runner** that applies many edits atomically in a
   single Aseprite process — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
@@ -132,8 +132,16 @@ Everything is configurable via environment variables (all optional):
 | --- | --- | --- |
 | `ASEPRITE_PATH` | Full path to `Aseprite.exe` / `aseprite`. | Auto-detected (Steam, standalone, PATH). |
 | `ASEPRITE_MCP_WORKSPACE` | Folder where **relative** sprite paths are resolved. | `<repo>/workspace` |
-| `ASEPRITE_MCP_TIMEOUT` | Per-operation timeout in seconds. | `90` |
+| `ASEPRITE_MCP_TIMEOUT` | Per-operation timeout in seconds (clamped to 1-3600). | `90` |
 | `ASEPRITE_MCP_ALLOW_ABSOLUTE` | Allow absolute / workspace-escaping paths (`1`/`true` to enable). | off (sandboxed) |
+| `ASEPRITE_MCP_TRANSPORT` | `stdio`, `streamable-http`, or `sse`. See the warning below before using an HTTP transport. | `stdio` |
+
+`stdio` is the right default: it is what desktop MCP clients launch, and it keeps the
+server reachable only by the process that started it. The HTTP transports exist for
+agents that cannot spawn a local process. Treat them as a deliberate exposure decision:
+this server's file access is scoped by a workspace directory, not by an identity, so
+binding it to a reachable port gives every caller that can reach it the same filesystem
+access the local user has. Bind to loopback, or put authentication in front of it.
 
 On this machine Aseprite was detected at
 `C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe`, so `ASEPRITE_PATH`
@@ -142,6 +150,14 @@ is not strictly required — but setting it explicitly is the most reliable.
 ---
 
 ## Register with an MCP client
+
+**Using something other than Claude?** [`docs/CLIENTS.md`](docs/CLIENTS.md) has a
+copy-paste config block per client format (Codex CLI's TOML, Continue's `config.yaml`,
+Zed's `context_servers`, Goose's `extensions`, and the `mcpServers` JSON that Claude
+Desktop, Cursor, Cline, Roo Code, Windsurf and LM Studio share), the config file path for
+each one, the launch form that avoids the Windows venv lock, and the strict-mode notes for
+OpenAI or Grok style function-calling bridges. The two quick starts below cover the common
+case.
 
 Replace `/ABSOLUTE/PATH/TO/aseprite-mcp` below with the absolute path to your clone.
 
@@ -180,8 +196,11 @@ ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.j
 }
 ```
 
-Restart the client; the `aseprite` server and its 108 tools will be available. Ask the
-agent to run `health_check` to confirm Aseprite is wired up correctly.
+Restart the client; the `aseprite` server and its full tool set will be available (the
+current count is at the top of [`docs/TOOLS.md`](docs/TOOLS.md)). Ask the agent to run
+`health_check` to confirm Aseprite is wired up correctly, and see
+[`docs/CLIENTS.md`](docs/CLIENTS.md#4-verify-it-works) for what the answer should look
+like.
 
 ---
 
@@ -457,7 +476,7 @@ The agent's own "eyes" remain `render_preview`, which returns a PNG it can inspe
 ## How it works
 
 ```
-client (Claude) ──MCP──> aseprite-mcp (FastMCP, Python)
+client (any MCP client) ──MCP──> aseprite-mcp (MCPServer, Python)
                               │  builds a Lua body + ARG table
                               ▼
                          luagen.assemble_script  ──>  temp .lua
@@ -479,7 +498,7 @@ flags (`--sheet`, `--scale`, `--data`, …).
 
 ```
 src/aseprite_mcp/
-  app.py          FastMCP instance + usage instructions
+  app.py          MCPServer instance + usage instructions
   config.py       locate Aseprite, workspace, path resolution
   luagen.py       Python->Lua serializer + shared Lua PRELUDE + script assembly
   runner.py       run_lua() / run_cli(), parse sentinel JSON
@@ -500,10 +519,18 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
   `ASEPRITE_MCP_WORKSPACE` (default `<repo>/workspace`). Absolute paths and paths that
   escape the workspace via `..` (or a symlink that points outside it) are **rejected**
   unless you set `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
-- **No-clobber by default.** Output-writing tools (`create_sprite`, `save_sprite_as`,
-  `export_*`, `export_game_asset_bundle`) refuse to overwrite an existing file; pass
-  `overwrite=True` to replace it on purpose. Multi-file exports validate every target up
-  front, so they fail before writing anything if any target already exists.
+- **No-clobber by default.** Every output-writing tool (`create_sprite`, `save_sprite_as`,
+  `import_image`, all `export_*`, `export_game_asset_bundle`) refuses to overwrite an
+  existing file; pass `overwrite=True` to replace it on purpose. Multi-file exports
+  validate every target up front, so they fail before writing anything if any target
+  already exists. Pattern exports (`frames/walk_{frame}.png`) are expanded by Aseprite
+  itself, so they are checked against everything the pattern could match.
+- **Bounded work per call.** A single call cannot exhaust the host: batch op-lists and
+  pixel/tile/colour lists are capped, canvases are capped at 16384px per axis **and**
+  16,777,216 pixels of area (so two individually-legal axes can't add up to gigabytes),
+  inline base64 images at 32 MB, and text rasterization is budgeted while it renders.
+  `ASEPRITE_MCP_TIMEOUT` is clamped to 1-3600s so it can't be set to something that
+  disables the timeout.
 - **No shell, no injection.** Aseprite is invoked with list-form arguments (never a
   shell), and every user value is passed into generated Lua through an escaped `ARG`
   table — user input is never concatenated into Lua source.
@@ -534,6 +561,11 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
   it usually names the bad argument (e.g. a missing layer/frame).
 - **Tests all skip.** That's expected when Aseprite isn't installed/found; set
   `ASEPRITE_PATH` to run them for real.
+
+Client-side problems (sprites landing in a venv directory, a text-only model that cannot
+see `render_preview`, the Windows lock on `.venv\Scripts\aseprite-mcp.exe` that blocks
+`uv sync`, a server that never appears) are covered in
+[`docs/CLIENTS.md`](docs/CLIENTS.md#5-troubleshooting).
 
 ## Development
 

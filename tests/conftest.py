@@ -23,8 +23,18 @@ from aseprite_mcp import config as ase_config
 PURE_PYTHON_TESTS = (
     "test_unit", "test_manifest", "test_validation", "test_errors", "test_models",
     "test_imports", "test_oplib", "test_output_paths", "test_limits", "test_properties",
-    "test_engine_godot", "test_slice_metadata", "test_asset_spec", "test_slice_data",
+    "test_engine_godot", "test_slice_metadata", "test_asset_spec", "test_hardening",
+    "test_concurrency", "test_minecraft", "test_minecraft_tools", "test_strict_args",
+    "test_path_sandbox", "test_error_hierarchy", "test_schema_portability",
+    "test_quality", "test_slice_data",
 )
+# Deliberately absent: test_walk_template_batch, which compares a batched scaffold against
+# the per-frame one it replaced and so needs the real editor. It belongs to the
+# --run-aseprite tier, not here.
+
+# NOTE: this is an ALLOWLIST, so a new pure-Python test file defaults to SKIPPED until it is
+# added here -- which looks identical to passing in a summary line. If you add a test file
+# that does not need Aseprite, add it above.
 
 
 def pytest_addoption(parser):

@@ -13,12 +13,27 @@ from aseprite_mcp.tools import (
 
 
 def test_gradient_linear():
+    # The layer is filled first because a gradient now shades existing pixels rather
+    # than painting the rectangle: on an empty canvas there is nothing to shade. This
+    # test previously relied on the gradient writing over transparency, which is the
+    # behaviour that destroyed silhouettes.
     sprite.create_sprite("e/grad.aseprite", 16, 1, "rgb")
+    drawing.fill_layer("e/grad.aseprite", "#808080")
     effects.fill_gradient("e/grad.aseprite", ["#000000", "#ffffff"], "linear", angle=0)
     px = inspect.get_pixels("e/grad.aseprite", 0, 0, 16, 1)
     row = px["pixels"][0]
     # left end darker than right end
     assert int(row[0][1:3], 16) < int(row[-1][1:3], 16)
+
+
+def test_gradient_on_an_empty_canvas_paints_nothing():
+    """The corollary: with nothing to shade, a gradient is a no-op that says so."""
+    sprite.create_sprite("e/grad_empty.aseprite", 16, 1, "rgb")
+    result = effects.fill_gradient(
+        "e/grad_empty.aseprite", ["#000000", "#ffffff"], "linear", angle=0
+    )
+    assert result["pixels_written"] == 0
+    assert result["pixels_skipped"] == 16
 
 
 def test_invert_colors():
@@ -50,7 +65,7 @@ def test_drop_shadow_adds_layer():
     sprite.create_sprite("e/shadow.aseprite", 8, 8, "rgb")
     drawing.draw_rectangle("e/shadow.aseprite", 1, 1, 3, 3, "#ffffff", filled=True)
     info = effects.add_drop_shadow("e/shadow.aseprite", "Layer 1", 1, 1, "#000000", opacity=128)
-    names = [l["name"] for l in info["layers"]]
+    names = [lyr["name"] for lyr in info["layers"]]
     assert "Layer 1 shadow" in names
 
 

@@ -14,8 +14,40 @@ The runner parses those sentinel lines back into Python.
 
 from __future__ import annotations
 
+import secrets
+
+# Legacy un-nonced sentinels. Retained because `aseprite_mcp.luagen` re-exports them,
+# but no longer used to frame real output: see `new_nonce` for why.
 RESULT_PREFIX = "@@ASEMCP@@"
 ERROR_PREFIX = "@@ASEMCP_ERR@@"
+
+
+def new_nonce() -> str:
+    """A fresh token scoping one run's stdout sentinels to that run.
+
+    Sentinels are recognised by position: the runner treats any stdout line starting
+    with the result or error prefix as protocol. With a fixed prefix, any caller-supplied
+    string that reaches stdout, a layer name, a tag, a filename, can therefore claim to
+    *be* the protocol, and escaping alone is a losing game because it has to enumerate
+    every byte sequence the reader might treat as a line break.
+
+    A per-run nonce removes the class instead of patching instances: the payload is
+    serialized before the nonce is generated and never appears in the script's input,
+    so it cannot name the token it would have to guess. Escaping the line terminators is
+    still worth doing (see `_esc`), but it is now defence in depth rather than the
+    only thing standing between a layer name and a forged result.
+    """
+    return secrets.token_hex(8)
+
+
+def result_prefix(nonce: str) -> str:
+    """The success sentinel for `nonce`. Distinct from `error_prefix` by construction."""
+    return f"@@ASEMCP:{nonce}@@"
+
+
+def error_prefix(nonce: str) -> str:
+    """The failure sentinel for `nonce`."""
+    return f"@@ASEMCP_ERR:{nonce}@@"
 
 
 # --------------------------------------------------------------------------- #
@@ -37,7 +69,7 @@ def _lua_string(s: str) -> str:
             out.append("\\t")
         elif o < 32 or o == 127:
             # Zero-padded decimal escape is unambiguous regardless of the next char.
-            out.append("\\%03d" % o)
+            out.append(f"\\{o:03d}")
         else:
             out.append(ch)
     out.append('"')
@@ -74,6 +106,30 @@ def to_lua(value) -> str:
 # --------------------------------------------------------------------------- #
 PRELUDE = r"""
 -- ===== number / table helpers =====================================
+-- ===== pixel accounting ===========================================
+-- Every write to an image goes through img_set, blend_over or flood_fill_img, so
+-- counting here gives every tool an honest report of what it did without each one
+-- having to keep its own tally. A draw whose coordinates fall off the canvas used to
+-- be silently dropped and still return ok: `draw_rectangle(10,10,20,20)` on a 16x16
+-- canvas asked for 400 pixels, landed 36, and said nothing. The counts are attached
+-- to RESULT by the harness only when a run actually touched pixels, so a tool that
+-- writes nothing does not grow a misleading "0".
+local _px_written, _px_clipped, _px_skipped, _px_masked = 0, 0, 0, 0
+
+-- The active selection, or nil. Set by open_sprite when a sidecar mask is loaded.
+--
+-- It has to be consulted by hand: a selection clips app.useTool and the filter commands,
+-- but NOT Image:drawPixel, which is what every drawing tool here goes through. Without
+-- this check a selection would appear to work for effects and be silently ignored for
+-- drawing, which is worse than not supporting selections at all.
+local _sel = nil
+
+-- For tools that decline a write on purpose (a gradient leaving transparent pixels
+-- alone, say). Deliberate and out-of-bounds are different facts and are reported so.
+local function note_skipped(n)
+  _px_skipped = _px_skipped + (n or 1)
+end
+
 local function clamp255(x)
   x = math.floor(tonumber(x) + 0.5)
   if x < 0 then return 0 elseif x > 255 then return 255 else return x end
@@ -92,7 +148,7 @@ local function _is_array(t)
 end
 
 local function _esc(s)
-  return (s:gsub('[%c"\\]', function(ch)
+  s = s:gsub('[%c"\\]', function(ch)
     local b = string.byte(ch)
     if ch == '"' then return '\\"'
     elseif ch == '\\' then return '\\\\'
@@ -102,7 +158,17 @@ local function _esc(s)
     elseif b == 8 then return '\\b'
     elseif b == 12 then return '\\f'
     else return string.format('\\u%04x', b) end
-  end))
+  end)
+  -- Lua's %c class is byte-wise, so the pattern above covers only 0x00-0x1F and 0x7F.
+  -- Bytes 128 and up pass through untouched, which means the UTF-8 encodings of the
+  -- Unicode line terminators reach stdout intact. Python's str.splitlines() treats
+  -- U+0085, U+2028 and U+2029 as line breaks, so an unescaped one lets a value inside
+  -- a JSON string start a new stdout line. Escape them to keep "one result, one line"
+  -- true for the reader as well as for Lua.
+  s = s:gsub("\194\133", "\\u0085")
+  s = s:gsub("\226\128\168", "\\u2028")
+  s = s:gsub("\226\128\169", "\\u2029")
+  return s
 end
 
 local function json_encode(v)
@@ -222,7 +288,11 @@ end
 -- Alpha-composite colour (r,g,b) with coverage `cov` (0..1) over the pixel at
 -- (x,y). On RGB sprites this anti-aliases; on indexed/gray it thresholds at 0.5.
 local function blend_over(spr, img, x, y, r, g, b, cov)
-  if x < 0 or y < 0 or x >= img.width or y >= img.height or cov <= 0 then return end
+  if cov <= 0 then return end
+  if x < 0 or y < 0 or x >= img.width or y >= img.height then
+    _px_clipped = _px_clipped + 1
+    return
+  end
   x, y = math.floor(x), math.floor(y)
   if cov > 1 then cov = 1 end
   if spr.colorMode == ColorMode.RGB then
@@ -235,8 +305,10 @@ local function blend_over(spr, img, x, y, r, g, b, cov)
     local ng = (g * sa + dg * dfa * (1 - sa)) / outa
     local nb = (b * sa + db * dfa * (1 - sa)) / outa
     img:drawPixel(x, y, app.pixelColor.rgba(clamp255(nr), clamp255(ng), clamp255(nb), clamp255(outa * 255)))
+    _px_written = _px_written + 1
   elseif cov >= 0.5 then
     img:drawPixel(x, y, rgba_to_px(spr, r, g, b, 255))
+    _px_written = _px_written + 1
   end
 end
 
@@ -296,6 +368,22 @@ local function open_sprite(path)
   local spr = app.open(path)
   if spr == nil then error("Could not open sprite: " .. tostring(path)) end
   app.sprite = spr
+
+  -- A selection is NOT stored in the .aseprite file: reopen a sprite and it is empty
+  -- again. Every tool call here is its own Aseprite run, so a selection is kept in a
+  -- sidecar beside the sprite and reloaded on open, which is what lets it scope the
+  -- edits that follow rather than dying with the process that made it.
+  --
+  -- ARG.use_selection == false opts out for one call. Whether a mask was applied is
+  -- always reported, because an edit that silently touched a fraction of what the
+  -- caller asked for is exactly the failure this codebase keeps turning up.
+  if ARG.use_selection ~= false then
+    local mask_path = tostring(path):gsub("%.[^./\\]+$", "") .. ".msk"
+    if app.fs.isFile(mask_path) then
+      app.command.LoadMask{ filename = mask_path }
+      if not spr.selection.isEmpty then _sel = spr.selection end
+    end
+  end
   return spr
 end
 
@@ -328,17 +416,19 @@ local function find_layer(spr, ref)
   return lyr
 end
 
-local function clamp_frame(spr, n)
-  n = math.floor(tonumber(n) or 1)
-  if n < 1 then n = 1 end
-  if n > #spr.frames then n = #spr.frames end
-  return n
-end
-
 -- ===== drawing primitives (operate on an Image, sprite-space coords) ======
 local function img_set(img, x, y, px)
   if x >= 0 and y >= 0 and x < img.width and y < img.height then
+    -- contains() costs roughly a quarter of a microsecond, so a full 256x256 canvas is
+    -- about 16ms: cheap enough to check per pixel rather than precomputing a bitmap.
+    if _sel ~= nil and not _sel:contains(math.floor(x), math.floor(y)) then
+      _px_masked = _px_masked + 1
+      return
+    end
     img:drawPixel(math.floor(x), math.floor(y), px)
+    _px_written = _px_written + 1
+  else
+    _px_clipped = _px_clipped + 1
   end
 end
 
@@ -429,6 +519,7 @@ local function flood_fill_img(img, x, y, px)
     if px0 >= 0 and py0 >= 0 and px0 < img.width and py0 < img.height
        and img:getPixel(px0, py0) == target then
       img:drawPixel(px0, py0, px)
+      _px_written = _px_written + 1
       stack[#stack + 1] = { px0 + 1, py0 }
       stack[#stack + 1] = { px0 - 1, py0 }
       stack[#stack + 1] = { px0, py0 + 1 }
@@ -618,8 +709,17 @@ end
 """
 
 
-def assemble_script(body: str, args: dict | None = None) -> str:
-    """Wrap a tool body with the ARG table, the prelude, and the pcall harness."""
+def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
+    """Wrap a tool body with the ARG table, the prelude, and the pcall harness.
+
+    `nonce` is required, and must come from `new_nonce()` per run. The caller keeps it
+    to parse the output; see `new_nonce` for why a fixed sentinel is not safe.
+
+    The error branch json_encodes the message rather than printing it raw. Lua error
+    text embeds caller data (a missing layer name, an unparseable colour), so printing
+    `tostring(_err)` unescaped puts an unescaped newline on stdout and splits one
+    logical error across lines.
+    """
     arg_literal = to_lua(args or {})
     return (
         f"local ARG = {arg_literal}\n"
@@ -630,8 +730,25 @@ def assemble_script(body: str, args: dict | None = None) -> str:
         "end\n"
         "local _ok, _err = pcall(_main)\n"
         "if _ok then\n"
-        f'  print("{RESULT_PREFIX}" .. json_encode(RESULT))\n'
+        # Attached here rather than by each tool, so every pixel-writing tool reports
+        # what it actually did. Only when something was touched: a tool that writes no
+        # pixels should not grow a "0" that reads as a claim about pixels.
+        "  if type(RESULT) == 'table' and\n"
+        "     (_px_written > 0 or _px_clipped > 0 or _px_skipped > 0) then\n"
+        "    RESULT.pixels_written = _px_written\n"
+        "    if _px_clipped > 0 then RESULT.pixels_clipped = _px_clipped end\n"
+        "    if _px_skipped > 0 then RESULT.pixels_skipped = _px_skipped end\n"
+        "    if _px_masked > 0 then RESULT.pixels_outside_selection = _px_masked end\n"
+        "  end\n"
+        # Reported whenever a mask was active, even if it let everything through: the
+        # caller needs to know an edit was scoped rather than infer it from counts. An
+        # edit that silently touched a fraction of what was asked for is precisely the
+        # failure mode this project keeps finding.
+        "  if type(RESULT) == 'table' and _sel ~= nil then\n"
+        "    RESULT.selection_applied = true\n"
+        "  end\n"
+        f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"
-        f'  print("{ERROR_PREFIX}" .. tostring(_err))\n'
+        f'  print("{error_prefix(nonce)}" .. json_encode(tostring(_err)))\n'
         "end\n"
     )

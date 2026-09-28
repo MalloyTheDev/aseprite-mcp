@@ -16,12 +16,21 @@ from pathlib import Path
 
 from ..app import mcp
 from ..core import validation
-from ..core.errors import ExportError
+from ..core.errors import ExportError, ValidationFailed
+from ..core.limits import (
+    MAX_BATCH_OPERATIONS,
+    MAX_FRAMES_PER_DIRECTION,
+    MAX_GRID_CELLS,
+    MAX_WALK_DIRECTIONS,
+    check_count,
+    check_list_length,
+)
 from ..core.manifest import export_entry, file_entry, sprite_summary, workflow_manifest
 from ..core.models import Rect
 from ..core.paths import ensure_output_path
 from ..core.runner import AsepriteError
 from . import (
+    batch,
     cels,
     drawing,
     effects,
@@ -156,9 +165,15 @@ def create_tileset_project(
     Returns a ``workflow_manifest.v1`` manifest with a tilemap block mapping tile
     names to their tileset indices.
     """
-    tile_defs = tiles or _DEFAULT_TILES
+    # `tiles or _DEFAULT_TILES` made the guard below unreachable: an explicitly
+    # empty list silently got the default tiles instead of being rejected.
+    tile_defs = _DEFAULT_TILES if tiles is None else list(tiles)
     if not tile_defs:
-        raise ValueError("tiles must be non-empty when provided.")
+        raise ValidationFailed("tiles must be non-empty when provided.")
+    check_list_length(
+        "tiles", tile_defs, MAX_GRID_CELLS,
+        remedy="Each tile is its own Aseprite launch; add the rest with add_tile.",
+    )
     filename = _aseprite_name(name)
     sprite.create_sprite(filename, columns * tile_size, rows * tile_size, "rgb")
     tilemap.create_tilemap_layer(filename, "tiles", tile_size, tile_size, columns, rows)
@@ -373,7 +388,14 @@ def _grid_sheet(filename: str, cell: int, names: list[str], columns: int | None,
     """Scaffold a grid sheet: a cell per name, each with a placeholder + a named slice.
     Returns the final get_sprite_info dict. (Shared by icon_set / rpg_item_sheet.)"""
     if len(set(names)) != len(names):
-        raise ValueError("Cell/slice names must be unique.")
+        raise ValidationFailed("Cell/slice names must be unique.")
+    # Each cell costs a placeholder draw plus a slice, so the cell count is a
+    # launch count until this scaffold is batched too (see the note on the walk
+    # template): bound it here, where both grid-sheet scaffolds pass through.
+    check_list_length(
+        "cells", names, MAX_GRID_CELLS,
+        remedy="Scaffold a smaller sheet, or split it across several sprites.",
+    )
     n = len(names)
     cols = columns or min(n, 4)
     rows = math.ceil(n / cols)
@@ -411,8 +433,10 @@ def create_icon_set(
     Returns a ``workflow_manifest.v1`` manifest (kind "icon_set"); the per-icon regions
     appear as slices under `sprite.slices`.
     """
-    if count < 1:
-        raise ValueError("count must be >= 1")
+    count = check_count(
+        "count", count, MAX_GRID_CELLS, minimum=1,
+        remedy="Scaffold a smaller sheet, or split it across several sprites.",
+    )
     filename = _aseprite_name(name)
     info = _grid_sheet(filename, icon_size, [f"icon_{i}" for i in range(count)], columns, "circle")
     return workflow_manifest(
@@ -421,7 +445,8 @@ def create_icon_set(
         created_files=[file_entry("source_sprite", info["path"], "aseprite")],
         suggested_next_actions=[
             "Draw each icon inside its named slice region.",
-            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', tile_multiple={icon_size}).",
+            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', "
+            f"tile_multiple={icon_size}).",
             f"Export the atlas: export_game_asset_bundle('{filename}').",
         ],
     )
@@ -437,9 +462,11 @@ def create_rpg_item_sheet(
     Returns a ``workflow_manifest.v1`` manifest (kind "rpg_item_sheet"); item regions
     appear as slices (named after each item) under `sprite.slices`.
     """
-    item_names = items or _DEFAULT_ITEMS
+    # As in create_tileset_project: `items or _DEFAULT_ITEMS` made this guard
+    # unreachable, so an explicitly empty list quietly became the default items.
+    item_names = _DEFAULT_ITEMS if items is None else list(items)
     if not item_names:
-        raise ValueError("items must be non-empty when provided.")
+        raise ValidationFailed("items must be non-empty when provided.")
     filename = _aseprite_name(name)
     info = _grid_sheet(filename, item_size, list(item_names), columns, "rect")
     return workflow_manifest(
@@ -448,7 +475,8 @@ def create_rpg_item_sheet(
         created_files=[file_entry("source_sprite", info["path"], "aseprite")],
         suggested_next_actions=[
             "Draw each item inside its named slice region.",
-            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', tile_multiple={item_size}).",
+            f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', "
+            f"tile_multiple={item_size}).",
             f"Export the atlas: export_game_asset_bundle('{filename}').",
         ],
     )
@@ -468,18 +496,44 @@ def make_8_direction_walk_template(
     Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifest
     (kind "walk_template") with an animation block listing the directions/tags.
     """
-    if frames_per_direction < 1:
-        raise ValueError("frames_per_direction must be >= 1")
-    dirs = directions or _DIRECTIONS_8
+    frames_per_direction = check_count(
+        "frames_per_direction", frames_per_direction, MAX_FRAMES_PER_DIRECTION, minimum=1,
+        remedy="Every frame is a full copy of frame 1; add more with add_frame if needed.",
+    )
+    dirs = list(directions or _DIRECTIONS_8)
+    check_list_length(
+        "directions", dirs, MAX_WALK_DIRECTIONS,
+        remedy="Tag the extra directions separately with add_tag.",
+    )
     total = frames_per_direction * len(dirs)
+
+    # One launch to read the starting frame count, then one launch per batch. This used
+    # to be a per-frame loop of add_frame + get_sprite_info -- two Aseprite launches for
+    # every frame, and nothing bounded the call as a whole, since the per-operation
+    # timeout applies to each launch individually. The per-frame get_sprite_info was
+    # only re-reading a count we can keep ourselves.
     info = inspect.get_sprite_info(filename)
-    while info["frameCount"] < total:
-        frames.add_frame(filename, frame_duration_ms, copy_from=1)
-        info = inspect.get_sprite_info(filename)
+    ops: list[dict] = [
+        {"op": "add_frame", "args": {"duration_ms": frame_duration_ms, "copy_from": 1}}
+        for _ in range(max(0, total - info["frameCount"]))
+    ]
+    # Tags come after the frames in the same ordered list: ops run in order against one
+    # open sprite, so by the time a tag is added the frames it spans exist.
+    ops += [
+        {"op": "add_tag", "args": {
+            "name": direction,
+            "from": i * frames_per_direction + 1,
+            "to": (i + 1) * frames_per_direction,
+            "direction": "forward",
+        }}
+        for i, direction in enumerate(dirs)
+    ]
+    for start in range(0, len(ops), MAX_BATCH_OPERATIONS):
+        batch.apply_operations(filename, ops[start:start + MAX_BATCH_OPERATIONS])
+    # Frames that already existed keep their own durations otherwise, so this still
+    # runs. It stays a single Lua-side loop rather than one op per frame: one launch
+    # either way, and it does not grow the batch with the sprite's existing frames.
     frames.set_all_frame_durations(filename, frame_duration_ms)
-    for i, direction in enumerate(dirs):
-        start = i * frames_per_direction + 1
-        tags.add_tag(filename, direction, start, start + frames_per_direction - 1, "forward")
 
     final = inspect.get_sprite_info(filename)
     return workflow_manifest(

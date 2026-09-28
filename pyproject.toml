@@ -1,6 +1,6 @@
 [project]
 name = "aseprite-mcp"
-version = "0.7.0"
+version = "0.7.1"
 description = "An extensive Model Context Protocol (MCP) server for driving Aseprite (pixel-art editor) headlessly via Lua scripting and the Aseprite CLI."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,7 +15,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "mcp[cli]>=1.4.0",
+    "mcp[cli]>=2.0.0",
     "pillow>=12.2.0",
 ]
 
@@ -28,11 +28,44 @@ Issues = "https://github.com/MalloyTheDev/aseprite-mcp/issues"
 aseprite-mcp = "aseprite_mcp.server:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "hypothesis>=6"]
+dev = ["pytest>=8.0", "hypothesis>=6", "ruff>=0.14"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+# 110 matches the codebase's existing style; only a handful of lines ever exceeded it.
+line-length = 110
+target-version = "py310"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import sorting
+    "B",        # bugbear (mutable defaults, raise-without-from, zip-without-strict)
+    "UP",       # pyupgrade
+    "C4",       # comprehension clarity
+    "SIM",      # simplifications
+    "RUF",      # ruff-specific
+]
+ignore = [
+    # The prose in this codebase deliberately uses typographic characters
+    # (em/en dashes, x). Flagging them as "ambiguous" fights the house style.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tool modules exist to register @mcp.tool() functions; importing them is the point.
+"src/aseprite_mcp/server.py" = ["F401"]
+"src/aseprite_mcp/__init__.py" = ["F401"]
+# Shim modules re-export the core API for backwards compatibility.
+"src/aseprite_mcp/config.py" = ["F401"]
+"src/aseprite_mcp/errors.py" = ["F401"]
+"src/aseprite_mcp/luagen.py" = ["F401"]
+"src/aseprite_mcp/runner.py" = ["F401"]
 
 [build-system]
 requires = ["hatchling"]

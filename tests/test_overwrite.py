@@ -10,6 +10,7 @@ import pytest
 
 from aseprite_mcp.core import config
 from aseprite_mcp.core.errors import ExportError, WorkspaceError
+from aseprite_mcp.core.paths import ensure_output_path
 from aseprite_mcp.tools import export, sprite, workflow
 
 
@@ -79,7 +80,9 @@ def test_bundle_fails_before_writing_any_file():
     workflow.create_character_sprite("w/ov_b2", 16, 16)
     # Pre-create the LAST planned output (manifest.json); the up-front validation
     # pass should reject the bundle before any image export runs.
-    manifest = config.resolve("ov_b2_bundle/manifest.json")
+    # ensure_output_path, not config.resolve: a read-path resolve creates no directories,
+    # so the bundle folder has to be made before anything can be written into it.
+    manifest = ensure_output_path("ov_b2_bundle/manifest.json", overwrite=True)
     manifest.write_text("{}", encoding="utf-8")
     png = config.resolve("ov_b2_bundle/ov_b2.png")  # resolve only; file not created
 

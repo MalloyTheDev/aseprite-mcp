@@ -4,18 +4,27 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import os
 import tempfile
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
+from ..core.limits import (
+    MAX_CANVAS_DIMENSION,
+    MAX_CANVAS_PIXELS,
+    MAX_IMAGE_BYTES,
+    check_size_bytes,
+)
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
-_STAMP_BODY = """
+_STAMP_BODY = FRAME_GUARD_LUA + """
 local spr = open_sprite(ARG.src)
 local layer = find_layer(spr, ARG.layer)
 if layer.isGroup then error("Cannot stamp onto a group layer: " .. layer.name) end
-local framenum = clamp_frame(spr, ARG.frame)
+local framenum = require_frame(spr, ARG.frame, "frame")
 local img = get_draw_image(spr, layer, framenum)
 
 local source = app.open(ARG.source)
@@ -40,6 +49,60 @@ def _stamp(args: dict) -> dict:
     return run_lua(_STAMP_BODY, args)
 
 
+def check_image_dimensions(path: str) -> tuple[int, int] | None:
+    """Reject an image whose declared dimensions exceed the canvas limits.
+
+    A byte cap does not bound the raster: PNG and friends compress a solid colour
+    to almost nothing, so a payload well under the size limit can declare
+    16384x16384 and make Aseprite allocate gigabytes the moment it opens the file.
+    Pillow parses only the header here, so the dimensions are read without decoding
+    any pixels.
+
+    Returns the (width, height) that were checked, or None when the format is not
+    one Pillow recognizes (notably Aseprite's own .aseprite/.ase), in which case no
+    claim is made and the caller proceeds.
+    """
+    from PIL import Image as PILImage
+    from PIL import UnidentifiedImageError
+
+    try:
+        # open() parses the header only, no pixel decode. Pillow applies its own
+        # bomb guard here too, but its threshold (2x MAX_IMAGE_PIXELS, ~179 Mpx) is
+        # an order of magnitude above this project's canvas cap, so the explicit
+        # check below is what rejects anything in between.
+        with PILImage.open(path) as img:
+            width, height = img.size
+    except PILImage.DecompressionBombError as exc:
+        raise ValidationFailed(
+            f"Source image rejected as a decompression bomb by Pillow: {exc}"
+        ) from exc
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None
+
+    if width > MAX_CANVAS_DIMENSION or height > MAX_CANVAS_DIMENSION:
+        raise ValidationFailed(
+            f"Source image is {width}x{height}; maximum is {MAX_CANVAS_DIMENSION}px "
+            "per axis. Resize it before stamping."
+        )
+    if width * height > MAX_CANVAS_PIXELS:
+        raise ValidationFailed(
+            f"Source image is {width}x{height} ({width * height} pixels); maximum is "
+            f"{MAX_CANVAS_PIXELS}. Resize it before stamping."
+        )
+    return width, height
+
+
+def decoded_size(b64: str) -> int:
+    """Decoded byte count of a base64 string, without decoding it.
+
+    Base64 encodes N bytes as ceil(4N/3) characters, then pads to a multiple of 4.
+    Dropping the padding makes the inverse exact for every N, so this is not an
+    estimate: it lets an oversized payload be rejected before the decoded copy is
+    allocated, without rejecting a payload that lands exactly on the cap.
+    """
+    return (len(b64.rstrip("=")) * 3) // 4
+
+
 @mcp.tool()
 def stamp_file(
     filename: str,
@@ -61,9 +124,11 @@ def stamp_file(
         opacity: 0-255.
         blend_mode: Blend mode for compositing (normal, multiply, …).
     """
+    source_path = resolve_path(source)
+    check_image_dimensions(str(source_path))
     args = {
         "src": lua_path(resolve_path(filename)),
-        "source": lua_path(resolve_path(source)),
+        "source": lua_path(source_path),
         "layer": layer, "frame": int(frame),
         "source_frame": int(source_frame),
         "x": int(x), "y": int(y),
@@ -87,20 +152,32 @@ def draw_image_base64(
     """Composite an inline base64-encoded PNG (or other image) onto a layer at (x, y).
 
     Useful for pasting externally generated artwork. `image_base64` may include a
-    `data:image/png;base64,` prefix.
+    `data:image/png;base64,` prefix. The decoded image is capped at 32 MB; for
+    anything larger, write the file into the workspace and use `stamp_file`.
     """
     data = image_base64.strip()
     if data.startswith("data:"):
         data = data.split(",", 1)[-1]
+    # Size-check before decoding so an oversized payload never allocates its
+    # decoded copy. The post-decode check below still runs as a backstop.
+    check_size_bytes(
+        "image_base64 (decoded)", decoded_size(data), MAX_IMAGE_BYTES,
+        remedy="Write the image into the workspace and use stamp_file instead.",
+    )
     try:
         raw = base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise ValueError(f"image_base64 is not valid base64: {exc}")
+        raise ValidationFailed(f"image_base64 is not valid base64: {exc}") from exc
+    check_size_bytes(
+        "image_base64 (decoded)", len(raw), MAX_IMAGE_BYTES,
+        remedy="Write the image into the workspace and use stamp_file instead.",
+    )
 
     fd, tmp = tempfile.mkstemp(suffix=".png", prefix="asemcp_stamp_")
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(raw)
+        check_image_dimensions(tmp)
         args = {
             "src": lua_path(resolve_path(filename)),
             "source": lua_path(tmp),
@@ -112,7 +189,5 @@ def draw_image_base64(
         }
         return _stamp(args)
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass

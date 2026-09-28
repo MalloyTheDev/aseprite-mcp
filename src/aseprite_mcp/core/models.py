@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .errors import ValidationFailed
+
+
 # --------------------------------------------------------------------------- #
 # Geometry                                                                    #
 # --------------------------------------------------------------------------- #
@@ -19,7 +22,7 @@ class Point:
     y: int
 
     @classmethod
-    def of(cls, x, y) -> "Point":
+    def of(cls, x, y) -> Point:
         return cls(int(x), int(y))
 
 
@@ -29,7 +32,7 @@ class Size:
     height: int
 
     @classmethod
-    def of(cls, width, height) -> "Size":
+    def of(cls, width, height) -> Size:
         w, h = int(width), int(height)
         if w < 1 or h < 1:
             raise ValueError(f"size must be at least 1x1, got {w}x{h}")
@@ -44,7 +47,7 @@ class Rect:
     height: int
 
     @classmethod
-    def of(cls, x, y, width, height) -> "Rect":
+    def of(cls, x, y, width, height) -> Rect:
         return cls(int(x), int(y), int(width), int(height))
 
     @property
@@ -96,7 +99,7 @@ class ColorSpec:
     index: int | None = None
 
     @classmethod
-    def parse(cls, spec: str | None) -> "ColorSpec":
+    def parse(cls, spec: str | None) -> ColorSpec:
         """Parse a flexible colour string. Accepts "#RGB", "#RGBA", "#RRGGBB",
         "#RRGGBBAA", "r,g,b", "r,g,b,a", "index:N"/"idx:N", or a name (black, white,
         red, transparent, ...). Raises ValueError on anything unparseable."""
@@ -127,16 +130,16 @@ class ColorSpec:
                     r, g, b, a = (int(h[i:i + 2], 16) for i in (0, 2, 4, 6))
                 else:
                     raise ValueError
-            except ValueError:
-                raise ValueError(f"Invalid hex colour: {spec!r}")
+            except ValueError as exc:
+                raise ValueError(f"Invalid hex colour: {spec!r}") from exc
             return cls(r=r, g=g, b=b, a=a)
 
         if "," in s:
             parts = [p.strip() for p in s.split(",") if p.strip() != ""]
             try:
-                nums = [max(0, min(255, int(round(float(p))))) for p in parts]
-            except ValueError:
-                raise ValueError(f"Invalid numeric colour: {spec!r}")
+                nums = [max(0, min(255, round(float(p)))) for p in parts]
+            except ValueError as exc:
+                raise ValueError(f"Invalid numeric colour: {spec!r}") from exc
             if len(nums) == 3:
                 return cls(r=nums[0], g=nums[1], b=nums[2], a=255)
             if len(nums) == 4:
@@ -165,7 +168,7 @@ class Pixel:
     color: ColorSpec | None = None
 
     @classmethod
-    def of(cls, x, y, color=None) -> "Pixel":
+    def of(cls, x, y, color=None) -> Pixel:
         cs = color if (color is None or isinstance(color, ColorSpec)) else ColorSpec.parse(color)
         return cls(int(x), int(y), cs)
 
@@ -187,7 +190,7 @@ class LayerRef:
     value: str | int | None = None
 
     @classmethod
-    def of(cls, value) -> "LayerRef":
+    def of(cls, value) -> LayerRef:
         if value is None or isinstance(value, str):
             return cls(value)
         return cls(int(value))
@@ -200,11 +203,55 @@ class FrameRef:
     number: int
 
     @classmethod
-    def of(cls, number) -> "FrameRef":
+    def of(cls, number) -> FrameRef:
         n = int(number)
         if n < 1:
             raise ValueError(f"frame number is 1-based and must be >= 1, got {n}")
         return cls(n)
+
+    @classmethod
+    def arg(cls, name: str, number) -> int:
+        """Validate a caller-supplied frame argument and return it as an int.
+
+        Raises `ValidationFailed` (inside the typed hierarchy) rather than `ValueError`,
+        because this one is reached directly from tool arguments; `of` keeps raising
+        `ValueError` for internal use.
+
+        Only the *lower* bound is checkable here: whether frame N exists depends on the
+        sprite, which is not open yet. `FRAME_GUARD_LUA` re-checks the upper bound inside
+        Aseprite. Doing the cheap half in Python means the common mistake (a 0-based
+        frame number) fails without launching Aseprite at all.
+        """
+        try:
+            return cls.of(number).number
+        except (TypeError, ValueError) as exc:
+            raise ValidationFailed(
+                f"{name} must be a 1-based frame number (>= 1); got {number!r}. "
+                "Frame 1 is the first frame."
+            ) from exc
+
+
+# The Lua half of `FrameRef`. A tool body that takes a frame prepends this and calls
+# `require_frame(spr, ARG.frame, "frame")` instead of the prelude's `clamp_frame`.
+#
+# `clamp_frame` folded an out-of-range number into 1..#frames and said nothing, so
+# `set_frame_duration(frame=999)` on a one-frame sprite edited frame 1, and the batch
+# summary went on to quote 999. Rejecting matches what the export tools already do
+# (`export._require_frame`) and what `FrameRef` already encodes.
+#
+# `error(..., 0)` is deliberate: level 0 omits the script position, so the message the
+# caller sees does not carry this server's temp script path (see
+# `errors.strip_script_location` for the ones that still do).
+FRAME_GUARD_LUA = r"""
+local function require_frame(spr, n, what)
+  local num = math.floor(tonumber(n) or 0)
+  if num < 1 or num > #spr.frames then
+    error((what or "frame") .. " " .. tostring(n) .. " does not exist; the sprite has " ..
+          #spr.frames .. " frame(s), numbered 1-" .. #spr.frames .. ".", 0)
+  end
+  return num
+end
+"""
 
 
 @dataclass(frozen=True)
@@ -215,7 +262,7 @@ class FrameRange:
     end: int
 
     @classmethod
-    def of(cls, start, end) -> "FrameRange":
+    def of(cls, start, end) -> FrameRange:
         a, b = FrameRef.of(start).number, FrameRef.of(end).number
         return cls(min(a, b), max(a, b))
 

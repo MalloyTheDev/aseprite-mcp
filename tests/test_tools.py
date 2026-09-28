@@ -38,10 +38,10 @@ def test_layers():
     sprite.create_sprite("t/layers.aseprite", 8, 8, "rgb")
     layers.add_layer("t/layers.aseprite", "fg")
     info = layers.add_group_layer("t/layers.aseprite", "grp")
-    names = [l["name"] for l in info["layers"]]
+    names = [lyr["name"] for lyr in info["layers"]]
     assert "fg" in names and "grp" in names
     info = layers.set_layer_properties("t/layers.aseprite", "fg", opacity=100, blend_mode="multiply")
-    fg = next(l for l in info["layers"] if l["name"] == "fg")
+    fg = next(lyr for lyr in info["layers"] if lyr["name"] == "fg")
     assert fg["opacity"] == 100 and fg["blendMode"] == "multiply"
 
 

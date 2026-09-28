@@ -19,7 +19,7 @@ def test_export_godot_spriteframes_writes_resource_and_sheet():
     _make_tagged_sprite("w/gd")
     m = export_presets.export_godot_spriteframes("w/gd.aseprite", "w/gd.tres")
 
-    assert _REQUIRED <= set(m)
+    assert set(m) >= _REQUIRED
     assert m["kind"] == "engine_preset"
     tres_entry = next(f for f in m["created_files"] if f["role"] == "engine_resource")
     sheet_entry = next(e for e in m["exports"] if e["role"] == "spritesheet")

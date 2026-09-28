@@ -6,22 +6,27 @@ always the empty tile. Workflow:
   2. `add_tile` / `fill_tile` / `paint_tile_pixels` to define the tileset artwork
   3. `set_tile` / `set_tiles` / `fill_tilemap` to place tiles on the grid
   4. `get_tilemap` to read back the grid of indices
+
+Every `frame` argument here must name a frame that already exists: an out-of-range
+number is rejected with the sprite's valid range rather than clamped into it.
 """
 
 from __future__ import annotations
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
 from ..core.limits import MAX_PIXEL_LIST_LENGTH, MAX_TILE_LIST_LENGTH, check_list_length
+from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
 # Common preamble: open sprite, resolve a tilemap layer, grab tileset + frame.
-_TM = """
+_TM = FRAME_GUARD_LUA + """
 local spr = open_sprite(ARG.src)
 local layer = find_layer(spr, ARG.layer)
-if not layer.isTilemap then error("Layer '" .. layer.name .. "' is not a tilemap layer.") end
+if not layer.isTilemap then error("Layer '" .. layer.name .. "' is not a tilemap layer.", 0) end
 local ts = layer.tileset
-local framenum = clamp_frame(spr, ARG.frame)
+local framenum = require_frame(spr, ARG.frame, "frame")
 """
 
 # Get an editable tilemap cel image (existing copy, or a fresh canvas-sized map).
@@ -70,9 +75,9 @@ def create_tilemap_layer(
         "th": max(1, int(tile_height)),
         "columns": columns,
         "rows": rows,
-        "frame": int(frame),
+        "frame": FrameRef.arg("frame", frame),
     }
-    body = """
+    body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
     spr.gridBounds = Rectangle(0, 0, ARG.tw, ARG.th)
     app.command.NewLayer{ tilemap = true }
@@ -82,7 +87,7 @@ def create_tilemap_layer(
     local rows = ARG.rows or math.max(1, math.ceil(spr.height / ARG.th))
     local tm = Image(ImageSpec{ width = cols, height = rows, colorMode = ColorMode.TILEMAP })
     tm:clear()
-    local framenum = clamp_frame(spr, ARG.frame)
+    local framenum = require_frame(spr, ARG.frame, "frame")
     spr:newCel(layer, framenum, tm, Point(0, 0))
     save_sprite(spr)
     RESULT = { ok = true, layer = layer.name, columns = cols, rows = rows,
@@ -97,7 +102,7 @@ def add_tile(filename: str, layer: str, color: str | None = None, frame: int = 1
     Returns the new tile's index."""
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame),
+        "layer": layer, "frame": FrameRef.arg("frame", frame),
         "color": parse_color(color) if color else None,
     }
     body = _TM + """
@@ -114,11 +119,11 @@ def fill_tile(filename: str, layer: str, tile_index: int, color: str, frame: int
     """Fill an existing tile's artwork with a solid colour."""
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame),
+        "layer": layer, "frame": FrameRef.arg("frame", frame),
         "index": int(tile_index), "color": parse_color(color),
     }
     body = _TM + """
-    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index) end
+    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index, 0) end
     ts:tile(ARG.index).image:clear(to_pixel(spr, ARG.color))
     save_sprite(spr)
     RESULT = { ok = true, index = ARG.index }
@@ -140,7 +145,7 @@ def paint_tile_pixels(
     pixels: list of {"x", "y", "color"?}; falls back to the shared `color`.
     """
     if not pixels:
-        raise ValueError("pixels must be non-empty.")
+        raise ValidationFailed("pixels must be non-empty.")
     check_list_length("pixels", pixels, MAX_PIXEL_LIST_LENGTH)
     default = parse_color(color) if color else None
     lua_pixels = []
@@ -149,15 +154,15 @@ def paint_tile_pixels(
         if p.get("color") is not None:
             item["c"] = parse_color(p["color"])
         elif default is None:
-            raise ValueError("A pixel lacks its own colour and no shared `color` was given.")
+            raise ValidationFailed("A pixel lacks its own colour and no shared `color` was given.")
         lua_pixels.append(item)
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame),
+        "layer": layer, "frame": FrameRef.arg("frame", frame),
         "index": int(tile_index), "color": default, "pixels": lua_pixels,
     }
     body = _TM + """
-    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index) end
+    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index, 0) end
     local im = ts:tile(ARG.index).image
     local default = nil
     if ARG.color ~= nil then default = to_pixel(spr, ARG.color) end
@@ -181,14 +186,14 @@ def set_tile(
     """Place a tile (by tileset index, 0 = empty) at grid cell (column, row)."""
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame),
+        "layer": layer, "frame": FrameRef.arg("frame", frame),
         "col": int(column), "row": int(row), "index": int(tile_index),
     }
     body = _TM + _TM_CEL + """
-    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index) end
+    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index, 0) end
     if ARG.col < 0 or ARG.row < 0 or ARG.col >= tm.width or ARG.row >= tm.height then
       error("Cell (" .. ARG.col .. "," .. ARG.row .. ") is outside the " ..
-            tm.width .. "x" .. tm.height .. " tilemap.")
+            tm.width .. "x" .. tm.height .. " tilemap.", 0)
     end
     tm:drawPixel(ARG.col, ARG.row, ARG.index)
     """ + _TM_COMMIT + """
@@ -201,7 +206,7 @@ def set_tile(
 def set_tiles(filename: str, layer: str, tiles: list[dict], frame: int = 1) -> dict:
     """Place many tiles at once. tiles: list of {"column", "row", "index"}."""
     if not tiles:
-        raise ValueError("tiles must be non-empty.")
+        raise ValidationFailed("tiles must be non-empty.")
     check_list_length("tiles", tiles, MAX_TILE_LIST_LENGTH)
     lua_tiles = [
         {"col": int(t["column"]), "row": int(t["row"]), "index": int(t["index"])}
@@ -209,7 +214,7 @@ def set_tiles(filename: str, layer: str, tiles: list[dict], frame: int = 1) -> d
     ]
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame), "tiles": lua_tiles,
+        "layer": layer, "frame": FrameRef.arg("frame", frame), "tiles": lua_tiles,
     }
     body = _TM + _TM_CEL + """
     for _, t in ipairs(ARG.tiles) do
@@ -229,10 +234,10 @@ def fill_tilemap(filename: str, layer: str, tile_index: int, frame: int = 1) -> 
     """Fill the entire tilemap grid with a single tile index."""
     args = {
         "src": lua_path(resolve_path(filename)),
-        "layer": layer, "frame": int(frame), "index": int(tile_index),
+        "layer": layer, "frame": FrameRef.arg("frame", frame), "index": int(tile_index),
     }
     body = _TM + _TM_CEL + """
-    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index) end
+    if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index, 0) end
     for r = 0, tm.height - 1 do
       for c = 0, tm.width - 1 do tm:drawPixel(c, r, ARG.index) end
     end
@@ -245,7 +250,7 @@ def fill_tilemap(filename: str, layer: str, tile_index: int, frame: int = 1) -> 
 @mcp.tool()
 def get_tilemap(filename: str, layer: str, frame: int = 1) -> dict:
     """Read the tilemap as a 2D grid of tile indices, plus tile size and count."""
-    args = {"src": lua_path(resolve_path(filename)), "layer": layer, "frame": int(frame)}
+    args = {"src": lua_path(resolve_path(filename)), "layer": layer, "frame": FrameRef.arg("frame", frame)}
     body = _TM + """
     local cel = layer:cel(framenum)
     if cel == nil or cel.image == nil then

@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **113 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **128 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -58,7 +58,8 @@ Create a new sprite file and save it.
 Args:
     filename: Output path. Relative paths go in the workspace. Use a
         .aseprite/.ase extension to keep layers & frames editable.
-    width, height: Canvas size in pixels (1-65535).
+    width, height: Canvas size in pixels. Each axis is capped at 16384px
+        and the total area at 16,777,216 pixels (e.g. 4096x4096).
     color_mode: "rgb" (default), "indexed", or "gray".
     background: Optional fill colour for the first layer (e.g. "#1d2b53").
         Omit for a transparent canvas.
@@ -72,13 +73,16 @@ Returns the new sprite's structured info.
 | `width` | integer | yes |  |
 | `height` | integer | yes |  |
 | `color_mode` | string | no | rgb |
-| `background` | string | null | no | None |
+| `background` | string | no | _none_ |
 | `overwrite` | boolean | no | False |
 
 
 ### `crop_sprite`
 
 Crop the canvas to the rectangle (x, y, width, height).
+
+The resulting canvas is subject to the same dimension/area caps as `create_sprite`
+(a "crop" to a larger rectangle grows the canvas).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -103,7 +107,8 @@ Flatten all layers into a single layer (in place).
 Resize the canvas WITHOUT scaling the artwork (adds or trims space).
 
 anchor controls where existing content sits in the new canvas:
-"top_left" (default) or "center".
+"top_left" (default) or "center". The new canvas is subject to the same
+dimension/area caps as `create_sprite`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -137,12 +142,16 @@ Scale the whole sprite (artwork included).
 Provide either `factor` (e.g. 2.0 to double) OR explicit `width`/`height`.
 method: "nearest" (crisp pixels, default) or "bilinear" (smooth).
 
+The scaled canvas is subject to the same dimension/area caps as `create_sprite`.
+With `factor` the result depends on the sprite's current size, so that check runs
+inside Aseprite and reports the size it would have produced.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `factor` | number | null | no | None |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
+| `factor` | number | no | _none_ |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
 | `method` | string | no | nearest |
 
 
@@ -174,19 +183,33 @@ Auto-crop the canvas to the bounding box of all non-transparent content
 
 ### `get_pixels`
 
-Read the composited (all visible layers) pixel colours of a region.
+Read the pixel colours of a region.
 
-Returns rows of "#RRGGBBAA" hex strings. The region is capped at 64x64
-(4096 pixels) per call to keep responses small — read in tiles for bigger areas.
+Args:
+    layer: Read this layer alone instead of the composite. This matters more than
+        it sounds: drawing tools write to ONE layer, so the composite is not the
+        surface your next edit will act on. A fill whose boundary is drawn on a
+        different layer will flood the whole canvas while the composite looks as
+        though it should have stopped.
+    format: "rows" (default) gives rows of "#RRGGBBAA" strings. "map" gives a
+        `legend` of symbol to colour plus one string per row, which is around a
+        tenth the size: a 16x16 icon of three colours costs roughly 3,400
+        characters as rows and 350 as a map, and defects like a one-pixel offset
+        are visible in it at a glance.
+
+The region is capped at 64x64 (4096 pixels) per call to keep responses small, so
+read in tiles for bigger areas.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
 | `frame` | integer | no | 1 |
+| `layer` | string | no | _none_ |
+| `format` | string | no | rows |
 
 
 ### `get_sprite_info`
@@ -251,7 +274,7 @@ Args:
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `name` | string | yes |  |
-| `group` | string | null | no | None |
+| `group` | string | no | _none_ |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
 | `visible` | boolean | no | True |
@@ -319,11 +342,11 @@ Update one or more layer properties. Only the arguments you pass are changed.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `layer` | string | yes |  |
-| `opacity` | integer | null | no | None |
-| `blend_mode` | string | null | no | None |
-| `visible` | boolean | null | no | None |
-| `editable` | boolean | null | no | None |
-| `name` | string | null | no | None |
+| `opacity` | integer | no | _none_ |
+| `blend_mode` | string | no | _none_ |
+| `visible` | boolean | no | _none_ |
+| `editable` | boolean | no | _none_ |
+| `name` | string | no | _none_ |
 
 
 ## Frames (animation)
@@ -335,7 +358,8 @@ Append a new frame to the animation.
 Args:
     duration_ms: Frame duration in milliseconds (default 100).
     copy_from: If given (1-based), duplicate the content of that frame;
-        otherwise the new frame is empty.
+        otherwise the new frame is empty. Must name an existing frame -- an
+        out-of-range number is rejected, not clamped.
 
 Returns the new frame number and updated frame count.
 
@@ -343,12 +367,15 @@ Returns the new frame number and updated frame count.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `duration_ms` | integer | no | 100 |
-| `copy_from` | integer | null | no | None |
+| `copy_from` | integer | no | _none_ |
 
 
 ### `duplicate_frame`
 
 Duplicate an existing frame (1-based); the copy is inserted after it.
+
+`frame` must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -359,6 +386,9 @@ Duplicate an existing frame (1-based); the copy is inserted after it.
 ### `remove_frame`
 
 Delete a frame (1-based). The sprite must have more than one frame.
+
+`frame` must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it (which used to delete a different frame).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -380,6 +410,10 @@ Set every frame's duration in milliseconds (uniform animation speed).
 
 Set a single frame's duration in milliseconds (1-based frame).
 
+`frame` must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it (which used to report the requested number
+while changing frame 1).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -393,6 +427,10 @@ Set a single frame's duration in milliseconds (1-based frame).
 
 Create an animation tag spanning frames [from_frame, to_frame] (1-based).
 
+Both frames must already exist: an out-of-range number is rejected with the sprite's
+valid range rather than clamped to it (which used to report a tag added while
+creating it over a different range).
+
 direction: "forward" (default), "reverse", "pingpong", or "pingpong_reverse".
 color: optional tag colour (shown in the timeline).
 
@@ -403,7 +441,7 @@ color: optional tag colour (shown in the timeline).
 | `from_frame` | integer | yes |  |
 | `to_frame` | integer | yes |  |
 | `direction` | string | no | forward |
-| `color` | string | null | no | None |
+| `color` | string | no | _none_ |
 
 
 ### `remove_tag`
@@ -421,17 +459,18 @@ Delete an animation tag by name.
 Update an existing tag. Only the arguments you pass are changed.
 
 Note: changing from_frame/to_frame recreates the tag in place to update its
-range reliably across Aseprite versions.
+range reliably across Aseprite versions. A frame that does not exist is rejected
+with the sprite's valid range rather than clamped into it.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `name` | string | yes |  |
-| `from_frame` | integer | null | no | None |
-| `to_frame` | integer | null | no | None |
-| `new_name` | string | null | no | None |
-| `direction` | string | null | no | None |
-| `color` | string | null | no | None |
+| `from_frame` | integer | no | _none_ |
+| `to_frame` | integer | no | _none_ |
+| `new_name` | string | no | _none_ |
+| `direction` | string | no | _none_ |
+| `color` | string | no | _none_ |
 
 
 ## Cels
@@ -504,7 +543,7 @@ Erase the target layer/frame cel to full transparency.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -512,6 +551,23 @@ Erase the target layer/frame cel to full transparency.
 
 Draw a quadratic Bézier curve from (x0,y0) to (x1,y1) bending toward the
 control point (control_x, control_y). `steps` controls smoothness.
+
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -524,7 +580,7 @@ control point (control_x, control_y). `steps` controls smoothness.
 | `y1` | integer | yes |  |
 | `color` | string | yes |  |
 | `steps` | integer | no | 32 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -536,6 +592,23 @@ For a circle, use the same value for radius_x and radius_y. filled=False
 draws a 1px outline. antialias smooths a *filled* ellipse with sub-pixel
 coverage (RGB sprites only; ignored otherwise).
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -546,7 +619,7 @@ coverage (RGB sprites only; ignored otherwise).
 | `color` | string | yes |  |
 | `filled` | boolean | no | False |
 | `antialias` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -559,6 +632,23 @@ Args:
     antialias: Smooth (Xiaolin Wu) line with alpha blending — RGB sprites only;
         ignored on indexed/gray. Takes precedence over pixel_perfect.
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -569,7 +659,7 @@ Args:
 | `color` | string | yes |  |
 | `pixel_perfect` | boolean | no | False |
 | `antialias` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -584,12 +674,29 @@ Args:
     layer: Target layer name or 1-based index (default: top layer).
     frame: Target frame, 1-based (default 1).
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `pixels` | array<object> | yes |  |
-| `color` | string | null | no | None |
-| `layer` | string | null | no | None |
+| `color` | string | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -601,6 +708,23 @@ points: list of {"x": int, "y": int}. Set closed=True to connect the last
 point back to the first (outline a polygon). pixel_perfect removes L-corner
 pixels across the whole path for a clean pixel-art outline.
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -608,13 +732,30 @@ pixels across the whole path for a clean pixel-art outline.
 | `color` | string | yes |  |
 | `closed` | boolean | no | False |
 | `pixel_perfect` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
 ### `draw_rectangle`
 
 Draw a rectangle. filled=False draws a 1px outline, True fills it.
+
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -625,7 +766,7 @@ Draw a rectangle. filled=False draws a 1px outline, True fills it.
 | `height` | integer | yes |  |
 | `color` | string | yes |  |
 | `filled` | boolean | no | False |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -634,13 +775,30 @@ Draw a rectangle. filled=False draws a 1px outline, True fills it.
 Flood fill (paint bucket): replace the contiguous region of matching
 colour starting at (x,y) on the target layer with `color`.
 
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `x` | integer | yes |  |
 | `y` | integer | yes |  |
 | `color` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -652,7 +810,7 @@ Fill the entire target layer/frame cel with a solid colour.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `color` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -676,7 +834,7 @@ Args:
 | `points` | array<object> | yes |  |
 | `color` | string | yes |  |
 | `anchor` | string | no | center |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -693,9 +851,9 @@ or "both" (4-way radial symmetry). Axes default to the canvas centre.
 | `pixels` | array<object> | yes |  |
 | `color` | string | yes |  |
 | `mode` | string | no | horizontal |
-| `axis_x` | integer | null | no | None |
-| `axis_y` | integer | null | no | None |
-| `layer` | string | null | no | None |
+| `axis_x` | integer | no | _none_ |
+| `axis_y` | integer | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -714,7 +872,7 @@ Args:
 | `layer` | string | yes |  |
 | `direction` | string | no | horizontal |
 | `source_side` | string | no | first |
-| `axis` | integer | null | no | None |
+| `axis` | integer | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -734,13 +892,13 @@ Args:
 | `source` | string | yes |  |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
 | `spacing_x` | integer | no | 0 |
 | `spacing_y` | integer | no | 0 |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -786,7 +944,7 @@ Args:
 | `thickness` | integer | no | 1 |
 | `connectivity` | integer | no | 8 |
 | `where` | string | no | outside |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -799,7 +957,7 @@ Adjust brightness (-255..255, additive) and contrast (-255..255) of a layer.
 | `filename` | string | yes |  |
 | `brightness` | integer | no | 0 |
 | `contrast` | integer | no | 0 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -813,7 +971,7 @@ Shift hue (degrees) and scale saturation/lightness (percent, -100..100).
 | `hue` | integer | no | 0 |
 | `saturation` | integer | no | 0 |
 | `lightness` | integer | no | 0 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -825,7 +983,7 @@ Desaturate toward grayscale by `amount` percent (0-100).
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `amount` | integer | no | 100 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -841,15 +999,15 @@ Fill a region with a 2-colour checkerboard of `size`-pixel squares.
 | `size` | integer | no | 1 |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
-| `layer` | string | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
 ### `fill_gradient`
 
-Fill a region with a gradient.
+Fill a region with a gradient, by default only where pixels already exist.
 
 Args:
     colors: 2+ colour stops, e.g. ["#000000", "#ff004d", "#ffec27"], spread
@@ -859,6 +1017,12 @@ Args:
     dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
         interpolation — great for limited palettes / retro looks.
     x, y, width, height: Region (defaults to the whole canvas).
+    respect_alpha: Leave transparent pixels transparent (default). The gradient
+        then shades the artwork inside the region rather than filling the region.
+        Pass False to paint the whole rectangle, background included.
+
+Returns `pixels_written` and `pixels_skipped` so the caller can tell how much of
+the region was actually covered.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -869,10 +1033,11 @@ Args:
 | `dither` | boolean | no | False |
 | `x` | integer | no | 0 |
 | `y` | integer | no | 0 |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
-| `layer` | string | null | no | None |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
+| `respect_alpha` | boolean | no | True |
 
 
 ### `invert_colors`
@@ -882,7 +1047,7 @@ Invert the RGB colours of a layer's pixels (alpha preserved).
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -897,7 +1062,7 @@ with `to_color`, on the chosen layer + frame.
 | `from_color` | string | yes |  |
 | `to_color` | string | yes |  |
 | `tolerance` | integer | no | 0 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -919,6 +1084,9 @@ Args:
     threshold: 0-255 cutoff; pixels brighter than this are drawn (lower =
         heavier text). Keeps glyphs crisp (no anti-aliasing artefacts).
 
+scale is capped at 64, font_size at 512, and the rendered text at 200,000
+pixels; the pixel budget is enforced while rasterizing, not afterwards.
+
 Returns the standard draw result plus the rendered text's pixel size.
 
 | Parameter | Type | Required | Default |
@@ -929,11 +1097,11 @@ Returns the standard draw result plus the rendered text's pixel size.
 | `y` | integer | yes |  |
 | `color` | string | yes |  |
 | `scale` | integer | no | 1 |
-| `font_path` | string | null | no | None |
+| `font_path` | string | no | _none_ |
 | `font_size` | integer | no | 16 |
 | `spacing` | integer | no | 1 |
 | `threshold` | integer | no | 128 |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -948,7 +1116,7 @@ Returns the new tile's index.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `layer` | string | yes |  |
-| `color` | string | null | no | None |
+| `color` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -967,8 +1135,8 @@ Args:
 | `name` | string | yes |  |
 | `tile_width` | integer | no | 16 |
 | `tile_height` | integer | no | 16 |
-| `columns` | integer | null | no | None |
-| `rows` | integer | null | no | None |
+| `columns` | integer | no | _none_ |
+| `rows` | integer | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1020,7 +1188,7 @@ pixels: list of {"x", "y", "color"?}; falls back to the shared `color`.
 | `layer` | string | yes |  |
 | `tile_index` | integer | yes |  |
 | `pixels` | array<object> | yes |  |
-| `color` | string | null | no | None |
+| `color` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1057,7 +1225,8 @@ Place many tiles at once. tiles: list of {"column", "row", "index"}.
 Composite an inline base64-encoded PNG (or other image) onto a layer at (x, y).
 
 Useful for pasting externally generated artwork. `image_base64` may include a
-`data:image/png;base64,` prefix.
+`data:image/png;base64,` prefix. The decoded image is capped at 32 MB; for
+anything larger, write the file into the workspace and use `stamp_file`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1067,7 +1236,7 @@ Useful for pasting externally generated artwork. `image_base64` may include a
 | `y` | integer | yes |  |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1091,7 +1260,7 @@ Args:
 | `source_frame` | integer | no | 1 |
 | `opacity` | integer | no | 255 |
 | `blend_mode` | string | no | normal |
-| `layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
 
@@ -1122,7 +1291,7 @@ Returns the list of "#RRGGBBAA" colours found.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `from_image` | string | null | no | None |
+| `from_image` | string | no | _none_ |
 | `set_as_palette` | boolean | no | True |
 | `include_alpha` | boolean | no | False |
 | `max_colors` | integer | no | 256 |
@@ -1150,8 +1319,12 @@ Returns the ramp as a list of "#RRGGBB" colours (darkest first).
 | `hue_shift` | number | no | 0.0 |
 | `saturation_shift` | number | no | 0.0 |
 | `light_range` | number | no | 0.6 |
-| `filename` | string | null | no | None |
+| `filename` | string | no | _none_ |
 | `apply` | string | no | none |
+| `shadow_hue` | string | no | _none_ |
+| `light_hue` | string | no | _none_ |
+| `sat_curve` | string | no | linear |
+| `easing` | string | no | linear |
 
 
 ### `get_palette`
@@ -1199,6 +1372,9 @@ colors: list of colour strings, e.g. ["#000000", "#ffffff", "255,0,0"].
 
 Set a single palette entry by index (0-based). Grows the palette if needed.
 
+The index is bounded by the palette ceiling: the Lua below resizes the palette to
+`index + 1`, so the index *is* a palette size.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -1240,8 +1416,7 @@ Args:
         top-left**. Provide all four to mark the stretchable middle.
     pivot_*: Optional pivot point (relative to the slice).
     color: Optional slice colour shown in the editor.
-    data: Optional user data. A string is stored as-is; a dict/list is JSON-encoded
-        (so e.g. {"type": "hitbox"} round-trips through export_slice_metadata).
+    data: Optional user data string.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1251,14 +1426,14 @@ Args:
 | `y` | integer | yes |  |
 | `width` | integer | yes |  |
 | `height` | integer | yes |  |
-| `center_x` | integer | null | no | None |
-| `center_y` | integer | null | no | None |
-| `center_width` | integer | null | no | None |
-| `center_height` | integer | null | no | None |
-| `pivot_x` | integer | null | no | None |
-| `pivot_y` | integer | null | no | None |
-| `color` | string | null | no | None |
-| `data` | string | object | array | null | no | None |
+| `center_x` | integer | no | _none_ |
+| `center_y` | integer | no | _none_ |
+| `center_width` | integer | no | _none_ |
+| `center_height` | integer | no | _none_ |
+| `pivot_x` | integer | no | _none_ |
+| `pivot_y` | integer | no | _none_ |
+| `color` | string | no | _none_ |
+| `data` | string | no | _none_ |
 
 
 ### `list_slices`
@@ -1284,20 +1459,17 @@ Delete a slice by name.
 
 Update an existing slice's bounds, name, colour, or data.
 
-data: a string is stored as-is; a dict/list is JSON-encoded (round-trips through
-export_slice_metadata).
-
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `name` | string | yes |  |
-| `x` | integer | null | no | None |
-| `y` | integer | null | no | None |
-| `width` | integer | null | no | None |
-| `height` | integer | null | no | None |
-| `new_name` | string | null | no | None |
-| `color` | string | null | no | None |
-| `data` | string | object | array | null | no | None |
+| `x` | integer | no | _none_ |
+| `y` | integer | no | _none_ |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `new_name` | string | no | _none_ |
+| `color` | string | no | _none_ |
+| `data` | string | no | _none_ |
 
 
 ## Transforms
@@ -1331,16 +1503,23 @@ Export each frame to its own image file.
 output_pattern must contain "{frame}" (and optionally "{tag}", "{layer}"),
 e.g. "frames/walk_{frame}.png". Aseprite substitutes the values.
 
+overwrite: Replace files the pattern would expand onto (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output_pattern` | string | yes |  |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_gif`
 
-Export the full animation as an animated GIF (honours frame durations & tags).
+Export the full animation as an animated GIF (honours frame durations).
+
+Tag *ranges* are honoured, but a tag's playback direction is not: a GIF is a flat
+frame sequence. A ping-pong tag exports forward, and the result says so in
+`warnings` rather than letting the caller find out in-engine.
 
 overwrite: Replace `output` if it already exists (default False = no-clobber).
 
@@ -1356,6 +1535,8 @@ overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 Export a single layer of one frame as a PNG (others excluded).
 
+overwrite: Replace `output` if it already exists (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -1363,6 +1544,7 @@ Export a single layer of one frame as a PNG (others excluded).
 | `output` | string | yes |  |
 | `frame` | integer | no | 1 |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_layers`
@@ -1372,12 +1554,17 @@ Export each layer to its own image file.
 output_pattern must contain "{layer}" (e.g. "layers/{layer}.png"); add
 "{frame}" too for animations. include_hidden also exports hidden layers.
 
+overwrite: Replace files the pattern would expand onto (default False =
+no-clobber). Aseprite expands the placeholders, so the check refuses when any
+file matching the pattern already exists.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output_pattern` | string | yes |  |
 | `scale` | integer | no | 1 |
 | `include_hidden` | boolean | no | False |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_onion_skin`
@@ -1389,6 +1576,7 @@ Args:
     previous, next: How many earlier/later frames to ghost.
     ghost_opacity: Max opacity (0-255) of the nearest ghost; further frames fade.
     scale: Integer upscaling factor for the output PNG.
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1399,6 +1587,7 @@ Args:
 | `next` | integer | no | 0 |
 | `ghost_opacity` | integer | no | 80 |
 | `scale` | integer | no | 4 |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_png`
@@ -1444,10 +1633,10 @@ Args:
 | `output` | string | yes |  |
 | `sheet_type` | string | no | packed |
 | `scale` | integer | no | 1 |
-| `data_output` | string | null | no | None |
+| `data_output` | string | no | _none_ |
 | `padding` | integer | no | 0 |
-| `layer` | string | null | no | None |
-| `ignore_layer` | string | null | no | None |
+| `layer` | string | no | _none_ |
+| `ignore_layer` | string | no | _none_ |
 | `split_layers` | boolean | no | False |
 | `split_tags` | boolean | no | False |
 | `overwrite` | boolean | no | False |
@@ -1475,11 +1664,14 @@ Export each animation tag's frames to their own files.
 output_pattern must contain "{tag}" (and usually "{frame}"),
 e.g. "anim/{tag}_{frame}.png".
 
+overwrite: Replace files the pattern would expand onto (default False = no-clobber).
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output_pattern` | string | yes |  |
 | `scale` | integer | no | 1 |
+| `overwrite` | boolean | no | False |
 
 
 ### `import_image`
@@ -1489,11 +1681,13 @@ Create an editable .aseprite sprite from a flat image (.png/.bmp/.jpg/...).
 Args:
     input_image: Source raster image.
     output: Destination .aseprite path.
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `input_image` | string | yes |  |
 | `output` | string | yes |  |
+| `overwrite` | boolean | no | False |
 
 
 ## Engine export presets
@@ -1526,9 +1720,9 @@ Returns a ``workflow_manifest.v1`` manifest (kind ``engine_preset``).
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output` | string | yes |  |
-| `sheet_output` | string | null | no | None |
+| `sheet_output` | string | no | _none_ |
 | `scale` | integer | no | 1 |
-| `texture_res_path` | string | null | no | None |
+| `texture_res_path` | string | no | _none_ |
 | `default_loop` | boolean | no | True |
 | `overwrite` | boolean | no | False |
 
@@ -1554,7 +1748,7 @@ Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `output` | string | null | no | None |
+| `output` | string | no | _none_ |
 | `overwrite` | boolean | no | False |
 
 
@@ -1570,6 +1764,8 @@ Args:
     opacity: Layer opacity (0-255); dim it so your art stands out.
     scale_to_fit: Resize the reference to the canvas size (smooth).
     x, y: Placement when not scaling to fit.
+    frame: Which existing frame to place the reference on (1-based). An
+        out-of-range frame is rejected with the sprite's valid range.
 
 Exclude this layer from exports with ignore_layer="<layer_name>".
 
@@ -1590,8 +1786,9 @@ Exclude this layer from exports with ignore_layer="<layer_name>".
 Import a sequence of images as per-frame references for rotoscoping.
 
 Each image is placed on its own frame in a single dimmed, locked layer
-(frames are created as needed). Draw your animation on a layer above, then
-exclude this layer at export with ignore_layer="<layer_name>".
+(frames are created as needed, so `start_frame` may sit past the end). Draw your
+animation on a layer above, then exclude this layer at export with
+ignore_layer="<layer_name>".
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1636,7 +1833,7 @@ appear as slices under `sprite.slices`.
 | `name` | string | yes |  |
 | `icon_size` | integer | no | 16 |
 | `count` | integer | no | 4 |
-| `columns` | integer | null | no | None |
+| `columns` | integer | no | _none_ |
 
 
 ### `create_rpg_item_sheet`
@@ -1651,8 +1848,8 @@ appear as slices (named after each item) under `sprite.slices`.
 | --- | --- | --- | --- |
 | `name` | string | yes |  |
 | `item_size` | integer | no | 16 |
-| `items` | array | null | no | None |
-| `columns` | integer | null | no | None |
+| `items` | array<string> | no | _none_ |
+| `columns` | integer | no | _none_ |
 
 
 ### `create_tileset_project`
@@ -1670,7 +1867,7 @@ names to their tileset indices.
 | `tile_size` | integer | no | 16 |
 | `columns` | integer | no | 4 |
 | `rows` | integer | no | 4 |
-| `tiles` | array | null | no | None |
+| `tiles` | array<object> | no | _none_ |
 
 
 ### `export_game_asset_bundle`
@@ -1690,7 +1887,7 @@ disk as manifest.json inside the bundle).
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `bundle_name` | string | null | no | None |
+| `bundle_name` | string | no | _none_ |
 | `scale` | integer | no | 1 |
 | `overwrite` | boolean | no | False |
 
@@ -1727,7 +1924,7 @@ Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifes
 | `filename` | string | yes |  |
 | `frames_per_direction` | integer | no | 4 |
 | `frame_duration_ms` | integer | no | 120 |
-| `directions` | array | null | no | None |
+| `directions` | array<string> | no | _none_ |
 
 
 ### `validate_sprite_for_game_export`
@@ -1748,17 +1945,17 @@ All criteria are optional; only the ones you pass are enforced. Returns a
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `expected_width` | integer | null | no | None |
-| `expected_height` | integer | null | no | None |
-| `tile_multiple` | integer | null | no | None |
-| `allowed_color_modes` | array | null | no | None |
-| `min_frames` | integer | null | no | None |
-| `max_frames` | integer | null | no | None |
-| `required_tags` | array | null | no | None |
+| `expected_width` | integer | no | _none_ |
+| `expected_height` | integer | no | _none_ |
+| `tile_multiple` | integer | no | _none_ |
+| `allowed_color_modes` | array<string> | no | _none_ |
+| `min_frames` | integer | no | _none_ |
+| `max_frames` | integer | no | _none_ |
+| `required_tags` | array<string> | no | _none_ |
 | `require_transparent_background` | boolean | no | False |
-| `max_palette_size` | integer | null | no | None |
-| `expected_exports` | array | null | no | None |
-| `spritesheet_data` | string | null | no | None |
+| `max_palette_size` | integer | no | _none_ |
+| `expected_exports` | array<string> | no | _none_ |
+| `spritesheet_data` | string | no | _none_ |
 
 
 ## Asset spec (declarative build)
@@ -1769,13 +1966,13 @@ Build the asset described by an ``aseprite_mcp.asset_spec.v1`` document.
 
 Executes the (validated) plan by dispatching each step to an existing tool: scaffolds
 the sprite for its `kind`, applies palette / extra layers / animation frames+tags /
-slices, and runs the requested exports. **Structure only — no pixels are drawn;** the
+slices, and runs the requested exports. **Structure only - no pixels are drawn;** the
 returned manifest's `suggested_next_actions` hand the actual art back to you.
 
 Args:
     overwrite: Passed to the export steps (replace existing export files). The sprite
         itself is created no-clobber, so building over an existing ``<name>.aseprite``
-        raises — build to a new name or remove the old file.
+        raises - build to a new name or remove the old file.
 
 Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with the created files, the
 executed `plan`, and next actions. Raises ``ValidationFailed`` if the spec is invalid.
@@ -1805,10 +2002,12 @@ returns the validation report instead.
 Validate an ``aseprite_mcp.asset_spec.v1`` document (does the *spec* make sense?).
 
 Checks the schema, kind, canvas, per-kind fields, palette, layers, animations
-(`frame_count`, not `frames`), slices, and export formats. Returns a
-``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
+(`frame_count`, not `frames`), slices, export formats, and that the work the plan
+would produce fits one build. `name` may already carry a `.aseprite`/`.ase`
+extension: it is normalised, not doubled, so `hero` and `hero.aseprite` name the same
+file. Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
 `{passed, checks, errors, warnings}`. This does **not** check a finished sprite against
-the spec — that's a separate future tool.
+the spec - that's a separate future tool.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1821,19 +2020,50 @@ the spec — that's a separate future tool.
 
 Apply a list of edit operations to a sprite in one atomic, single-process batch.
 
-Each operation is `{"op": "<name>", "args": {...}}`. Supported ops (v1):
-add_layer, rename_layer, set_layer_visible, set_layer_opacity, remove_layer,
-add_frame, duplicate_frame, set_frame_duration, add_tag, remove_tag, set_pixel,
-draw_line, draw_rectangle, fill_rectangle, draw_ellipse, fill_ellipse, fill_layer,
-clear_layer, add_slice, remove_slice, replace_color. Ops run **in order against the
+Each operation is `{"op": "<name>", "args": {...}}`. Ops run **in order against the
 same open sprite**, so later ops see earlier ones (e.g. add a layer then draw on it).
+Arguments not listed for an op are rejected rather than ignored.
 
 Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
 error names the failing op index. `dry_run=True` validates the op list and returns
 the plan **without launching Aseprite** (shape checks only — runtime issues like a
 missing layer surface on a real run).
 
+Frames are 1-based, and an `arg=frame` argument must name a frame that already
+exists: an out-of-range frame is rejected with the sprite's valid range rather than
+clamped, so a per-op `summary` always describes the frames actually touched.
+
 Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
+
+Operations and their arguments ('?' marks an optional argument):
+  add_frame(duration_ms=int?, copy_from=frame?)
+  add_layer(name=str, group=str?, opacity=int?, blend_mode=str?, visible=bool?)
+  add_slice(name=str, x=int, y=int, width=int, height=int, color=color?)
+  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?)  [also accepts from_frame for from, to_frame for to]
+  clear_layer(layer=str?, frame=frame?)
+  copy_cel(layer=str, from=frame, to=frame, to_layer=str?)  [also accepts from_frame for from, to_frame for to]
+  delete_cel(layer=str, frame=frame)
+  draw_ellipse(layer=str?, frame=frame?, cx=int, cy=int, rx=int, ry=int, color=color)
+  draw_line(layer=str?, frame=frame?, x1=int, y1=int, x2=int, y2=int, color=color)
+  draw_pixels(layer=str?, frame=frame?, pixels=list, color=color?)
+  draw_rectangle(layer=str?, frame=frame?, x=int, y=int, width=int, height=int, color=color)
+  duplicate_frame(frame=frame)
+  fill_ellipse(layer=str?, frame=frame?, cx=int, cy=int, rx=int, ry=int, color=color)
+  fill_layer(layer=str?, frame=frame?, color=color)
+  fill_rectangle(layer=str?, frame=frame?, x=int, y=int, width=int, height=int, color=color)
+  remove_frame(frame=frame)
+  remove_layer(layer=str)
+  remove_slice(name=str)
+  remove_tag(name=str)
+  rename_layer(layer=str, new_name=str)
+  replace_color(layer=str?, frame=frame?, from=color, to=color, tolerance=int?)  [also accepts from_color for from, to_color for to]
+  set_all_frame_durations(duration_ms=int)
+  set_cel_opacity(layer=str, frame=frame, opacity=int)
+  set_cel_position(layer=str, frame=frame, x=int, y=int)
+  set_frame_duration(frame=frame, duration_ms=int)
+  set_layer_opacity(layer=str, opacity=int)
+  set_layer_visible(layer=str, visible=bool)
+  set_pixel(layer=str?, frame=frame?, x=int, y=int, color=color)
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

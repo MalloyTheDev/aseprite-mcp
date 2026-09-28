@@ -7,18 +7,27 @@ coordinates are always predictable.
 
 from __future__ import annotations
 
+import inspect
+
 from ..app import mcp
-from ..core.limits import MAX_PIXEL_LIST_LENGTH, check_list_length
+from ..core.errors import ValidationFailed
+from ..core.limits import (
+    MAX_CURVE_STEPS,
+    MAX_PIXEL_LIST_LENGTH,
+    check_count,
+    check_list_length,
+)
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
 # Shared Lua preamble: open sprite, resolve a non-group layer + frame, build an
 # editable full-canvas image, then run the per-tool drawing snippet, commit & save.
-_OPEN = """
+_OPEN = FRAME_GUARD_LUA + """
 local spr = open_sprite(ARG.src)
 local layer = find_layer(spr, ARG.layer)
 if layer.isGroup then error("Cannot draw on a group layer: " .. layer.name) end
-local framenum = clamp_frame(spr, ARG.frame)
+local framenum = require_frame(spr, ARG.frame, "frame")
 local img = get_draw_image(spr, layer, framenum)
 """
 
@@ -34,7 +43,47 @@ def _draw(args: dict, snippet: str) -> dict:
     return run_lua(_OPEN + snippet + _CLOSE, args)
 
 
-@mcp.tool()
+# These conventions lived only in this module's docstring, which never reaches the
+# model: only a function's own docstring becomes its tool description. Most geometry
+# tools documented no argument at all, and the two centring rules disagree by half a
+# pixel, which is a visible defect at 16x16 rather than a rounding difference.
+#
+# Applied through a registration decorator rather than by editing seven docstrings, so
+# one statement covers every geometry tool and they cannot drift apart. It has to run
+# BEFORE mcp.tool(), because registration captures the description at that moment.
+_GEOMETRY_NOTE = """
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+"""
+
+
+def _geometry_tool(fn):
+    """Register a drawing tool with the shared coordinate conventions appended.
+
+    cleandoc first, because Python 3.13 dedents docstrings at compile time and 3.12
+    does not, so appending at "the docstring's own level" yields different text per
+    interpreter, and docs/TOOLS.md is generated from it.
+    """
+    base = inspect.cleandoc(fn.__doc__ or "").rstrip()
+    fn.__doc__ = f"{base}\n\n{_GEOMETRY_NOTE.strip()}\n"
+    return mcp.tool()(fn)
+
+
+@_geometry_tool
 def draw_pixels(
     filename: str,
     pixels: list[dict],
@@ -52,7 +101,7 @@ def draw_pixels(
         frame: Target frame, 1-based (default 1).
     """
     if not pixels:
-        raise ValueError("pixels must be a non-empty list.")
+        raise ValidationFailed("pixels must be a non-empty list.")
     check_list_length("pixels", pixels, MAX_PIXEL_LIST_LENGTH)
     default = parse_color(color) if color else None
     lua_pixels = []
@@ -64,7 +113,7 @@ def draw_pixels(
         if c is not None:
             item["c"] = parse_color(c)
         elif default is None:
-            raise ValueError(
+            raise ValidationFailed(
                 "Pixel without its own colour found, but no shared `color` was given."
             )
         lua_pixels.append(item)
@@ -87,7 +136,7 @@ def draw_pixels(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_line(
     filename: str,
     x1: int,
@@ -133,7 +182,7 @@ def draw_line(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_polyline(
     filename: str,
     points: list[dict],
@@ -150,7 +199,7 @@ def draw_polyline(
     pixels across the whole path for a clean pixel-art outline.
     """
     if len(points) < 2:
-        raise ValueError("Need at least 2 points.")
+        raise ValidationFailed("Need at least 2 points.")
     check_list_length("points", points, MAX_PIXEL_LIST_LENGTH)
     pts = [{"x": int(p["x"]), "y": int(p["y"])} for p in points]
     args = {
@@ -188,7 +237,7 @@ def draw_polyline(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_curve(
     filename: str,
     x0: int,
@@ -204,6 +253,10 @@ def draw_curve(
 ) -> dict:
     """Draw a quadratic Bézier curve from (x0,y0) to (x1,y1) bending toward the
     control point (control_x, control_y). `steps` controls smoothness."""
+    steps = check_count(
+        "steps", max(2, int(steps)), MAX_CURVE_STEPS, minimum=2,
+        remedy="Steps beyond the curve's length in pixels add no detail.",
+    )
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
@@ -211,7 +264,7 @@ def draw_curve(
         "x0": int(x0), "y0": int(y0),
         "cx": int(control_x), "cy": int(control_y),
         "x1": int(x1), "y1": int(y1),
-        "steps": max(2, int(steps)),
+        "steps": steps,
     }
     snippet = """
     local px = to_pixel(spr, ARG.color)
@@ -228,7 +281,7 @@ def draw_curve(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_rectangle(
     filename: str,
     x: int,
@@ -256,7 +309,7 @@ def draw_rectangle(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_ellipse(
     filename: str,
     center_x: int,
@@ -296,7 +349,7 @@ def draw_ellipse(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def fill_area(
     filename: str,
     x: int,

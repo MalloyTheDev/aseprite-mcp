@@ -129,7 +129,7 @@ def _animation_block(spec: dict, frames: list[dict], atlas_id: dict[int, str]) -
     speed = _fmt_float(1000.0 / base_ms)
 
     frame_entries = []
-    for i, ms in zip(indices, durations):
+    for i, ms in zip(indices, durations, strict=True):  # built from indices: same length
         frame_entries.append(
             '{\n'
             f'"duration": {_fmt_float(ms / base_ms)},\n'

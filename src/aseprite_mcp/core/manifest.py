@@ -42,6 +42,8 @@ VALID_KINDS = (
     "engine_preset",
     "engine_metadata",
     "asset_spec",
+    "minecraft_pack",
+    "minecraft_texture",
 )
 FILE_ROLES = ("source_sprite", "preview_png", "image", "manifest", "engine_resource", "metadata")
 EXPORT_ROLES = ("spritesheet", "gif", "png", "tag_gif", "frames")
@@ -64,6 +66,7 @@ class WorkflowManifest(TypedDict, total=False):
     palette: dict
     animation: dict
     tilemap: dict
+    tiling: dict
     validation: dict
     operations: list
     plan: list

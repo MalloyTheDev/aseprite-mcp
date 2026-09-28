@@ -5,35 +5,53 @@ against a curated registry, then provides the Lua body that runs them all in a s
 process inside one `app.transaction` (open once -> all ops -> save once, atomically).
 
 Validation happens before any Aseprite launch and is the basis of `dry_run`. It checks
-*shape* (unknown op, missing/typed args, bad colour/number) — not runtime sprite state
-(a missing layer/frame is an execute-time failure).
+*shape*: unknown op, unknown/missing/mistyped args, bad colour or number, and a frame
+number below 1. What needs the open sprite stays an execute-time failure (a missing
+layer, or a frame past the end, which `FRAME_GUARD_LUA` rejects inside Aseprite).
 """
 
 from __future__ import annotations
 
 from .errors import ValidationFailed
-from .limits import MAX_BATCH_OPERATIONS, check_list_length
-from .models import ColorSpec
+from .limits import MAX_BATCH_OPERATIONS, MAX_PIXEL_LIST_LENGTH, check_list_length
+from .models import FRAME_GUARD_LUA, ColorSpec, FrameRef
 
-# Arg kinds.
-_INT, _STR, _BOOL, _COLOR = "int", "str", "bool", "color"
+# Arg kinds. `frame` is an int that must name an existing 1-based frame: the lower bound
+# is checked here, the upper bound inside Aseprite (see FRAME_GUARD_LUA).
+_INT, _STR, _BOOL, _COLOR, _FRAME = "int", "str", "bool", "color", "frame"
+_LIST = "list"
 
 # Curated v1 op set. Each entry maps arg name -> (kind, required).
-_DRAW_TARGET = {"layer": (_STR, False), "frame": (_INT, False)}
+_DRAW_TARGET = {"layer": (_STR, False), "frame": (_FRAME, False)}
 OP_SPECS: dict[str, dict] = {
     # layers
-    "add_layer": {"name": (_STR, True), "opacity": (_INT, False),
+    "add_layer": {"name": (_STR, True), "group": (_STR, False), "opacity": (_INT, False),
                   "blend_mode": (_STR, False), "visible": (_BOOL, False)},
     "rename_layer": {"layer": (_STR, True), "new_name": (_STR, True)},
     "set_layer_visible": {"layer": (_STR, True), "visible": (_BOOL, True)},
     "set_layer_opacity": {"layer": (_STR, True), "opacity": (_INT, True)},
     "remove_layer": {"layer": (_STR, True)},
     # frames
-    "add_frame": {"duration_ms": (_INT, False), "copy_from": (_INT, False)},
-    "duplicate_frame": {"frame": (_INT, True)},
-    "set_frame_duration": {"frame": (_INT, True), "duration_ms": (_INT, True)},
+    "add_frame": {"duration_ms": (_INT, False), "copy_from": (_FRAME, False)},
+    "duplicate_frame": {"frame": (_FRAME, True)},
+    "set_frame_duration": {"frame": (_FRAME, True), "duration_ms": (_INT, True)},
+    "remove_frame": {"frame": (_FRAME, True)},
+    "set_all_frame_durations": {"duration_ms": (_INT, True)},
+    # cels
+    #
+    # These are what animation is made of, and none of them was batchable. Moving one
+    # drawn cel across eight frames cost eight Aseprite launches and 1.75s, against two
+    # launches and 0.24s for the same work in one batch: seven times faster, on the path
+    # every animation tool has to walk.
+    "set_cel_position": {"layer": (_STR, True), "frame": (_FRAME, True),
+                         "x": (_INT, True), "y": (_INT, True)},
+    "set_cel_opacity": {"layer": (_STR, True), "frame": (_FRAME, True),
+                        "opacity": (_INT, True)},
+    "copy_cel": {"layer": (_STR, True), "from": (_FRAME, True), "to": (_FRAME, True),
+                 "to_layer": (_STR, False)},
+    "delete_cel": {"layer": (_STR, True), "frame": (_FRAME, True)},
     # tags
-    "add_tag": {"name": (_STR, True), "from": (_INT, True), "to": (_INT, True),
+    "add_tag": {"name": (_STR, True), "from": (_FRAME, True), "to": (_FRAME, True),
                 "direction": (_STR, False), "color": (_COLOR, False)},
     "remove_tag": {"name": (_STR, True)},
     # drawing
@@ -50,6 +68,9 @@ OP_SPECS: dict[str, dict] = {
                      "rx": (_INT, True), "ry": (_INT, True), "color": (_COLOR, True)},
     "fill_layer": {**_DRAW_TARGET, "color": (_COLOR, True)},
     "clear_layer": {**_DRAW_TARGET},
+    # A list of {"x", "y", "color"?}, so a whole sprite's worth of plotting is one op
+    # rather than one op per pixel against the 500-operation batch cap.
+    "draw_pixels": {**_DRAW_TARGET, "pixels": (_LIST, True), "color": (_COLOR, False)},
     # slices
     "add_slice": {"name": (_STR, True), "x": (_INT, True), "y": (_INT, True),
                   "width": (_INT, True), "height": (_INT, True), "color": (_COLOR, False)},
@@ -58,6 +79,59 @@ OP_SPECS: dict[str, dict] = {
     "replace_color": {**_DRAW_TARGET, "from": (_COLOR, True), "to": (_COLOR, True),
                       "tolerance": (_INT, False)},
 }
+
+# Accepted spellings for an argument whose canonical op name differs from the equivalent
+# standalone tool's parameter name (`add_tag(from_frame=...)`, `replace_color(from_color=...)`).
+#
+# Aliases rather than a rename: undeclared arguments are now rejected outright, so
+# dropping `from`/`to` would turn every working batch call into a hard failure. Aliases
+# make the tool spelling work too, and cost one lookup. The canonical names stay as they
+# are, and `operations_reference()` lists both.
+OP_ARG_ALIASES: dict[str, dict[str, str]] = {
+    "add_tag": {"from_frame": "from", "to_frame": "to"},
+    "replace_color": {"from_color": "from", "to_color": "to"},
+    "copy_cel": {"from_frame": "from", "to_frame": "to"},
+}
+
+
+def operations_reference() -> str:
+    """A generated listing of every operation and its argument names/kinds.
+
+    Generated, not hand-written: the docstring's hand-written list of op *names* had
+    already drifted from this registry, and the argument names were never documented at
+    all, which is how a caller ends up guessing `from_frame` inside a batch. A test
+    asserts this listing covers OP_SPECS exactly, so it cannot go stale.
+    """
+    lines = []
+    for name in sorted(OP_SPECS):
+        args = ", ".join(
+            f"{arg}={kind}" if required else f"{arg}={kind}?"
+            for arg, (kind, required) in OP_SPECS[name].items()
+        )
+        line = f"  {name}({args})"
+        aliases = OP_ARG_ALIASES.get(name)
+        if aliases:
+            spellings = ", ".join(f"{alias} for {target}" for alias, target in sorted(aliases.items()))
+            line += f"  [also accepts {spellings}]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _canonical_args(index: int, name: str, args: dict) -> dict:
+    """Rewrite accepted alias spellings to their canonical arg names."""
+    aliases = OP_ARG_ALIASES.get(name)
+    if not aliases or not any(alias in args for alias in aliases):
+        return args
+    out = dict(args)
+    for alias, target in aliases.items():
+        if alias not in out:
+            continue
+        if target in out:
+            raise ValidationFailed(
+                f"op {index} ({name}): pass either '{target}' or '{alias}', not both."
+            )
+        out[target] = out.pop(alias)
+    return out
 
 
 def validate_operations(operations) -> list[dict]:
@@ -83,6 +157,19 @@ def validate_operations(operations) -> list[dict]:
         args = op.get("args", {})
         if not isinstance(args, dict):
             raise ValidationFailed(f"op {i} ({name}): 'args' must be an object.")
+        args = _canonical_args(i, name, args)
+
+        # The loop below walks the SPEC, so anything the caller sent that is not in the spec
+        # simply never gets looked at. A misspelled optional arg -- "blendmode" for
+        # "blend_mode", "opacty" for "opacity" -- vanished silently and the op reported
+        # success having ignored it. Required args were caught; optional ones were not.
+        unknown = sorted(set(args) - set(spec))
+        if unknown:
+            accepted = sorted(set(spec) | set(OP_ARG_ALIASES.get(name, {})))
+            raise ValidationFailed(
+                f"op {i} ({name}): unknown arg(s) {', '.join(repr(u) for u in unknown)}. "
+                f"Accepted: {', '.join(accepted)}."
+            )
 
         norm: dict = {}
         for arg, (kind, required) in spec.items():
@@ -94,16 +181,49 @@ def validate_operations(operations) -> list[dict]:
             try:
                 if kind == _INT:
                     norm[arg] = int(value)
+                elif kind == _FRAME:
+                    norm[arg] = FrameRef.arg(f"'{arg}'", value)
                 elif kind == _STR:
                     norm[arg] = str(value)
                 elif kind == _BOOL:
                     norm[arg] = bool(value)
                 elif kind == _COLOR:
                     norm[arg] = ColorSpec.parse(value).as_dict()
+                elif kind == _LIST:
+                    if not isinstance(value, list) or not value:
+                        raise ValidationFailed(f"'{arg}' must be a non-empty list.")
+                    # Capped per op, not just per batch: the batch cap counts operations,
+                    # so one op carrying a million pixels would slip straight past it.
+                    check_list_length(f"'{arg}'", value, MAX_PIXEL_LIST_LENGTH)
+                    norm[arg] = _normalize_pixels(value, name, i)
+            except ValidationFailed as exc:
+                # Already a full sentence from FrameRef; just place it in the batch.
+                raise ValidationFailed(f"op {i} ({name}): {exc}") from exc
             except (ValueError, TypeError) as exc:
                 raise ValidationFailed(f"op {i} ({name}): bad value for '{arg}': {exc}") from exc
         normalized.append({"op": name, "args": norm})
     return normalized
+
+
+def _normalize_pixels(pixels: list, op_name: str, index: int) -> list[dict]:
+    """Validate a pixel list the same way the standalone draw_pixels tool does.
+
+    Done here rather than in Lua so a malformed entry is refused before Aseprite is
+    launched, which is the difference between a clear message and a Lua type error
+    quoting generated code.
+    """
+    out = []
+    for n, pixel in enumerate(pixels):
+        if not isinstance(pixel, dict) or "x" not in pixel or "y" not in pixel:
+            raise ValidationFailed(
+                f"op {index} ({op_name}): pixels[{n}] must be "
+                '{"x": int, "y": int, "color": "#hex"?}.'
+            )
+        entry = {"x": int(pixel["x"]), "y": int(pixel["y"])}
+        if pixel.get("color") is not None:
+            entry["color"] = ColorSpec.parse(pixel["color"]).as_dict()
+        out.append(entry)
+    return out
 
 
 def summarize(op: dict) -> str:
@@ -117,7 +237,7 @@ def summarize(op: dict) -> str:
 # {op, args}) and applies them atomically. On any op failure it raises a JSON-encoded
 # error (level 0, no position prefix) so Python can surface a structured message; the
 # transaction rolls back and the file is never saved.
-BATCH_LUA_BODY = r"""
+BATCH_LUA_BODY = FRAME_GUARD_LUA + r"""
 local spr = open_sprite(ARG.src)
 local applied = {}
 
@@ -130,6 +250,12 @@ local function run_op(op)
     if a.opacity ~= nil then l.opacity = a.opacity end
     if a.blend_mode ~= nil then l.blendMode = blendmode_from(a.blend_mode) end
     if a.visible ~= nil then l.isVisible = a.visible end
+    if a.group ~= nil then
+      local grp = find_layer(spr, a.group)
+      if not grp.isGroup then error("'" .. tostring(a.group) .. "' is not a group layer", 0) end
+      l.parent = grp
+      return "added layer '" .. a.name .. "' in group '" .. a.group .. "'"
+    end
     return "added layer '" .. a.name .. "'"
   elseif name == "rename_layer" then
     find_layer(spr, a.layer).name = a.new_name
@@ -147,24 +273,76 @@ local function run_op(op)
   -- frames
   elseif name == "add_frame" then
     local fr
-    if a.copy_from ~= nil then fr = spr:newFrame(clamp_frame(spr, a.copy_from))
+    if a.copy_from ~= nil then fr = spr:newFrame(require_frame(spr, a.copy_from, "copy_from"))
     else fr = spr:newEmptyFrame(#spr.frames + 1) end
     if a.duration_ms ~= nil then fr.duration = a.duration_ms / 1000.0 end
     return "added frame " .. fr.frameNumber
   elseif name == "duplicate_frame" then
-    local fr = spr:newFrame(clamp_frame(spr, a.frame))
+    local fr = spr:newFrame(require_frame(spr, a.frame, "frame"))
     return "duplicated frame -> " .. fr.frameNumber
   elseif name == "set_frame_duration" then
-    spr.frames[clamp_frame(spr, a.frame)].duration = a.duration_ms / 1000.0
-    return "set frame " .. a.frame .. " duration"
+    local n = require_frame(spr, a.frame, "frame")
+    spr.frames[n].duration = a.duration_ms / 1000.0
+    return "set frame " .. n .. " duration to " .. a.duration_ms .. "ms"
+  elseif name == "remove_frame" then
+    if #spr.frames <= 1 then error("cannot delete the only frame", 0) end
+    local n = require_frame(spr, a.frame, "frame")
+    spr:deleteFrame(n)
+    return "removed frame " .. n
+  elseif name == "set_all_frame_durations" then
+    for _, fr in ipairs(spr.frames) do fr.duration = a.duration_ms / 1000.0 end
+    return "set all " .. #spr.frames .. " frames to " .. a.duration_ms .. "ms"
+  -- cels
+  elseif name == "set_cel_position" then
+    local layer = find_layer(spr, a.layer)
+    local n = require_frame(spr, a.frame, "frame")
+    local cel = layer:cel(n)
+    if cel == nil then
+      error("layer '" .. tostring(a.layer) .. "' has no cel on frame " .. n, 0)
+    end
+    cel.position = Point(a.x, a.y)
+    return "moved cel on frame " .. n .. " to (" .. a.x .. "," .. a.y .. ")"
+  elseif name == "set_cel_opacity" then
+    local layer = find_layer(spr, a.layer)
+    local n = require_frame(spr, a.frame, "frame")
+    local cel = layer:cel(n)
+    if cel == nil then
+      error("layer '" .. tostring(a.layer) .. "' has no cel on frame " .. n, 0)
+    end
+    cel.opacity = math.max(0, math.min(255, a.opacity))
+    return "set cel opacity on frame " .. n .. " to " .. cel.opacity
+  elseif name == "copy_cel" then
+    local from_layer = find_layer(spr, a.layer)
+    local to_layer = (a.to_layer ~= nil) and find_layer(spr, a.to_layer) or from_layer
+    local fromn = require_frame(spr, a["from"], "from")
+    local ton = require_frame(spr, a["to"], "to")
+    local src_cel = from_layer:cel(fromn)
+    if src_cel == nil then
+      error("layer '" .. tostring(a.layer) .. "' has no cel on frame " .. fromn, 0)
+    end
+    -- A copy, not a link: an independent image, so editing the destination later does
+    -- not silently change the source. Linking is a separate, deliberate operation.
+    local copy = Image(src_cel.image)
+    spr:newCel(to_layer, ton, copy, src_cel.position)
+    return "copied cel frame " .. fromn .. " -> " .. ton
+  elseif name == "delete_cel" then
+    local layer = find_layer(spr, a.layer)
+    local n = require_frame(spr, a.frame, "frame")
+    local cel = layer:cel(n)
+    if cel == nil then
+      error("layer '" .. tostring(a.layer) .. "' has no cel on frame " .. n, 0)
+    end
+    spr:deleteCel(cel)
+    return "deleted cel on frame " .. n
   -- tags
   elseif name == "add_tag" then
-    local f1, f2 = clamp_frame(spr, a["from"]), clamp_frame(spr, a.to)
+    local f1 = require_frame(spr, a["from"], "from")
+    local f2 = require_frame(spr, a.to, "to")
     if f1 > f2 then f1, f2 = f2, f1 end
     local t = spr:newTag(f1, f2); t.name = a.name
     if a.direction ~= nil then t.aniDir = anidir_from(a.direction) end
     if a.color ~= nil then t.color = mkcolor(a.color) end
-    return "added tag '" .. a.name .. "'"
+    return "added tag '" .. a.name .. "' on frames " .. f1 .. "-" .. f2
   elseif name == "remove_tag" then
     local found = nil
     for _, tg in ipairs(spr.tags) do if tg.name == a.name then found = tg end end
@@ -186,7 +364,7 @@ local function run_op(op)
   elseif name == "replace_color" then
     local layer = find_layer(spr, a.layer)
     if layer.isGroup then error("cannot edit a group layer: " .. layer.name, 0) end
-    local n = clamp_frame(spr, a.frame or 1)
+    local n = require_frame(spr, a.frame or 1, "frame")
     local img = get_draw_image(spr, layer, n)
     local fr, fg, fb, fa = a["from"].r, a["from"].g, a["from"].b, a["from"].a or 255
     local tol = a.tolerance or 0
@@ -206,7 +384,7 @@ local function run_op(op)
   else
     local layer = find_layer(spr, a.layer)
     if layer.isGroup then error("cannot draw on a group layer: " .. layer.name, 0) end
-    local n = clamp_frame(spr, a.frame or 1)
+    local n = require_frame(spr, a.frame or 1, "frame")
     local img = get_draw_image(spr, layer, n)
     if name == "set_pixel" then
       img_set(img, a.x, a.y, to_pixel(spr, a.color))
@@ -224,6 +402,16 @@ local function run_op(op)
       draw_rect_img(img, 0, 0, spr.width, spr.height, to_pixel(spr, a.color), true)
     elseif name == "clear_layer" then
       img:clear()
+    elseif name == "draw_pixels" then
+      local fallback = (a.color ~= nil) and to_pixel(spr, a.color) or nil
+      for _, pixel in ipairs(a.pixels) do
+        local px = (pixel.color ~= nil) and to_pixel(spr, pixel.color) or fallback
+        if px == nil then
+          error("draw_pixels: pixel at (" .. pixel.x .. "," .. pixel.y ..
+                ") has no colour and no shared `color` was given", 0)
+        end
+        img_set(img, pixel.x, pixel.y, px)
+      end
     else
       error("unknown op '" .. tostring(name) .. "'", 0)
     end
