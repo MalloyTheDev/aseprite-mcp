@@ -26,14 +26,16 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **117 tools**, including high-level **workflow** tools that scaffold and validate whole
+- **128 tools**, including high-level **workflow** tools that scaffold and validate whole
   assets in one call, and a **batch op-runner** that applies many edits atomically in a
-  single Aseprite process — across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
-  anti-aliased modes), custom brushes & symmetry, palettes (extract/sort/ramps), animation
-  tags, slices/9-patch, effects (gradients/outline/drop-shadow/colour adjustments), text
-  rendering, tilemaps, image stamping, reference/rotoscope layers, transforms, rich
-  export (per-layer/per-tag, sprite sheets, onion-skin), a GUI companion view, and a
-  `health_check` self-test.
+  single Aseprite process, across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
+  anti-aliased modes), custom brushes & symmetry, ramp-aware shading (form light, contact
+  shadow, smart outline, dither bands), selections that scope later edits, palettes
+  (extract/sort/ramps), animation tags, slices/9-patch, effects (gradients/outline/
+  drop-shadow/colour adjustments), text rendering, tilemaps, image stamping,
+  reference/rotoscope layers, transforms, rich export (per-layer/per-tag, sprite sheets,
+  onion-skin), Minecraft resource packs, a GUI companion view, and a `health_check`
+  self-test.
 - **Sandboxed file access** — by default the file capability is scoped to the workspace
   (relative paths only; absolute/`..` paths rejected unless you opt in).
 - **No-clobber by default** — output-writing tools refuse to overwrite an existing file;

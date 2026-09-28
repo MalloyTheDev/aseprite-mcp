@@ -26,7 +26,7 @@ PURE_PYTHON_TESTS = (
     "test_engine_godot", "test_slice_metadata", "test_asset_spec", "test_hardening",
     "test_concurrency", "test_minecraft", "test_minecraft_tools", "test_strict_args",
     "test_path_sandbox", "test_error_hierarchy", "test_schema_portability",
-    "test_quality", "test_slice_data",
+    "test_quality", "test_slice_data", "test_tool_docs",
 )
 # Deliberately absent: test_walk_template_batch, which compares a batched scaffold against
 # the per-frame one it replaced and so needs the real editor. It belongs to the

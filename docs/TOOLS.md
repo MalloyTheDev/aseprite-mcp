@@ -14,6 +14,8 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Cels](#cels) (5)
 - [Drawing](#drawing) (9)
 - [Brushes & symmetry](#brushes--symmetry) (4)
+- [Shading & light](#shading--light) (5)
+- [Selections](#selections) (6)
 - [Effects & colour adjustments](#effects--colour-adjustments) (9)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
@@ -23,6 +25,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (10)
 - [Engine export presets](#engine-export-presets) (2)
+- [Minecraft resource packs](#minecraft-resource-packs) (4)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (8)
 - [Asset spec (declarative build)](#asset-spec-declarative-build) (3)
@@ -902,6 +905,336 @@ Args:
 | `frame` | integer | no | 1 |
 
 
+## Shading & light
+
+### `contact_shadow`
+
+Darken the pixels where one form meets another, along its ramp.
+
+Ambient occlusion as pixel artists actually draw it: a line one or two steps darker
+where two shapes touch. It is what stops a shaded object looking like it is floating
+in front of the thing it is standing on.
+
+Args:
+    ramp: Colours darkest first. Darkened pixels stay on this ramp.
+    occluder_color: The colour of the form casting the occlusion, for example the
+        ground a character stands on, or the blade a crossguard meets.
+    radius: How far the darkening reaches from the occluder, in pixels. 1 or 2 is
+        usually right; beyond that it reads as a drop shadow rather than contact.
+    depth: How many ramp steps darker, at the contact line. 1 is the common choice.
+    direction: Degrees, restricting occlusion to one side. Omit for all directions,
+        which is what you want for a contact line; set it when only one side of the
+        form is actually touching something.
+    tolerance: How close a pixel must be to a ramp entry to be darkened. Pixels
+        further away are left alone, so this does not spill onto other materials.
+    layer: Target layer (default: top layer).
+    frame: Target frame, 1-based.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `occluder_color` | string | yes |  |
+| `radius` | integer | no | 1 |
+| `depth` | integer | no | 1 |
+| `direction` | number | no | _none_ |
+| `tolerance` | number | no | 24.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `dither_band`
+
+Dither the boundary between two adjacent ramp steps, widening the transition.
+
+Dithering in pixel art is a limited-palette necessity rather than a style: it buys
+an apparent extra shade between two you already have. It reads as dated when applied
+globally, which is why this is scoped to one boundary rather than offered as a
+filter over the whole sprite.
+
+Args:
+    ramp: Colours darkest first.
+    from_step, to_step: 1-based indices into `ramp`, and they must be adjacent.
+        Dithering between distant steps produces visible noise, not a gradient.
+    pattern: "bayer4" (finest, the usual choice), "bayer2" (chunkier) or "checker"
+        (a hard 50/50 that suits a sharp material change).
+    width: How far the dithered zone reaches into each band, in pixels. This is what
+        widens the transition, which is the point of dithering: at width=1 only the
+        seam itself alternates, and every pattern collapses to the same result
+        because a one-pixel-deep band can only alternate.
+    tolerance: How close a pixel must be to one of the two colours to take part.
+    layer: Target layer (default: top layer).
+    frame: Target frame, 1-based.
+
+Only pixels of the two named colours that border each other are touched, so the
+rest of the sprite is untouched even where it uses the same ramp.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `from_step` | integer | yes |  |
+| `to_step` | integer | yes |  |
+| `pattern` | string | no | bayer4 |
+| `width` | integer | no | 2 |
+| `tolerance` | number | no | 24.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `outline_smart`
+
+Outline a shape in colours drawn from its own ramp, not one flat colour.
+
+`add_outline` paints a single colour all the way round, which reads as a sticker.
+Pixel artists vary the outline: darker where the form turns away from the light,
+and often dropped entirely on the lit side so the shape breathes.
+
+Args:
+    ramp: Colours darkest first. Outline pixels come from here.
+    mode: "colormatched" takes each outline pixel from the adjacent interior colour
+        shifted `darken_steps` down the ramp. "selective" does the same but leaves
+        the lit side unoutlined, which needs `light_angle`. "single" uses the
+        darkest ramp entry all round, the classic look.
+    darken_steps: How many ramp steps below the neighbouring interior colour.
+    light_angle: Degrees, required for "selective". 135 is the usual key light.
+    tolerance: How close an interior pixel must be to a ramp entry to be used as
+        the source for its outline pixel.
+    layer: Target layer (default: top layer).
+    frame: Target frame, 1-based.
+
+The outline is drawn outside the silhouette, into transparency, so it never eats
+into the artwork.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `mode` | string | no | colormatched |
+| `darken_steps` | integer | no | 2 |
+| `light_angle` | number | no | _none_ |
+| `tolerance` | number | no | 32.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `shade_region_by_light`
+
+Shade a flat region as a lit form, using a ramp and a light direction.
+
+Turns a flat fill into a shaded one: an asymmetric terminator, a darker core away
+from the light, and optional rim light. Every output pixel comes from `ramp`.
+
+Scope this to one material. Shading a whole layer flattens materials together: a
+sword shaded in one pass turns steel, brass and leather into the same colours, where
+three scoped calls keep all three. Scope it by passing `base_color`, by making a
+selection first (`select_by_color` is the usual way), or both.
+
+What it cannot do: a distance field measures depth inside a silhouette, so it cannot
+invent form boundaries that are not in the outline. An overlapping head and torso
+drawn as one flat shape become one mass. Shade them as separate regions.
+
+Args:
+    ramp: Colours darkest first, as from `generate_ramp`. Output uses only these.
+    base_color: Only shade pixels near this colour. Defaults to every opaque pixel
+        in scope, which is usually what you want once a selection is active.
+    light_angle: Degrees. 0 is from the right, 90 from above, 135 from the upper
+        left, which is the conventional pixel-art key light.
+    light_z: How much the light comes from the viewer, 0 to 1. Higher flattens the
+        terminator and lights more of the form.
+    bulge: How rounded the form reads. 1.0 is sphere-like; lower is flatter, which
+        suits cloth and flat panels; higher exaggerates the curvature.
+    ambient: Floor brightness in shadow, 0 to 1. Pixel art rarely wants true black
+        in shadow, so this sits well above zero by default.
+    rim: Light wrapping the edge away from the key, 0 to 1. A little reads as a
+        bounce; a lot reads as backlight.
+    bias: Shift the whole result along the ramp, in steps. Use this when the result
+        is uniformly a shade too dark or light, rather than re-tuning the lighting.
+    tolerance: How close a pixel must be to `base_color` to count as part of the
+        region, as a weighted RGB distance. Ignored when `base_color` is omitted.
+    layer: Target layer (default: top layer).
+    frame: Target frame, 1-based.
+
+Refuses a region with no interior to shade: below roughly 6px across, the distance
+field never exceeds a pixel and there is no form to describe. The honest answer
+there is two hand-placed pixels, which `draw_pixels` already does.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `base_color` | string | no | _none_ |
+| `light_angle` | number | no | 135.0 |
+| `light_z` | number | no | 0.45 |
+| `bulge` | number | no | 1.0 |
+| `ambient` | number | no | 0.35 |
+| `rim` | number | no | 0.0 |
+| `bias` | number | no | 0.0 |
+| `tolerance` | number | no | 24.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `shift_along_ramp`
+
+Move pixels along a colour ramp, keeping every one of them on the palette.
+
+This is the operation to use for "put this in shadow", "make the night variant" or
+"deepen the shadow side". Each pixel is matched to its nearest ramp entry, moved
+`steps` along the ramp, and clamped at the ends, so the result uses only colours
+that were already on the ramp.
+
+Prefer this over `adjust_brightness_contrast` for anything that should still look
+like pixel art: that tool does colour arithmetic and lands almost every pixel
+between palette entries.
+
+Args:
+    ramp: The ramp, darkest first, as produced by `generate_ramp`. Order matters:
+        negative `steps` moves toward the front of this list.
+    steps: How far to move. Negative darkens (toward the front of `ramp`), positive
+        lightens. Pixels already at an end stay there rather than wrapping.
+    x, y, width, height: Restrict the change to a region. Defaults to the whole
+        canvas. Scope this when a sprite has several materials: one ramp applied to
+        everything flattens steel, brass and leather into the same colours.
+    tolerance: How far a pixel may be from a ramp entry and still be treated as
+        belonging to it, as a weighted RGB distance. Pixels further away than this
+        are left alone and counted in `pixels_skipped`, so shading one material does
+        not disturb its neighbours.
+    layer: Target layer (default: top layer).
+    frame: Target frame, 1-based.
+
+Returns `pixels_written` and `pixels_skipped`. A high skip count usually means the
+ramp does not match the artwork, not that the sprite was already correct.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `steps` | integer | yes |  |
+| `x` | integer | no | 0 |
+| `y` | integer | no | 0 |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `tolerance` | number | no | 48.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+## Selections
+
+### `deselect`
+
+Clear the selection, so edits affect the whole layer again.
+
+A real step, not a formality: the selection lives in a sidecar beside the sprite and
+persists across calls, so leaving one active will silently scope every later edit.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+
+
+### `get_selection`
+
+Describe the current selection: whether there is one, and what it covers.
+
+Returns `bounds`, the pixel `area` actually inside the selection, and a `map` of
+the selected region using `#` for selected and `.` for not, in the same shape
+`get_pixels(format="map")` uses. The map is capped, and omitted for a selection
+larger than the cap, since a wall of characters is not feedback.
+
+Worth calling before a large edit: a selection you forgot about is the difference
+between changing what you meant and changing a corner of it.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+
+
+### `invert_selection`
+
+Swap what is selected for what is not.
+
+Selecting a character's silhouette and inverting gives the background, which is
+usually easier than describing the background directly.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+
+
+### `modify_selection`
+
+Grow, shrink, or outline the current selection.
+
+Args:
+    op: "expand" grows by `quantity` pixels, "contract" shrinks, "border" replaces
+        the selection with a band of that width around its edge. A border selection
+        is how you scope an outline or a contact shadow to where two forms meet.
+    quantity: How many pixels, at least 1.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `op` | string | yes |  |
+| `quantity` | integer | no | 1 |
+
+
+### `select_by_color`
+
+Select every pixel matching a colour, the magic-wand selection.
+
+The usual way to scope an edit to one material: select the armour's base colour and
+every later operation touches only the armour. Pair it with `shift_along_ramp` to
+shade one material without disturbing its neighbours.
+
+Args:
+    color: The colour to match.
+    tolerance: 0 matches exactly. Higher values also catch nearby colours, which is
+        useful on artwork that was anti-aliased or converted from a photo.
+    frame: Which frame to sample, 1-based.
+
+Matching is done on the composited image, so what is selected is what you see rather
+than what happens to be on the active layer.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `color` | string | yes |  |
+| `tolerance` | integer | no | 0 |
+| `frame` | integer | no | 1 |
+
+
+### `select_region`
+
+Select a region, so later edits only affect that area.
+
+The selection persists until `deselect`, and every pixel-writing tool honours it.
+There is no per-call override: to draw outside the selection, clear it first. Tools
+that wrote fewer pixels than asked report `selection_applied` and
+`pixels_outside_selection`, so a forgotten selection shows up in the result rather
+than as a mysteriously incomplete edit.
+
+Args:
+    shape: "rect", "ellipse" (both use x/y/width/height) or "polygon" (uses points).
+    x, y, width, height: The region. width/height default to the rest of the canvas.
+    points: For "polygon", a list of {"x": int, "y": int}, at least 3.
+    mode: "replace" the selection, or "add"/"subtract"/"intersect" with the current
+        one. Building a selection from several shapes is how you scope an edit to
+        an awkward area, such as everything except a character's eyes.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `shape` | string | no | rect |
+| `x` | integer | no | 0 |
+| `y` | integer | no | 0 |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
+| `points` | array<object> | no | _none_ |
+| `mode` | string | no | replace |
+
+
 ## Effects & colour adjustments
 
 ### `add_drop_shadow`
@@ -1754,6 +2087,132 @@ Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `output` | string | no | _none_ |
+| `overwrite` | boolean | no | False |
+
+
+## Minecraft resource packs
+
+### `export_minecraft_texture`
+
+Export a sprite into a resource pack at its correct texture path.
+
+A single-frame sprite exports as a plain PNG. A multi-frame sprite exports as a
+**vertical strip** (frame 1 on top, no padding) and gets a ``.png.mcmeta`` sidecar -
+that pairing is what the game reads as an animation, and either half alone is broken.
+
+Args:
+    pack_root: The resource-pack directory (its ``assets/`` tree is written under this).
+    namespace: Your mod/pack id. Defaults to "minecraft", which overrides vanilla.
+    category: Texture subdirectory - block, item, entity, gui, particle, ...
+    texture_name: In-pack texture name, ``/`` allowed for subdirectories. Defaults to
+        the sprite's filename stem.
+    frametime: Ticks per frame for the animation sidecar (1 tick = 50 ms).
+    interpolate: Blend between animation frames.
+    frame_order: Optional playback order (see ``write_texture_mcmeta``).
+    overwrite: Replace existing files (default False = no-clobber).
+
+Returns a ``workflow_manifest.v1`` manifest (kind ``minecraft_texture``).
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `pack_root` | string | yes |  |
+| `namespace` | string | no | minecraft |
+| `category` | string | no | block |
+| `texture_name` | string | no | _none_ |
+| `frametime` | integer | no | 1 |
+| `interpolate` | boolean | no | False |
+| `frame_order` | array<any> | no | _none_ |
+| `overwrite` | boolean | no | False |
+
+
+### `validate_minecraft_texture`
+
+Check a sprite against Minecraft's texture rules before it ships.
+
+Always checks that frames are square and power-of-two. Optionally checks the declared
+size, frame count and palette budget; if `tiling` is set, measures the wrap-around
+seams of every frame; if `pack_root` is given, confirms an animated texture has its
+``.png.mcmeta`` sidecar.
+
+**The seam check** does not require the first and last columns to match - that is only
+true of a texture with no variation, and would reject most real block art. It compares
+the wrap transition against the texture's own interior column-to-column transitions and
+reports the ratio, so a borderline verdict can be judged rather than taken on faith.
+`warn_ratio` / `error_ratio` set where "suspect" and "seam" begin.
+
+Returns a ``workflow_manifest.v1`` manifest (kind ``validation``) whose `validation`
+block is ``{passed, checks, errors, warnings}``, plus per-frame seam measurements
+under `tiling` when the seam check ran.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `category` | string | no | _none_ |
+| `texture_size` | integer | no | _none_ |
+| `tiling` | boolean | no | False |
+| `expected_frames` | integer | no | _none_ |
+| `max_palette_size` | integer | no | _none_ |
+| `pack_root` | string | no | _none_ |
+| `namespace` | string | no | minecraft |
+| `texture_name` | string | no | _none_ |
+| `warn_ratio` | number | no | 2.0 |
+| `error_ratio` | number | no | 4.0 |
+
+
+### `write_pack_mcmeta`
+
+Write ``<pack_root>/pack.mcmeta`` - the file that makes a directory a resource pack.
+
+Args:
+    pack_root: Directory to become the pack root (created if needed).
+    mc_version: A known Minecraft version (e.g. "1.21.1") to look the format up from.
+        Defaults to 1.21.1.
+    pack_format: The format number, overriding `mc_version`. Required for versions
+        outside the known table - an unverified guess produces a pack the game
+        rejects as incompatible, so it is refused rather than guessed.
+    supported_min, supported_max: Optional inclusive `supported_formats` range,
+        letting one pack load across several game versions.
+
+Returns a ``workflow_manifest.v1`` manifest (kind ``minecraft_pack``).
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `pack_root` | string | yes |  |
+| `mc_version` | string | no | _none_ |
+| `pack_format` | integer | no | _none_ |
+| `description` | string | no | Generated by aseprite-mcp |
+| `supported_min` | integer | no | _none_ |
+| `supported_max` | integer | no | _none_ |
+| `overwrite` | boolean | no | False |
+
+
+### `write_texture_mcmeta`
+
+Write the ``<texture>.png.mcmeta`` sidecar for an animated texture.
+
+``export_minecraft_texture`` writes this automatically for a multi-frame sprite; use
+this to add or repair one beside a PNG that already exists.
+
+Args:
+    texture_path: Path to the ``.png`` (the sidecar goes beside it, same name + .mcmeta).
+    frametime: Ticks each frame is shown for (1 tick = 50 ms).
+    interpolate: Blend between frames - smooth for gradients, blurry for pixel art.
+    frame_order: Optional playback order: frame indices (0-based) or
+        ``{"index": i, "time": t}`` objects to hold individual frames longer.
+    frame_width, frame_height: Only for non-square frames, which the game otherwise
+        infers from the strip's width.
+
+Returns a ``workflow_manifest.v1`` manifest (kind ``minecraft_texture``).
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `texture_path` | string | yes |  |
+| `frametime` | integer | no | 1 |
+| `interpolate` | boolean | no | False |
+| `frame_order` | array<any> | no | _none_ |
+| `frame_width` | integer | no | _none_ |
+| `frame_height` | integer | no | _none_ |
 | `overwrite` | boolean | no | False |
 
 
