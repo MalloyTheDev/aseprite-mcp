@@ -31,6 +31,16 @@ All notable changes to this project are documented here. The format is based on
   `core/asset_spec.py`. (113 tools.)
 
 ### Fixed
+- **15 tools were missing from the tool reference.** `docs/TOOLS.md` is generated from
+  the live registry and CI checks it is in sync, which looked like enough. It was not:
+  only modules named in the generator's `GROUPS` list got a section and the rest were
+  dropped in silence, so the header counted 128 tools while the file described 113, and
+  `--check` compared that file against the same lossy output and passed. Shading,
+  selections and the whole Minecraft domain were absent from the document an agent reads
+  to find out what this server can do. All three are documented now; generation fails
+  loudly when a tool module has no `GROUPS` entry; and tests assert the artifact itself
+  covers every registered tool, so a missing entry cannot pass as up to date again. The
+  README's tool count, which had drifted 11 behind, is now checked the same way.
 - **Slice user-data could not carry structure.** `export_slice_metadata` derives a
   slice's `type` and `id` by parsing its `data`, so `{"type": "hitbox", "id": "body"}` is
   the shape worth sending, and it could not be sent: `add_slice` / `set_slice` declared

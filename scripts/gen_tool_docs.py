@@ -16,6 +16,9 @@ from pathlib import Path
 from aseprite_mcp import server  # noqa: F401  (importing registers every tool)
 from aseprite_mcp.app import mcp
 
+# Bucket for tools whose module is not in GROUPS. Reaching it is an error, not a section.
+_UNGROUPED = "(ungrouped)"
+
 # Ordered (module, heading) pairs for grouping the reference.
 GROUPS = [
     ("sprite", "Sprite lifecycle"),
@@ -26,6 +29,8 @@ GROUPS = [
     ("cels", "Cels"),
     ("drawing", "Drawing"),
     ("brushes", "Brushes & symmetry"),
+    ("shading", "Shading & light"),
+    ("selection", "Selections"),
     ("effects", "Effects & colour adjustments"),
     ("text", "Text"),
     ("tilemap", "Tilemaps"),
@@ -35,6 +40,7 @@ GROUPS = [
     ("transform", "Transforms"),
     ("export", "Export & import"),
     ("export_presets", "Engine export presets"),
+    ("minecraft", "Minecraft resource packs"),
     ("reference", "Reference / rotoscope"),
     ("workflow", "Workflows (high-level scaffolding)"),
     ("asset_spec", "Asset spec (declarative build)"),
@@ -94,9 +100,22 @@ async def main(check: bool = False) -> int:
     tools = await mcp.list_tools()
     by_mod: dict[str, list] = {}
     for t in tools:
-        by_mod.setdefault(name_to_mod.get(t.name, "other"), []).append(t)
+        by_mod.setdefault(name_to_mod.get(t.name, _UNGROUPED), []).append(t)
     for v in by_mod.values():
         v.sort(key=lambda t: t.name)
+
+    # Only modules named in GROUPS get a section, so a tool module added without a
+    # GROUPS entry used to be dropped here in silence: the header still counted it,
+    # and --check compared the file against the same lossy output, so nothing failed.
+    # Three whole domains (shading, selections, Minecraft) went undocumented that way.
+    orphans = by_mod.get(_UNGROUPED)
+    if orphans:
+        names = ", ".join(t.name for t in orphans)
+        raise SystemExit(
+            f"{len(orphans)} registered tool(s) belong to no GROUPS entry and would be "
+            f"left out of the reference: {names}. Add their module to GROUPS in "
+            f"{Path(__file__).name}."
+        )
 
     out = [
         "# Aseprite MCP — Tool Reference",
