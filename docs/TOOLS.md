@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **128 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **129 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -10,6 +10,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Inspection & preview](#inspection--preview) (4)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (5)
+- [Animation checks](#animation-checks) (1)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (5)
 - [Drawing](#drawing) (9)
@@ -422,6 +423,45 @@ while changing frame 1).
 | `filename` | string | yes |  |
 | `frame` | integer | yes |  |
 | `duration_ms` | integer | yes |  |
+
+
+## Animation checks
+
+### `validate_loop`
+
+Measure an animation and report what is wrong with it, without playing it.
+
+Renders each frame once (one Aseprite launch), then reports per-frame hashes, content
+bounding boxes, centroids, the bottom row of the drawn content, the spacing series
+between frames, and the durations. On top of the numbers it checks for: a last frame
+identical to the first (a loop's wrap showing one image twice), identical adjacent
+frames (a pose held by repeating a frame instead of lengthening one), uniform frame
+durations, a spacing series that wobbles rather than eases, a contact edge that moves,
+and frames with nothing drawn on them.
+
+Args:
+    tag: Limit the check to one animation tag's frames. Its repeat setting also
+        decides whether the seam is treated as a loop's wrap.
+    layer: Measure one layer's cels instead of the flattened frame, so a moving
+        character can be measured without the background it sits on.
+    loops: Override whether these frames are a cycle. One-shots (attack, hurt, death)
+        do not wrap, so a repeated last frame is only a warning for them.
+    jitter_tolerance: Pixels of spacing wobble to ignore. Integer cel positions make
+        1px unavoidable, so that is the default; pass 0 to see every reversal.
+
+Returns a ``workflow_manifest.v1`` manifest (kind "validation") whose `validation`
+section is `{passed, checks[], errors[], warnings[]}` and whose `animation` section
+carries every measurement. `validation.passed` is the verdict and is false only for
+faults that are wrong whatever the animation is doing; the rest are warnings, because
+a bouncing ball is meant to leave the ground and a flicker is meant to go blank.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `tag` | string | no | _none_ |
+| `layer` | string | no | _none_ |
+| `loops` | boolean | no | _none_ |
+| `jitter_tolerance` | number | no | 1.0 |
 
 
 ## Animation tags

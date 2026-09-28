@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`validate_loop`** - an animation can now be checked instead of eyeballed. It renders
+  every frame once, in a single Aseprite launch, and reports per-frame hashes, content
+  bounding boxes, centroids, the bottom row of the drawn content, the spacing series and
+  the durations, then names the faults a still frame hides: a last frame identical to the
+  first (the loop shows one image twice at the wrap), identical adjacent frames (a pose
+  held by repeating a frame instead of lengthening one), uniform placeholder timing,
+  spacing that wobbles rather than eases, a contact edge that moves, and frames with
+  nothing drawn on them. Scope it to a tag or to one layer, so a character can be measured
+  without the background it stands on. The verdict fails only on faults that are wrong
+  whatever the animation is doing; a bouncing ball is meant to leave the ground, so that
+  is reported and not failed. (129 tools.)
 - **Minecraft resource-pack domain** (4 tools): `export_minecraft_texture`,
   `validate_minecraft_texture`, `write_pack_mcmeta`, `write_texture_mcmeta`, plus a
   matching asset-spec kind and seam validation in `core/minecraft.py`. (117 tools.)

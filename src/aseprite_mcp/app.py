@@ -181,6 +181,7 @@ READ_ONLY_TOOLS = frozenset({
     "plan_asset_spec",
     "render_preview",
     "validate_asset_spec",
+    "validate_loop",
     "validate_minecraft_texture",
     "validate_sprite_for_game_export",
 })

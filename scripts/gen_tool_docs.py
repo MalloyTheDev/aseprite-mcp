@@ -25,6 +25,7 @@ GROUPS = [
     ("inspect", "Inspection & preview"),
     ("layers", "Layers"),
     ("frames", "Frames (animation)"),
+    ("animation", "Animation checks"),
     ("tags", "Animation tags"),
     ("cels", "Cels"),
     ("drawing", "Drawing"),
