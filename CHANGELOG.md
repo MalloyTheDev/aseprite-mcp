@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`draw_ellipse_in_box`** - there was no way to draw an even-diameter circle. Every
+  ellipse came from a centre and radii, so it was always an odd 2*radius+1 across: a disc
+  could not be centred on a 32x32 canvas, and a circle could not line up with an
+  even-width rectangle. The new tool takes the same bounding box as `draw_rectangle` and
+  fills it exactly. An even side is drawn the way it is by hand, as the odd ellipse one
+  pixel smaller with its middle row or column repeated, and an odd box gives pixel for
+  pixel what `draw_ellipse` gives, because the ellipse geometry is now one function that
+  both forms place differently rather than two rasterisers that nearly agree. The shared
+  geometry note every drawing tool carries used to document the gap; it now names the way
+  round it. (132 tools.)
 - **`apply_timing_curve`** - uniform frame durations are the placeholder every animation
   starts with, and `validate_loop` has been warning about them with nothing to point at.
   Now there is: `hold_extremes` holds the ends of a cycle two and a half times as long as

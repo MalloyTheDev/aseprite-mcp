@@ -26,7 +26,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **131 tools**, including high-level **workflow** tools that scaffold and validate whole
+- **132 tools**, including high-level **workflow** tools that scaffold and validate whole
   assets in one call, and a **batch op-runner** that applies many edits atomically in a
   single Aseprite process, across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, ramp-aware shading (form light, contact
@@ -370,6 +370,7 @@ and says so rather than doing it quietly.
 | `draw_line` · `draw_polyline` | Line / connected segments; `pixel_perfect` & `antialias` options. |
 | `draw_curve` | Quadratic Bézier curve. |
 | `draw_rectangle` · `draw_ellipse` | Outline or filled rectangle / ellipse; ellipse has `antialias`. |
+| `draw_ellipse_in_box` | An ellipse filling the same bounding box `draw_rectangle` takes, so an even diameter is possible and a circle can line up with a rectangle. |
 | `fill_area` | Flood fill (paint bucket) from a point. |
 | `fill_layer` · `clear_layer` | Fill the whole cel / erase it to transparent. |
 
