@@ -191,10 +191,17 @@ def test_operations_reference_covers_every_op_and_argument():
         matching = [ln for ln in lines if ln.strip().startswith(f"{op}(")]
         assert len(matching) == 1, f"{op} is not listed exactly once"
         line = matching[0]
+        # Split the argument list out and compare whole entries rather than substrings.
+        # A substring test is fooled whenever one argument name ends with another's:
+        # "layer=str?" is inside "to_layer=str?", so copy_cel's required `layer` looked
+        # optional purely because it also has a `to_layer`.
+        inside = line.strip().split("(", 1)[1].rsplit(")", 1)[0]
+        entries = {part.strip() for part in inside.split(",") if part.strip()}
         for arg, (kind, required) in spec.items():
-            assert f"{arg}={kind}" in line, f"{op}: '{arg}={kind}' missing from {line!r}"
-            # '?' marks optional, so a required argument must not carry one.
-            assert (f"{arg}={kind}?" in line) is (not required), f"{op}.{arg}: wrong optionality"
+            expected = f"{arg}={kind}" if required else f"{arg}={kind}?"
+            assert expected in entries, (
+                f"{op}: expected {expected!r} among {sorted(entries)}"
+            )
 
 
 def test_operations_reference_lists_no_unknown_ops():
