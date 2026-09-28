@@ -56,6 +56,13 @@ MAX_OUTLINE_THICKNESS = 64
 # 4,096 is smooth for any curve that fits in a sprite (the default is 32).
 MAX_CURVE_STEPS = 4_096
 
+# --- Animation ------------------------------------------------------------- #
+# Frames one call may move a cel across. The distribution is computed in Python and
+# applied inside a single transaction, so the work is one launch whatever the count; the
+# cap is here because the frame list comes from the caller, and a request for more frames
+# than the longest hand-drawn cycle (well under 100) is a mistake worth naming early.
+MAX_MOTION_FRAMES = 512
+
 # --- Workflow scaffolding -------------------------------------------------- #
 # These bound the most expensive calls in the server: one integer asks for frames, and
 # each frame used to cost two Aseprite launches.
