@@ -106,6 +106,22 @@ def to_lua(value) -> str:
 # --------------------------------------------------------------------------- #
 PRELUDE = r"""
 -- ===== number / table helpers =====================================
+-- ===== pixel accounting ===========================================
+-- Every write to an image goes through img_set, blend_over or flood_fill_img, so
+-- counting here gives every tool an honest report of what it did without each one
+-- having to keep its own tally. A draw whose coordinates fall off the canvas used to
+-- be silently dropped and still return ok: `draw_rectangle(10,10,20,20)` on a 16x16
+-- canvas asked for 400 pixels, landed 36, and said nothing. The counts are attached
+-- to RESULT by the harness only when a run actually touched pixels, so a tool that
+-- writes nothing does not grow a misleading "0".
+local _px_written, _px_clipped, _px_skipped = 0, 0, 0
+
+-- For tools that decline a write on purpose (a gradient leaving transparent pixels
+-- alone, say). Deliberate and out-of-bounds are different facts and are reported so.
+local function note_skipped(n)
+  _px_skipped = _px_skipped + (n or 1)
+end
+
 local function clamp255(x)
   x = math.floor(tonumber(x) + 0.5)
   if x < 0 then return 0 elseif x > 255 then return 255 else return x end
@@ -264,7 +280,11 @@ end
 -- Alpha-composite colour (r,g,b) with coverage `cov` (0..1) over the pixel at
 -- (x,y). On RGB sprites this anti-aliases; on indexed/gray it thresholds at 0.5.
 local function blend_over(spr, img, x, y, r, g, b, cov)
-  if x < 0 or y < 0 or x >= img.width or y >= img.height or cov <= 0 then return end
+  if cov <= 0 then return end
+  if x < 0 or y < 0 or x >= img.width or y >= img.height then
+    _px_clipped = _px_clipped + 1
+    return
+  end
   x, y = math.floor(x), math.floor(y)
   if cov > 1 then cov = 1 end
   if spr.colorMode == ColorMode.RGB then
@@ -277,8 +297,10 @@ local function blend_over(spr, img, x, y, r, g, b, cov)
     local ng = (g * sa + dg * dfa * (1 - sa)) / outa
     local nb = (b * sa + db * dfa * (1 - sa)) / outa
     img:drawPixel(x, y, app.pixelColor.rgba(clamp255(nr), clamp255(ng), clamp255(nb), clamp255(outa * 255)))
+    _px_written = _px_written + 1
   elseif cov >= 0.5 then
     img:drawPixel(x, y, rgba_to_px(spr, r, g, b, 255))
+    _px_written = _px_written + 1
   end
 end
 
@@ -374,6 +396,9 @@ end
 local function img_set(img, x, y, px)
   if x >= 0 and y >= 0 and x < img.width and y < img.height then
     img:drawPixel(math.floor(x), math.floor(y), px)
+    _px_written = _px_written + 1
+  else
+    _px_clipped = _px_clipped + 1
   end
 end
 
@@ -464,6 +489,7 @@ local function flood_fill_img(img, x, y, px)
     if px0 >= 0 and py0 >= 0 and px0 < img.width and py0 < img.height
        and img:getPixel(px0, py0) == target then
       img:drawPixel(px0, py0, px)
+      _px_written = _px_written + 1
       stack[#stack + 1] = { px0 + 1, py0 }
       stack[#stack + 1] = { px0 - 1, py0 }
       stack[#stack + 1] = { px0, py0 + 1 }
@@ -674,6 +700,15 @@ def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
         "end\n"
         "local _ok, _err = pcall(_main)\n"
         "if _ok then\n"
+        # Attached here rather than by each tool, so every pixel-writing tool reports
+        # what it actually did. Only when something was touched: a tool that writes no
+        # pixels should not grow a "0" that reads as a claim about pixels.
+        "  if type(RESULT) == 'table' and\n"
+        "     (_px_written > 0 or _px_clipped > 0 or _px_skipped > 0) then\n"
+        "    RESULT.pixels_written = _px_written\n"
+        "    if _px_clipped > 0 then RESULT.pixels_clipped = _px_clipped end\n"
+        "    if _px_skipped > 0 then RESULT.pixels_skipped = _px_skipped end\n"
+        "  end\n"
         f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"
         f'  print("{error_prefix(nonce)}" .. json_encode(tostring(_err)))\n'

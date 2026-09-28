@@ -7,6 +7,8 @@ coordinates are always predictable.
 
 from __future__ import annotations
 
+import inspect
+
 from ..app import mcp
 from ..core.errors import ValidationFailed
 from ..core.limits import (
@@ -27,11 +29,6 @@ local layer = find_layer(spr, ARG.layer)
 if layer.isGroup then error("Cannot draw on a group layer: " .. layer.name) end
 local framenum = require_frame(spr, ARG.frame, "frame")
 local img = get_draw_image(spr, layer, framenum)
--- Optional per-tool counters. _OPEN, the tool snippet and _CLOSE are concatenated
--- into one Lua chunk, so a snippet that increments these gets them reported without
--- needing its own RESULT. Left nil by tools that do not count, and omitted from the
--- result in that case rather than reported as zero, which would be a lie.
-local written, skipped = nil, nil
 """
 
 _CLOSE = """
@@ -39,8 +36,6 @@ commit_image(spr, layer, framenum, img)
 save_sprite(spr)
 RESULT = { ok = true, filename = spr.filename, layer = layer.name,
            frame = framenum, width = spr.width, height = spr.height }
-if written ~= nil then RESULT.pixels_written = written end
-if skipped ~= nil then RESULT.pixels_skipped = skipped end
 """
 
 
@@ -48,7 +43,47 @@ def _draw(args: dict, snippet: str) -> dict:
     return run_lua(_OPEN + snippet + _CLOSE, args)
 
 
-@mcp.tool()
+# These conventions lived only in this module's docstring, which never reaches the
+# model: only a function's own docstring becomes its tool description. Most geometry
+# tools documented no argument at all, and the two centring rules disagree by half a
+# pixel, which is a visible defect at 16x16 rather than a rounding difference.
+#
+# Applied through a registration decorator rather than by editing seven docstrings, so
+# one statement covers every geometry tool and they cannot drift apart. It has to run
+# BEFORE mcp.tool(), because registration captures the description at that moment.
+_GEOMETRY_NOTE = """
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
+    diameter, so a circle cannot be centred on an even canvas or aligned with an
+    even-width rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+"""
+
+
+def _geometry_tool(fn):
+    """Register a drawing tool with the shared coordinate conventions appended.
+
+    cleandoc first, because Python 3.13 dedents docstrings at compile time and 3.12
+    does not, so appending at "the docstring's own level" yields different text per
+    interpreter, and docs/TOOLS.md is generated from it.
+    """
+    base = inspect.cleandoc(fn.__doc__ or "").rstrip()
+    fn.__doc__ = f"{base}\n\n{_GEOMETRY_NOTE.strip()}\n"
+    return mcp.tool()(fn)
+
+
+@_geometry_tool
 def draw_pixels(
     filename: str,
     pixels: list[dict],
@@ -101,7 +136,7 @@ def draw_pixels(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_line(
     filename: str,
     x1: int,
@@ -147,7 +182,7 @@ def draw_line(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_polyline(
     filename: str,
     points: list[dict],
@@ -202,7 +237,7 @@ def draw_polyline(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_curve(
     filename: str,
     x0: int,
@@ -246,7 +281,7 @@ def draw_curve(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_rectangle(
     filename: str,
     x: int,
@@ -274,7 +309,7 @@ def draw_rectangle(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def draw_ellipse(
     filename: str,
     center_x: int,
@@ -314,7 +349,7 @@ def draw_ellipse(
     return _draw(args, snippet)
 
 
-@mcp.tool()
+@_geometry_tool
 def fill_area(
     filename: str,
     x: int,
