@@ -114,7 +114,15 @@ PRELUDE = r"""
 -- canvas asked for 400 pixels, landed 36, and said nothing. The counts are attached
 -- to RESULT by the harness only when a run actually touched pixels, so a tool that
 -- writes nothing does not grow a misleading "0".
-local _px_written, _px_clipped, _px_skipped = 0, 0, 0
+local _px_written, _px_clipped, _px_skipped, _px_masked = 0, 0, 0, 0
+
+-- The active selection, or nil. Set by open_sprite when a sidecar mask is loaded.
+--
+-- It has to be consulted by hand: a selection clips app.useTool and the filter commands,
+-- but NOT Image:drawPixel, which is what every drawing tool here goes through. Without
+-- this check a selection would appear to work for effects and be silently ignored for
+-- drawing, which is worse than not supporting selections at all.
+local _sel = nil
 
 -- For tools that decline a write on purpose (a gradient leaving transparent pixels
 -- alone, say). Deliberate and out-of-bounds are different facts and are reported so.
@@ -360,6 +368,22 @@ local function open_sprite(path)
   local spr = app.open(path)
   if spr == nil then error("Could not open sprite: " .. tostring(path)) end
   app.sprite = spr
+
+  -- A selection is NOT stored in the .aseprite file: reopen a sprite and it is empty
+  -- again. Every tool call here is its own Aseprite run, so a selection is kept in a
+  -- sidecar beside the sprite and reloaded on open, which is what lets it scope the
+  -- edits that follow rather than dying with the process that made it.
+  --
+  -- ARG.use_selection == false opts out for one call. Whether a mask was applied is
+  -- always reported, because an edit that silently touched a fraction of what the
+  -- caller asked for is exactly the failure this codebase keeps turning up.
+  if ARG.use_selection ~= false then
+    local mask_path = tostring(path):gsub("%.[^./\\]+$", "") .. ".msk"
+    if app.fs.isFile(mask_path) then
+      app.command.LoadMask{ filename = mask_path }
+      if not spr.selection.isEmpty then _sel = spr.selection end
+    end
+  end
   return spr
 end
 
@@ -395,6 +419,12 @@ end
 -- ===== drawing primitives (operate on an Image, sprite-space coords) ======
 local function img_set(img, x, y, px)
   if x >= 0 and y >= 0 and x < img.width and y < img.height then
+    -- contains() costs roughly a quarter of a microsecond, so a full 256x256 canvas is
+    -- about 16ms: cheap enough to check per pixel rather than precomputing a bitmap.
+    if _sel ~= nil and not _sel:contains(math.floor(x), math.floor(y)) then
+      _px_masked = _px_masked + 1
+      return
+    end
     img:drawPixel(math.floor(x), math.floor(y), px)
     _px_written = _px_written + 1
   else
@@ -708,6 +738,14 @@ def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
         "    RESULT.pixels_written = _px_written\n"
         "    if _px_clipped > 0 then RESULT.pixels_clipped = _px_clipped end\n"
         "    if _px_skipped > 0 then RESULT.pixels_skipped = _px_skipped end\n"
+        "    if _px_masked > 0 then RESULT.pixels_outside_selection = _px_masked end\n"
+        "  end\n"
+        # Reported whenever a mask was active, even if it let everything through: the
+        # caller needs to know an edit was scoped rather than infer it from counts. An
+        # edit that silently touched a fraction of what was asked for is precisely the
+        # failure mode this project keeps finding.
+        "  if type(RESULT) == 'table' and _sel ~= nil then\n"
+        "    RESULT.selection_applied = true\n"
         "  end\n"
         f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"
