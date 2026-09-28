@@ -1416,7 +1416,9 @@ Args:
         top-left**. Provide all four to mark the stretchable middle.
     pivot_*: Optional pivot point (relative to the slice).
     color: Optional slice colour shown in the editor.
-    data: Optional user data string.
+    data: Optional user data. A string is stored as it arrives; a dict or list is
+        JSON-encoded, so {"type": "hitbox", "id": "body"} round-trips through
+        export_slice_metadata, which derives the slice's type and id from it.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1458,6 +1460,9 @@ Delete a slice by name.
 ### `set_slice`
 
 Update an existing slice's bounds, name, colour, or data.
+
+data: a string is stored as it arrives; a dict or list is JSON-encoded, so structured
+user-data round-trips through export_slice_metadata.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

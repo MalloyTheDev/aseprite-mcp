@@ -1,12 +1,26 @@
 """Integration tests for export_slice_metadata — require Aseprite (--run-aseprite)."""
 
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
 
+import aseprite_mcp.server  # noqa: F401  -- importing registers the real tools
+from aseprite_mcp.app import mcp
 from aseprite_mcp.core.errors import ExportError
 from aseprite_mcp.tools import export_presets, slices, sprite
+
+
+def _call(name, arguments):
+    """Invoke a tool the way a client does, through schema validation."""
+    result = asyncio.run(mcp.call_tool(name, arguments))
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, tuple):
+        result = result[0]
+    blocks = getattr(result, "content", result)
+    return json.loads(blocks[0].text)
 
 _REQUIRED = {"ok", "schema_version", "kind", "created_files", "suggested_next_actions", "warnings"}
 
@@ -69,16 +83,59 @@ def test_export_slice_metadata_no_slices_warns():
     assert doc["slices"] == []
 
 
+def _slice_doc(meta):
+    return json.loads(Path(meta["created_files"][0]["path"]).read_text(encoding="utf-8"))
+
+
 def test_dict_slice_data_round_trips_to_type_and_id():
-    """A dict passed to add_slice(data=...) is JSON-encoded and round-trips: the exported
-    metadata derives type/id from it and parses data back to the dict (regression for the
-    'expected string, got dict' rejection / type='custom' fallback)."""
+    """A dict is JSON-encoded on the way in, so the export derives type/id from it.
+
+    Without this the slice was stored with no data at all and came back as
+    type "custom" with a null id.
+    """
     sprite.create_sprite("w/sdict.aseprite", 32, 32)
     slices.add_slice("w/sdict.aseprite", "torso", 8, 8, 16, 16,
                      data={"type": "hitbox", "id": "body"})
     m = export_presets.export_slice_metadata("w/sdict.aseprite", "w/sdict_slices.json")
-    doc = json.loads(Path(m["created_files"][0]["path"]).read_text(encoding="utf-8"))
-    torso = next(s for s in doc["slices"] if s["name"] == "torso")
+    torso = next(s for s in _slice_doc(m)["slices"] if s["name"] == "torso")
     assert torso["type"] == "hitbox"
     assert torso["id"] == "body"
     assert torso["data"] == {"type": "hitbox", "id": "body"}
+
+
+def test_a_client_can_send_slice_data_as_an_object():
+    """The same thing over the wire, which is where it used to be refused.
+
+    Calling the Python function proves the coercion; only going through `call_tool` proves
+    a client can get a dict past schema validation, and that is the shape a client sends
+    (or the shape its JSON-looking string is parsed into before the tool is reached).
+    """
+    sprite.create_sprite("w/swire.aseprite", 32, 32)
+    result = _call("add_slice", {
+        "filename": "w/swire.aseprite", "name": "torso",
+        "x": 8, "y": 8, "width": 16, "height": 16,
+        "data": {"type": "hitbox", "id": "body"},
+    })
+    # add_slice answers with the sprite's state; reaching it at all is the point, since
+    # the dict argument is what used to be refused before the tool ran.
+    assert [sl["name"] for sl in result["slices"]] == ["torso"]
+
+    m = export_presets.export_slice_metadata("w/swire.aseprite", "w/swire_slices.json")
+    torso = next(s for s in _slice_doc(m)["slices"] if s["name"] == "torso")
+    assert (torso["type"], torso["id"]) == ("hitbox", "body")
+
+
+def test_a_client_can_also_send_it_as_a_json_string():
+    """The other half of the same call, kept because clients differ in which one they
+    send: some pass the string through, some parse it into an object first. The stored
+    text may be re-spaced by that round trip, so what has to survive is the data."""
+    sprite.create_sprite("w/sstr.aseprite", 32, 32)
+    _call("add_slice", {
+        "filename": "w/sstr.aseprite", "name": "torso",
+        "x": 8, "y": 8, "width": 16, "height": 16,
+        "data": '{"type":"hurtbox","id":"core"}',
+    })
+    m = export_presets.export_slice_metadata("w/sstr.aseprite", "w/sstr_slices.json")
+    torso = next(s for s in _slice_doc(m)["slices"] if s["name"] == "torso")
+    assert (torso["type"], torso["id"]) == ("hurtbox", "core")
+    assert torso["data"] == {"type": "hurtbox", "id": "core"}
