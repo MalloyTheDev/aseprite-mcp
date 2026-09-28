@@ -432,6 +432,25 @@ local function img_set(img, x, y, px)
   end
 end
 
+-- Bresenham line as a list of {x,y} points.
+local function bresenham_points(x0, y0, x1, y1)
+  x0, y0, x1, y1 = math.floor(x0), math.floor(y0), math.floor(x1), math.floor(y1)
+  local pts = {}
+  local dx = math.abs(x1 - x0)
+  local dy = -math.abs(y1 - y0)
+  local sx = x0 < x1 and 1 or -1
+  local sy = y0 < y1 and 1 or -1
+  local err = dx + dy
+  while true do
+    pts[#pts + 1] = { x0, y0 }
+    if x0 == x1 and y0 == y1 then break end
+    local e2 = 2 * err
+    if e2 >= dy then err = err + dy; x0 = x0 + sx end
+    if e2 <= dx then err = err + dx; y0 = y0 + sy end
+  end
+  return pts
+end
+
 local function draw_line_img(img, x0, y0, x1, y1, px)
   x0, y0, x1, y1 = math.floor(x0), math.floor(y0), math.floor(x1), math.floor(y1)
   local dx = math.abs(x1 - x0)
@@ -461,27 +480,32 @@ local function draw_rect_img(img, x, y, w, h, px, filled)
   end
 end
 
-local function draw_ellipse_img(img, cx, cy, rx, ry, px, filled)
-  cx, cy, rx, ry = math.floor(cx), math.floor(cy), math.floor(math.abs(rx)), math.floor(math.abs(ry))
+-- The ellipse as offsets from its centre, with nothing said about where that centre is.
+-- Two tools need the same shape placed differently: one centres it on a pixel, the other
+-- fits it to a bounding box and duplicates the middle row and column when a side is even,
+-- which is how an even diameter is drawn by hand. Sharing the offsets is what keeps the
+-- two forms the same ellipse rather than two rasterisers that nearly agree.
+local function ellipse_offsets(rx, ry, filled)
+  rx, ry = math.floor(math.abs(rx)), math.floor(math.abs(ry))
   if rx == 0 or ry == 0 then
-    draw_line_img(img, cx - rx, cy - ry, cx + rx, cy + ry, px)
-    return
+    return bresenham_points(-rx, -ry, rx, ry)
   end
+  local pts, n = {}, 0
+  local function emit(dx, dy) n = n + 1; pts[n] = { dx, dy } end
   if filled then
     for dy = -ry, ry do
       local t = 1 - (dy * dy) / (ry * ry)
       if t < 0 then t = 0 end
       local hw = math.floor(rx * math.sqrt(t) + 0.5)
-      for dx = -hw, hw do img_set(img, cx + dx, cy + dy, px) end
+      for dx = -hw, hw do emit(dx, dy) end
     end
-    return
+    return pts
   end
   local rx2, ry2 = rx * rx, ry * ry
   local x, y = 0, ry
   local dpx, dpy = 0, 2 * rx2 * y
   local function plot4(ox, oy)
-    img_set(img, cx + ox, cy + oy, px); img_set(img, cx - ox, cy + oy, px)
-    img_set(img, cx + ox, cy - oy, px); img_set(img, cx - ox, cy - oy, px)
+    emit(ox, oy); emit(-ox, oy); emit(ox, -oy); emit(-ox, -oy)
   end
   local p = ry2 - rx2 * ry + 0.25 * rx2
   while dpx < dpy do
@@ -505,6 +529,14 @@ local function draw_ellipse_img(img, cx, cy, rx, ry, px, filled)
       x = x + 1; dpx = dpx + 2 * ry2; p = p + rx2 - dpy + dpx
     end
   end
+  return pts
+end
+
+local function draw_ellipse_img(img, cx, cy, rx, ry, px, filled)
+  cx, cy = math.floor(cx), math.floor(cy)
+  for _, pt in ipairs(ellipse_offsets(rx, ry, filled)) do
+    img_set(img, cx + pt[1], cy + pt[2], px)
+  end
 end
 
 local function flood_fill_img(img, x, y, px)
@@ -526,25 +558,6 @@ local function flood_fill_img(img, x, y, px)
       stack[#stack + 1] = { px0, py0 - 1 }
     end
   end
-end
-
--- Bresenham line as a list of {x,y} points.
-local function bresenham_points(x0, y0, x1, y1)
-  x0, y0, x1, y1 = math.floor(x0), math.floor(y0), math.floor(x1), math.floor(y1)
-  local pts = {}
-  local dx = math.abs(x1 - x0)
-  local dy = -math.abs(y1 - y0)
-  local sx = x0 < x1 and 1 or -1
-  local sy = y0 < y1 and 1 or -1
-  local err = dx + dy
-  while true do
-    pts[#pts + 1] = { x0, y0 }
-    if x0 == x1 and y0 == y1 then break end
-    local e2 = 2 * err
-    if e2 >= dy then err = err + dy; x0 = x0 + sx end
-    if e2 <= dx then err = err + dx; y0 = y0 + sy end
-  end
-  return pts
 end
 
 -- Remove L-corner pixels from a line path (Aseprite-style pixel-perfect mode).

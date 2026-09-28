@@ -60,9 +60,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
@@ -344,6 +345,81 @@ def draw_ellipse(
       aa_ellipse_fill_img(spr, img, ARG.cx, ARG.cy, ARG.rx, ARG.ry, c.r, c.g, c.b)
     else
       draw_ellipse_img(img, ARG.cx, ARG.cy, ARG.rx, ARG.ry, to_pixel(spr, c), ARG.filled)
+    end
+    """
+    return _draw(args, snippet)
+
+
+@_geometry_tool
+def draw_ellipse_in_box(
+    filename: str,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    color: str,
+    filled: bool = False,
+    antialias: bool = False,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Draw an ellipse that fills the given bounding box exactly.
+
+    Takes the same box as draw_rectangle, so the two share a centre and an extent: this is
+    how to draw a disc centred on an even canvas, or a circle that lines up with a
+    rectangle. draw_ellipse takes a centre and radii instead, which can only ever be an odd
+    2*radius+1 across.
+
+    An even side is drawn the way it is drawn by hand: the odd ellipse one pixel smaller,
+    with its middle row or column repeated. Give an odd width and height and the result is
+    pixel for pixel what draw_ellipse produces for the same shape, because both use the
+    same geometry.
+
+    filled=False draws a 1px outline. antialias smooths a *filled* ellipse with sub-pixel
+    coverage (RGB sprites only; ignored otherwise).
+    """
+    if int(width) < 1 or int(height) < 1:
+        raise ValidationFailed(
+            f"width and height must be at least 1; got {width}x{height}. They are pixel "
+            "counts, like draw_rectangle's."
+        )
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "color": parse_color(color),
+        "x": int(x), "y": int(y), "w": int(width), "h": int(height),
+        "filled": bool(filled),
+        "antialias": bool(antialias),
+    }
+    snippet = """
+    local c = ARG.color
+    local w, h = ARG.w, ARG.h
+    if ARG.antialias and ARG.filled and spr.colorMode == ColorMode.RGB then
+      -- The antialiased fill samples in continuous coordinates, so a centre that falls
+      -- between two pixels is nothing special to it: hand it the box's true centre.
+      aa_ellipse_fill_img(spr, img, ARG.x + (w - 1) / 2, ARG.y + (h - 1) / 2,
+                          w / 2, h / 2, c.r, c.g, c.b)
+    else
+      local px = to_pixel(spr, c)
+      -- The largest odd ellipse that fits. An even side takes this one's middle row or
+      -- column twice, which is the even circle a pixel artist draws.
+      local rx = (w % 2 == 0) and ((w - 2) // 2) or ((w - 1) // 2)
+      local ry = (h % 2 == 0) and ((h - 2) // 2) or ((h - 1) // 2)
+      local function spread(o, size, r)
+        if size % 2 == 1 then return o, nil end
+        if o < r then return o, nil end
+        if o == r then return r, r + 1 end
+        return o + 1, nil
+      end
+      for _, pt in ipairs(ellipse_offsets(rx, ry, ARG.filled)) do
+        local x1, x2 = spread(pt[1] + rx, w, rx)
+        local y1, y2 = spread(pt[2] + ry, h, ry)
+        img_set(img, ARG.x + x1, ARG.y + y1, px)
+        if x2 ~= nil then img_set(img, ARG.x + x2, ARG.y + y1, px) end
+        if y2 ~= nil then img_set(img, ARG.x + x1, ARG.y + y2, px) end
+        if x2 ~= nil and y2 ~= nil then img_set(img, ARG.x + x2, ARG.y + y2, px) end
+      end
     end
     """
     return _draw(args, snippet)

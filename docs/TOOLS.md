@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **131 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **132 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -13,7 +13,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Animation (motion, timing, checks)](#animation-motion-timing-checks) (3)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (5)
-- [Drawing](#drawing) (9)
+- [Drawing](#drawing) (10)
 - [Brushes & symmetry](#brushes--symmetry) (4)
 - [Shading & light](#shading--light) (5)
 - [Selections](#selections) (6)
@@ -682,9 +682,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
@@ -722,9 +723,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
@@ -738,6 +740,55 @@ against what you asked for rather than trusting ok.
 | `center_y` | integer | yes |  |
 | `radius_x` | integer | yes |  |
 | `radius_y` | integer | yes |  |
+| `color` | string | yes |  |
+| `filled` | boolean | no | False |
+| `antialias` | boolean | no | False |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `draw_ellipse_in_box`
+
+Draw an ellipse that fills the given bounding box exactly.
+
+Takes the same box as draw_rectangle, so the two share a centre and an extent: this is
+how to draw a disc centred on an even canvas, or a circle that lines up with a
+rectangle. draw_ellipse takes a centre and radii instead, which can only ever be an odd
+2*radius+1 across.
+
+An even side is drawn the way it is drawn by hand: the odd ellipse one pixel smaller,
+with its middle row or column repeated. Give an odd width and height and the result is
+pixel for pixel what draw_ellipse produces for the same shape, because both use the
+same geometry.
+
+filled=False draws a 1px outline. antialias smooths a *filled* ellipse with sub-pixel
+coverage (RGB sprites only; ignored otherwise).
+
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `x` | integer | yes |  |
+| `y` | integer | yes |  |
+| `width` | integer | yes |  |
+| `height` | integer | yes |  |
 | `color` | string | yes |  |
 | `filled` | boolean | no | False |
 | `antialias` | boolean | no | False |
@@ -762,9 +813,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
@@ -804,9 +856,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
@@ -838,9 +891,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
@@ -870,9 +924,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
@@ -905,9 +960,10 @@ Centring differs between primitives, so check this when aligning two shapes:
   * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
     width therefore centres on a half pixel.
   * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
-    an ODD 2*radius+1 pixels wide and always centred on a whole pixel. There is no even
-    diameter, so a circle cannot be centred on an even canvas or aligned with an
-    even-width rectangle.
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
   * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
 
 Writes falling outside the canvas are dropped rather than raising. Every drawing tool
