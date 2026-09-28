@@ -275,3 +275,221 @@ def test_nothing_matching_base_color_is_an_error_not_a_silent_no_op(request):
 
     with pytest.raises(AsepriteError, match="Nothing to shade"):
         shading.shade_region_by_light(name, RAMP, base_color="#00ff00", tolerance=1)
+
+
+# ------------------------------------------------------- contact / outline / dither
+
+
+def _colors_in(name: str, size: int) -> set[str]:
+    rows = inspect.get_pixels(name, 0, 0, size, size)["pixels"]
+    return {p.lower()[:7] for row in rows for p in row if not p.lower().endswith("00")}
+
+
+@pytest.fixture()
+def ball_on_ground(request):
+    """A disc resting on a band of a different colour: the contact-shadow case."""
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 20, 20)
+    drawing.draw_rectangle(name, 0, 15, 20, 5, "#404040", filled=True)
+    drawing.draw_ellipse(name, 10, 10, 5, 5, RAMP[3], filled=True)
+    return name
+
+
+def test_contact_shadow_darkens_toward_the_occluder(ball_on_ground):
+    """The darkening has to fall off with distance, or it is a band not a contact."""
+    result = shading.contact_shadow(
+        ball_on_ground, RAMP, occluder_color="#404040", radius=2, depth=2
+    )
+    assert result["darkened_pixels"] > 0
+    assert result["occluder_pixels"] > 0
+
+    rows = inspect.get_pixels(ball_on_ground, 0, 0, 20, 20)["pixels"]
+    index = {c.lower() + "ff": i for i, c in enumerate(RAMP)}
+
+    def shade_at(x, y):
+        return index.get(rows[y][x].lower())
+
+    near = shade_at(10, 14)
+    far = shade_at(10, 8)
+    assert near is not None and far is not None
+    assert near < far, "pixels nearer the ground should be darker"
+
+
+def test_contact_shadow_keeps_everything_on_the_ramp(ball_on_ground):
+    shading.contact_shadow(ball_on_ground, RAMP, occluder_color="#404040", radius=2)
+    rows = inspect.get_pixels(ball_on_ground, 0, 0, 20, 20)["pixels"]
+    ball = [p for row in rows for p in row if p.lower()[:7] != "#404040"
+            and not p.lower().endswith("00")]
+    allowed = {c.lower() + "ff" for c in RAMP}
+    assert {p.lower() for p in ball} <= allowed
+
+
+def test_contact_shadow_says_so_when_nothing_matches(ball_on_ground):
+    from aseprite_mcp.core.errors import AsepriteError
+
+    with pytest.raises(AsepriteError, match="No pixel matched occluder_color"):
+        shading.contact_shadow(
+            ball_on_ground, RAMP, occluder_color="#00ff00", tolerance=1
+        )
+
+
+def test_contact_shadow_rejects_a_radius_that_is_really_a_drop_shadow(ball_on_ground):
+    with pytest.raises(ValidationFailed, match="radius"):
+        shading.contact_shadow(ball_on_ground, RAMP, occluder_color="#404040", radius=0)
+    with pytest.raises(ValidationFailed, match="depth"):
+        shading.contact_shadow(ball_on_ground, RAMP, occluder_color="#404040", depth=0)
+
+
+@pytest.fixture()
+def shaded_disc(request):
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 16, 16)
+    drawing.draw_ellipse(name, 8, 8, 5, 5, RAMP[3], filled=True)
+    shading.shade_region_by_light(name, RAMP, light_angle=135)
+    return name
+
+
+def test_colormatched_outline_varies_with_the_form(shaded_disc):
+    """A flat outline reads as a sticker. This one follows the shading."""
+    before = _colors_in(shaded_disc, 16)
+    result = shading.outline_smart(shaded_disc, RAMP, mode="colormatched", darken_steps=2)
+
+    assert result["outline_pixels"] > 0
+    after = _colors_in(shaded_disc, 16)
+    assert after >= before, "outlining must not remove interior colours"
+    assert after <= {c.lower() for c in RAMP}, "outline colours must come from the ramp"
+    assert len(after) > len(before) or len(before) >= 3
+
+
+def test_selective_outline_drops_the_lit_side(shaded_disc, request):
+    """Fewer outline pixels than colormatched, because the lit side is left open."""
+    other = f"sh/{request.node.name}_cm.aseprite"
+    sprite.create_sprite(other, 16, 16)
+    drawing.draw_ellipse(other, 8, 8, 5, 5, RAMP[3], filled=True)
+    shading.shade_region_by_light(other, RAMP, light_angle=135)
+
+    selective = shading.outline_smart(
+        shaded_disc, RAMP, mode="selective", light_angle=135
+    )
+    colormatched = shading.outline_smart(other, RAMP, mode="colormatched")
+
+    assert selective["outline_pixels"] < colormatched["outline_pixels"]
+
+
+def test_selective_outline_needs_to_know_where_the_light_is(shaded_disc):
+    with pytest.raises(ValidationFailed, match="light_angle"):
+        shading.outline_smart(shaded_disc, RAMP, mode="selective")
+
+
+def test_outline_does_not_eat_into_the_artwork(shaded_disc):
+    """It grows outward into transparency; the silhouette must only ever get bigger."""
+    rows_before = inspect.get_pixels(shaded_disc, 0, 0, 16, 16)["pixels"]
+    solid_before = {
+        (x, y)
+        for y, row in enumerate(rows_before)
+        for x, p in enumerate(row)
+        if not p.lower().endswith("00")
+    }
+
+    shading.outline_smart(shaded_disc, RAMP, mode="single")
+
+    rows_after = inspect.get_pixels(shaded_disc, 0, 0, 16, 16)["pixels"]
+    solid_after = {
+        (x, y)
+        for y, row in enumerate(rows_after)
+        for x, p in enumerate(row)
+        if not p.lower().endswith("00")
+    }
+    assert solid_before <= solid_after
+
+
+def test_outline_smart_rejects_an_unknown_mode(shaded_disc):
+    with pytest.raises(ValidationFailed, match="mode"):
+        shading.outline_smart(shaded_disc, RAMP, mode="fancy")
+
+
+@pytest.fixture()
+def two_bands(request):
+    """Two adjacent ramp steps meeting on a hard line."""
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 16, 16)
+    drawing.draw_rectangle(name, 0, 0, 16, 8, RAMP[2], filled=True)
+    drawing.draw_rectangle(name, 0, 8, 16, 8, RAMP[3], filled=True)
+    return name
+
+
+def test_dither_band_touches_only_the_boundary(two_bands):
+    """Dithering a whole sprite is what makes dithering look dated."""
+    result = shading.dither_band(two_bands, RAMP, from_step=3, to_step=4)
+    assert result["dithered_pixels"] > 0
+
+    rows = inspect.get_pixels(two_bands, 0, 0, 16, 16)["pixels"]
+    # Rows well away from the seam must be untouched.
+    assert {p.lower()[:7] for p in rows[0]} == {RAMP[2]}
+    assert {p.lower()[:7] for p in rows[15]} == {RAMP[3]}
+    # The seam rows must now contain both.
+    assert {p.lower()[:7] for p in rows[7]} == {RAMP[2], RAMP[3]}
+
+
+def test_dither_band_introduces_no_new_colours(two_bands):
+    before = _colors_in(two_bands, 16)
+    shading.dither_band(two_bands, RAMP, from_step=3, to_step=4)
+    assert _colors_in(two_bands, 16) == before
+
+
+def test_dither_band_ramps_across_the_zone_rather_than_checkerboarding_it(two_bands):
+    """Dithering is a gradient, not a texture.
+
+    Comparing the ordered-dither threshold against a fixed 0.5 gives a uniform 50/50
+    checkerboard over the whole zone, which is not what dithering is for. The mix has to
+    follow how far through the transition each pixel sits: near the seam about half the
+    pixels flip, and deep in a band almost none do.
+    """
+    shading.dither_band(two_bands, RAMP, 3, 4, pattern="bayer4", width=3)
+    rows = inspect.get_pixels(two_bands, 0, 0, 16, 16)["pixels"]
+
+    def share_of_lower(y: int) -> float:
+        return sum(1 for p in rows[y] if p.lower()[:7] == RAMP[3]) / len(rows[y])
+
+    zone = [share_of_lower(y) for y in range(6, 11)]
+
+    # Compared across the zone rather than between neighbours: a 4x4 Bayer cell can
+    # only express a few distinct fractions per row, so two adjacent rows legitimately
+    # tie even where the underlying mix differs.
+    assert zone[0] < zone[-1], f"the zone should ramp toward the lower band: {zone}"
+    assert len(set(zone)) > 1, f"a uniform zone is a texture, not a gradient: {zone}"
+    # And it stays a transition: neither end of the zone is pure.
+    assert 0.0 < zone[len(zone) // 2] < 1.0, zone
+
+
+def test_dither_patterns_differ(two_bands, request):
+    """A one-pixel-deep seam alternates whatever the pattern, so this needs width."""
+    other = f"sh/{request.node.name}_b.aseprite"
+    sprite.create_sprite(other, 16, 16)
+    drawing.draw_rectangle(other, 0, 0, 16, 8, RAMP[2], filled=True)
+    drawing.draw_rectangle(other, 0, 8, 16, 8, RAMP[3], filled=True)
+
+    fine = shading.dither_band(two_bands, RAMP, 3, 4, pattern="bayer4", width=3)
+    hard = shading.dither_band(other, RAMP, 3, 4, pattern="checker", width=3)
+    assert fine["pattern"] != hard["pattern"]
+
+    a = inspect.get_pixels(two_bands, 0, 0, 16, 16)["pixels"]
+    b = inspect.get_pixels(other, 0, 0, 16, 16)["pixels"]
+    assert a != b, "different patterns should produce different pixels"
+
+
+def test_dither_band_rejects_a_width_that_is_a_texture(two_bands):
+    with pytest.raises(ValidationFailed, match="width"):
+        shading.dither_band(two_bands, RAMP, 3, 4, width=0)
+    with pytest.raises(ValidationFailed, match="width"):
+        shading.dither_band(two_bands, RAMP, 3, 4, width=99)
+
+
+def test_dither_band_refuses_non_adjacent_steps(two_bands):
+    """Dithering between distant steps is noise, not an intermediate shade."""
+    with pytest.raises(ValidationFailed, match="adjacent"):
+        shading.dither_band(two_bands, RAMP, from_step=1, to_step=4)
+    with pytest.raises(ValidationFailed, match="between 1 and"):
+        shading.dither_band(two_bands, RAMP, from_step=0, to_step=1)
+    with pytest.raises(ValidationFailed, match="pattern"):
+        shading.dither_band(two_bands, RAMP, 3, 4, pattern="noise")
