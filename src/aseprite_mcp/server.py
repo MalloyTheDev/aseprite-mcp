@@ -25,6 +25,7 @@ from .tools import (
     minecraft,
     palette,
     reference,
+    shading,
     slices,
     sprite,
     tags,
