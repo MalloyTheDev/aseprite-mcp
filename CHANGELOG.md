@@ -54,6 +54,13 @@ All notable changes to this project are documented here. The format is based on
   `core/asset_spec.py`. (113 tools.)
 
 ### Fixed
+- **The README's own tool catalogue was missing the same three domains the generated
+  reference was.** Shading, selections and Minecraft resource packs had never been added
+  to it by hand, so the front page listed 115 of 130 tools while claiming to be a
+  catalogue. All four missing sections are there now (including the animation checks),
+  and a test asserts every registered tool is named in `README.md`, the way one already
+  asserts it for `docs/TOOLS.md`. The project layout in the README was two refactors
+  behind and now describes `core/` and every tool module.
 - **15 tools were missing from the tool reference.** `docs/TOOLS.md` is generated from
   the live registry and CI checks it is in sync, which looked like enough. It was not:
   only modules named in the generator's `GROUPS` list got a section and the rest were

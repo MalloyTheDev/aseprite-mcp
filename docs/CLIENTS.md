@@ -297,7 +297,18 @@ relative name. `ASEPRITE_MCP_ALLOW_ABSOLUTE=1` opts out, and gives away the sand
 text-only model gets nothing usable from it. Use `get_sprite_info` for structured state
 (size, colour mode, frames, layer tree, tags, palette size) and `get_pixels` to read an
 actual region as hex strings; both are text. The `validate_*` tools also answer
-"is this right" without needing an image.
+"is this right" without needing an image, and for animation `validate_loop` measures a
+cycle frame by frame and names its faults, which is the one thing a still preview cannot
+show however many times it is rendered.
+
+**A structured argument seems to arrive empty.** Clients disagree about JSON-looking
+values: some send an object, some send a string, and some parse a JSON-looking string into
+an object before the call is made. Where an argument is genuinely structured, such as a
+slice's `data`, the server accepts both forms and stores the same thing either way, so
+`data={"type": "hitbox"}` and `data='{"type":"hitbox"}'` are equivalent. The exact text may
+come back re-spaced by that round trip; the data does not change. Elsewhere, an argument
+declared as a string wants a string: every parameter advertises one concrete type, which
+is what makes the schemas usable by strict function-calling clients.
 
 **`uv sync` fails with a permission or "file in use" error on Windows.** A client is
 holding `.venv\Scripts\aseprite-mcp.exe` open. Close the client (or stop the server it

@@ -350,6 +350,12 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `add_tag` | Tag a frame range with a name, direction, colour. |
 | `set_tag` · `remove_tag` | Edit / delete a tag. |
 
+### Animation checks
+| Tool | Description |
+| --- | --- |
+| `validate_loop` | Measure a cycle instead of playing it: per-frame hashes, spacing, contact rows, durations, and the faults a still frame hides (a wrap frame repeating the first, duplicated poses, placeholder timing, a drifting contact edge). |
+| `offset_cels` | Move a drawn cel along a line or an arc across frames in one launch, spacing distributed so it reads as speed rather than as a limp. |
+
 ### Drawing
 | Tool | Description |
 | --- | --- |
@@ -367,6 +373,29 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `stamp_pattern` | Tile an image/sprite across a region (with spacing, opacity, blend). |
 | `mirror_layer` | Reflect one half of a layer onto the other (build symmetric art). |
 | `draw_symmetric_pixels` | Plot pixels with horizontal/vertical/4-way mirroring. |
+
+### Shading & light
+| Tool | Description |
+| --- | --- |
+| `shade_region_by_light` | Shade a flat region as a lit form, from a ramp and a light direction. |
+| `shift_along_ramp` | Move pixels along a colour ramp, keeping every one of them on the palette. |
+| `contact_shadow` | Darken the pixels where one form meets another, along its ramp. |
+| `outline_smart` | Outline a shape in colours taken from its own ramp, not one flat colour. |
+| `dither_band` | Dither the boundary between two adjacent ramp steps, widening the transition. |
+
+### Selections
+| Tool | Description |
+| --- | --- |
+| `select_region` | Select a rectangle, ellipse, or polygon (`replace`/`add`/`subtract`/`intersect`). |
+| `select_by_color` | Magic wand: select every pixel matching a colour. |
+| `modify_selection` | Grow, shrink, or outline the current selection. |
+| `invert_selection` · `deselect` | Swap selected for unselected / clear it. |
+| `get_selection` | Report whether there is a selection and what it covers. |
+
+A selection is not stored in the `.aseprite` file, and every call here is its own Aseprite
+process, so it is kept in a `.msk` sidecar beside the sprite and loaded again on the next
+call. It scopes every later edit until `deselect`, which is how an image editor behaves,
+and every result that touched pixels reports `selection_applied`.
 
 ### Slices (named regions / 9-patch)
 | Tool | Description |
@@ -427,6 +456,14 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `export_tags` | Export each animation tag's frames to separate files. |
 | `export_onion_skin` | Render a frame with neighbouring frames ghosted behind it. |
 | `import_image` | Build an editable `.aseprite` from a flat image. |
+
+### Minecraft resource packs
+| Tool | Description |
+| --- | --- |
+| `export_minecraft_texture` | Export a sprite into a resource pack at its correct texture path. |
+| `validate_minecraft_texture` | Check a sprite against Minecraft's texture rules before it ships. |
+| `write_pack_mcmeta` | Write `pack.mcmeta`, the file that makes a directory a resource pack. |
+| `write_texture_mcmeta` | Write the `<texture>.png.mcmeta` sidecar for an animated texture. |
 
 ### Reference / rotoscope
 | Tool | Description |
@@ -506,17 +543,24 @@ flags (`--sheet`, `--scale`, `--data`, …).
 
 ```
 src/aseprite_mcp/
-  app.py          MCPServer instance + usage instructions
-  config.py       locate Aseprite, workspace, path resolution
-  luagen.py       Python->Lua serializer + shared Lua PRELUDE + script assembly
-  runner.py       run_lua() / run_cli(), parse sentinel JSON
-  server.py       imports all tool modules, main()
+  app.py          MCPServer instance, tool classification, portable schemas
+  server.py       imports every tool module, picks the transport, main()
+  core/           config (locate Aseprite, workspace, path sandbox), limits,
+                  errors, models, luagen (Python->Lua + the shared PRELUDE),
+                  runner (run_lua / run_cli, sentinel parsing), oplib (the batch
+                  op registry), manifest, validation, asset_spec, minecraft,
+                  quality, loopcheck and motion (animation maths)
   tools/          one module per domain: sprite, inspect, layers, frames, tags,
-                  cels, drawing, brushes, effects, text, tilemap, image, palette,
-                  slices, transform, export, reference (+ common.py)
-docs/TOOLS.md     full auto-generated tool reference
-scripts/          gen_tool_docs.py (regenerates docs/TOOLS.md)
-tests/            pytest suite (auto-skips without Aseprite)
+                  cels, animation, drawing, brushes, shading, selection, effects,
+                  text, tilemap, image, palette, slices, transform, export,
+                  export_presets, minecraft, reference, workflow, asset_spec,
+                  batch, gui, health (+ common.py)
+docs/TOOLS.md     full auto-generated tool reference, every registered tool
+docs/CLIENTS.md   per-client setup, transports, and what to do when a client
+                  mangles arguments
+scripts/          gen_tool_docs.py (regenerates docs/TOOLS.md), quality_report.py
+tests/            pytest suite: the pure tests always run, the rest need
+                  --run-aseprite
 ```
 
 ## Security
@@ -548,11 +592,13 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 
 ## Notes & limitations
 
-- **Stateless by design.** Each tool call is an independent headless Aseprite process,
-  so transient state (the GUI selection, undo history, the "active" sprite) does **not**
-  persist between calls. Operations that would need a persistent selection instead take
-  explicit coordinates. A future **live-GUI mode** can layer on top of this without
-  changing the tool API.
+- **Each call is its own process.** A tool call is an independent headless Aseprite run,
+  so in-memory state (undo history, the "active" sprite) does **not** carry over, and
+  operations take explicit coordinates rather than relying on what was open. The one piece
+  of editor state that does survive is the selection: the selection tools keep it in a
+  `.msk` sidecar beside the sprite and reload it on the next call, so it scopes later edits
+  and `deselect` is a real step rather than a formality. A future **live-GUI mode** can
+  layer on top of this without changing the tool API.
 - Use a `.aseprite`/`.ase` extension to keep layers, frames, and tags editable. Saving to
   `.png`/`.gif` flattens.
 - `get_pixels` is capped at 4096 px (e.g. 64×64) per call — read in tiles for larger areas.
