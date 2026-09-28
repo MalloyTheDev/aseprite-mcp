@@ -16,7 +16,7 @@ classifiers = [
 ]
 dependencies = [
     "mcp[cli]>=2.0.0",
-    "pillow>=12.2.0",
+    "pillow>=12.3.0",
 ]
 
 [project.urls]
