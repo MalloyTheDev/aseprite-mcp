@@ -56,6 +56,30 @@ def _require_tag(src, tag: str) -> str:
     return tag
 
 
+def _unhonoured_tag_directions(src, only: str | None = None) -> list[str]:
+    """Tag directions the exported file cannot represent.
+
+    Aseprite stores a tag's direction in the .aseprite file, but GIF and sprite-sheet
+    output are flat frame sequences with no notion of playback order, so a ping-pong
+    tag exports as a plain forward run. A 4-frame ping-pong is 6 frames of playback and
+    exports as 4. Saying nothing made the tool claim a loop it had not produced, so the
+    exporters report this instead of leaving the caller to discover it in-engine.
+    """
+    notes = []
+    for t in _sprite_facts(src).get("tags") or []:
+        direction = (t.get("aniDir") or "forward").lower()
+        if direction in ("forward", ""):
+            continue
+        name = t.get("name")
+        if only is not None and name != only:
+            continue
+        notes.append(
+            f"tag {name!r} is {direction}, which this format cannot express; "
+            "the frames were written in forward order"
+        )
+    return notes
+
+
 def _flat_layer_names(layers, out=None):
     out = [] if out is None else out
     for layer in layers or []:
@@ -114,7 +138,11 @@ def export_png(
 
 @mcp.tool()
 def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = False) -> dict:
-    """Export the full animation as an animated GIF (honours frame durations & tags).
+    """Export the full animation as an animated GIF (honours frame durations).
+
+    Tag *ranges* are honoured, but a tag's playback direction is not: a GIF is a flat
+    frame sequence. A ping-pong tag exports forward, and the result says so in
+    `warnings` rather than letting the caller find out in-engine.
 
     overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
@@ -122,8 +150,12 @@ def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = Fal
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     scale = _require_scale(scale)
     run_cli([str(src), "--scale", str(scale), "--save-as", str(out)])
-    return {"ok": True, "output": str(out), "scale": scale,
-            "bytes": _verify_written(out, "export_gif")}
+    result = {"ok": True, "output": str(out), "scale": scale,
+              "bytes": _verify_written(out, "export_gif")}
+    warnings = _unhonoured_tag_directions(src)
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 @mcp.tool()
@@ -144,8 +176,12 @@ def export_tag_gif(
         "--scale", str(scale),
         "--save-as", str(out),
     ])
-    return {"ok": True, "output": str(out), "tag": tag, "scale": scale,
-            "bytes": _verify_written(out, "export_tag_gif")}
+    result = {"ok": True, "output": str(out), "tag": tag, "scale": scale,
+              "bytes": _verify_written(out, "export_tag_gif")}
+    warnings = _unhonoured_tag_directions(src, only=tag)
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 @mcp.tool()

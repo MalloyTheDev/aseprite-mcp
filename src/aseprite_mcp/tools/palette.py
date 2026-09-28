@@ -260,6 +260,22 @@ def sort_palette(filename: str, by: str = "luminance", reverse: bool = False) ->
     return run_lua(body, args)
 
 
+def _unit_rgb(color: str) -> tuple[float, float, float]:
+    """A colour spec as 0..1 RGB, for handing to colorsys."""
+    c = parse_color(color)
+    return c["r"] / 255, c["g"] / 255, c["b"] / 255
+
+
+def _lerp_hue(start: float, end: float, k: float) -> float:
+    """Interpolate hue the short way round the wheel.
+
+    Naive interpolation from 350 degrees to 10 would travel backwards through the
+    whole spectrum instead of the 20 degrees that were meant.
+    """
+    delta = (end - start + 0.5) % 1.0 - 0.5
+    return (start + delta * k) % 1.0
+
+
 @mcp.tool()
 def generate_ramp(
     base_color: str,
@@ -269,6 +285,10 @@ def generate_ramp(
     light_range: float = 0.6,
     filename: str | None = None,
     apply: str = "none",
+    shadow_hue: str | None = None,
+    light_hue: str | None = None,
+    sat_curve: str = "linear",
+    easing: str = "linear",
 ) -> dict:
     """Generate a shading ramp from a base colour (dark -> light).
 
@@ -295,12 +315,48 @@ def generate_ramp(
     base = parse_color(base_color)
     r, g, b = base["r"] / 255, base["g"] / 255, base["b"] / 255
     h, lum, sat = colorsys.rgb_to_hls(r, g, b)
+    if sat_curve not in ("linear", "peak"):
+        raise ValidationFailed('sat_curve must be "linear" or "peak".')
+    if easing not in ("linear", "perceptual"):
+        raise ValidationFailed('easing must be "linear" or "perceptual".')
+
+    shadow_h = colorsys.rgb_to_hls(*_unit_rgb(shadow_hue))[0] if shadow_hue else None
+    light_h = colorsys.rgb_to_hls(*_unit_rgb(light_hue))[0] if light_hue else None
+
     colors = []
     for i in range(steps):
-        t = (i / (steps - 1)) - 0.5  # -0.5 .. 0.5
-        L = min(1.0, max(0.0, lum + t * light_range))
-        H = (h + (t * hue_shift / 360.0)) % 1.0
-        S = min(1.0, max(0.0, sat * (1 + t * saturation_shift / 100.0)))
+        u = i / (steps - 1)  # 0 = darkest .. 1 = lightest
+        t = u - 0.5  # -0.5 .. 0.5, the original parameterisation
+
+        # Lightness. "perceptual" bunches the dark steps, because equal steps in HLS
+        # lightness are not equal steps to the eye and a ramp built that way has a
+        # muddy shadow end.
+        lt = (u**1.5) - 0.5 if easing == "perceptual" else t
+        L = min(1.0, max(0.0, lum + lt * light_range))
+
+        # Hue. Explicit targets express the rule as artists state it, "shadows go
+        # toward blue, highlights toward yellow", which a single symmetric rotation
+        # about the base cannot: it forces the two ends to be equal and opposite.
+        if shadow_h is not None or light_h is not None:
+            if u <= 0.5:
+                target, k = (shadow_h if shadow_h is not None else h), 1 - (u * 2)
+            else:
+                target, k = (light_h if light_h is not None else h), (u - 0.5) * 2
+            H = _lerp_hue(h, target, k)
+        else:
+            H = (h + (t * hue_shift / 360.0)) % 1.0
+
+        # Saturation. A ramp's chroma peaks in the midtone and falls at both ends:
+        # highlights desaturate toward the light, deep shadows toward ambient. The
+        # monotonic form cannot express that, so the brightest step came out the most
+        # saturated, which is the opposite of how a hand-built ramp reads.
+        if sat_curve == "peak":
+            falloff = (2 * u - 1) ** 2  # 0 at the midtone, 1 at either end
+            S = sat * (1 - (saturation_shift / 100.0) * falloff)
+        else:
+            S = sat * (1 + t * saturation_shift / 100.0)
+        S = min(1.0, max(0.0, S))
+
         rr, gg, bb = colorsys.hls_to_rgb(H, L, S)
         colors.append(f"#{round(rr * 255):02x}{round(gg * 255):02x}{round(bb * 255):02x}")
 
