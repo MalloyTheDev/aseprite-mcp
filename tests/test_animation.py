@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.core.runner import AsepriteError
 from aseprite_mcp.tools import animation, batch, cels, drawing, frames, layers, sprite, tags
 
@@ -200,3 +201,151 @@ def test_validate_loop_saves_nothing(request):
 
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
     assert path.stat().st_mtime_ns == mtime
+
+
+# =============================================================== offset_cels (issue #88)
+# Moving a drawn cel across eight frames used to be eight tool calls, eight Aseprite
+# launches, and eight positions worked out by the caller.
+
+
+def _positions(name: str, count: int) -> list[tuple[int, int]]:
+    out = []
+    for f in range(1, count + 1):
+        cel = cels.get_cel(name, "Layer 1", f)
+        out.append((cel["position"]["x"], cel["position"]["y"]))
+    return out
+
+
+def test_a_slide_places_every_cel_in_one_launch(request, monkeypatch):
+    from aseprite_mcp.core import runner
+
+    name = _ball(f"a/{request.node.name}.aseprite", 16)
+    launches = []
+    real = runner._run_bounded
+
+    def counted(*args, **kwargs):
+        launches.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "_run_bounded", counted)
+    result = animation.offset_cels(name, "Layer 1", list(range(1, 17)), dx=45)
+
+    assert len(launches) == 1
+    assert [(p["x"], p["y"]) for p in result["positions"]] == _positions(name, 16)
+    assert result["positions"][-1]["x"] - result["positions"][0]["x"] == 45
+
+
+def test_the_first_listed_frame_anchors_the_movement(request):
+    """The movement is relative, so a cel that was already placed moves on from there."""
+    name = _ball(f"a/{request.node.name}.aseprite", 4)
+    cels.set_cel_position(name, "Layer 1", 1, 12, 20)
+
+    result = animation.offset_cels(name, "Layer 1", [1, 2, 3, 4], dx=30, dy=-9)
+
+    assert result["anchor"] == {"x": 12, "y": 20}
+    assert _positions(name, 4)[0] == (12, 20)
+    assert _positions(name, 4)[-1] == (42, 11)
+
+
+def test_the_planned_spacing_is_the_spacing_that_ends_up_in_the_file(request):
+    """The returned deltas are a claim about the sprite; validate_loop measures it."""
+    name = _ball(f"a/{request.node.name}.aseprite", 8)
+    planned = animation.offset_cels(name, "Layer 1", list(range(1, 9)),
+                                    dx=0, dy=40, ease="ease_in")
+
+    measured = animation.validate_loop(name, layer="Layer 1")["animation"]
+    assert [d["distance"] for d in planned["deltas"]] == \
+           [s["distance"] for s in measured["spacing"]]
+    assert measured["contact_drift_px"] == 40
+
+
+def test_an_arc_lifts_the_cel_and_still_lands_it_on_target(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 9)
+    result = animation.offset_cels(name, "Layer 1", list(range(1, 10)),
+                                   dx=48, arc_height=16)
+
+    ys = [p["y"] for p in result["positions"]]
+    assert ys[0] == ys[-1] == 0, "a jump starts and ends on the ground"
+    assert min(ys) == -16
+    assert result["positions"][-1]["x"] == 48
+    assert result["max_error_px"] < 1.0
+
+
+def test_easing_moves_the_spacing_and_leaves_the_timing_alone(request):
+    """Easing spacing and durations at once applies the curve twice, and the result
+    reads as slow motion. This tool only ever touches positions."""
+    name = _ball(f"a/{request.node.name}.aseprite", 6)
+    before = animation.validate_loop(name)["animation"]["durations_ms"]
+
+    animation.offset_cels(name, "Layer 1", [1, 2, 3, 4, 5, 6], dx=40, ease="ease_out")
+
+    after = animation.validate_loop(name)["animation"]["durations_ms"]
+    assert after == before
+
+
+def test_a_frame_without_a_cel_stops_the_whole_move(request):
+    """Atomic, like every other multi-frame edit here: either all of it or none."""
+    import hashlib
+
+    from aseprite_mcp.tools.common import resolve_path
+
+    name = _ball(f"a/{request.node.name}.aseprite", 5)
+    batch.apply_operations(name, [
+        {"op": "delete_cel", "args": {"layer": "Layer 1", "frame": 4}},
+    ])
+    path = resolve_path(name)
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    with pytest.raises(AsepriteError, match="no cel on frame 4"):
+        animation.offset_cels(name, "Layer 1", [1, 2, 3, 4, 5], dx=20)
+
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    assert _positions(name, 3) == [(0, 0), (0, 0), (0, 0)]
+
+
+def test_a_frame_that_does_not_exist_is_named(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 3)
+    with pytest.raises(AsepriteError, match="does not exist"):
+        animation.offset_cels(name, "Layer 1", [1, 2, 99], dx=10)
+
+
+# --------------------------------------------------- refused before Aseprite is launched
+def test_one_frame_cannot_carry_a_movement():
+    with pytest.raises(ValidationFailed, match="at least two frames"):
+        animation.offset_cels("unused.aseprite", "Layer 1", [1], dx=10)
+
+
+def test_a_repeated_frame_is_refused():
+    with pytest.raises(ValidationFailed, match="more than once"):
+        animation.offset_cels("unused.aseprite", "Layer 1", [1, 2, 2, 3], dx=10)
+
+
+def test_frame_zero_is_refused_as_a_1_based_mistake():
+    with pytest.raises(ValidationFailed, match="1-based"):
+        animation.offset_cels("unused.aseprite", "Layer 1", [0, 1], dx=10)
+
+
+def test_an_unknown_easing_lists_the_ones_that_exist():
+    with pytest.raises(ValidationFailed, match="ease_in_out"):
+        animation.offset_cels("unused.aseprite", "Layer 1", [1, 2], ease="bouncy")
+
+
+def test_too_many_frames_is_refused_with_the_cap():
+    from aseprite_mcp.core.limits import MAX_MOTION_FRAMES
+
+    with pytest.raises(ValidationFailed, match=f"maximum is {MAX_MOTION_FRAMES}"):
+        animation.offset_cels("unused.aseprite", "Layer 1",
+                              list(range(1, MAX_MOTION_FRAMES + 3)), dx=10)
+
+
+def test_movement_off_the_canvas_measures_as_less_than_it_moved(request):
+    """The two numbers answer different questions, and agree only while the cel is fully
+    on the canvas. offset_cels reports how far the cel was moved; validate_loop measures
+    the content still visible, and a cel leaving the canvas is clipped."""
+    name = _ball(f"a/{request.node.name}.aseprite", 4)
+    planned = animation.offset_cels(name, "Layer 1", [1, 2, 3, 4], dx=0, dy=90)
+
+    measured = animation.validate_loop(name, layer="Layer 1")["animation"]
+    assert planned["positions"][-1]["y"] == 90
+    assert measured["frames"][-1]["bounds"] is None, "the cel has left the canvas"
+    assert sum(s["distance"] or 0 for s in measured["spacing"]) < 90

@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`offset_cels`** - move a drawn cel along a path across frames in one Aseprite launch,
+  instead of one call and one launch per frame with every intermediate position worked out
+  by the caller. Give it the frames and the whole movement; the cel on the first frame
+  stays where it is and the last lands exactly on target. `ease` shapes the spacing
+  (`linear`, `ease_in`, `ease_out`, `ease_in_out`, or `gravity`, which keeps horizontal
+  speed even while the vertical accelerates), and `arc_height` bends the path into a jump.
+  Because cel positions are whole pixels, it is the running position that is rounded and
+  not each step, so the leftover carries forward: a 43px slide over nine steps comes out
+  5, 5, 4, 5, 5, 5, 4, 5, 5 rather than the alternating 5, 4, 5, 5, 4 that reads as a limp,
+  and no frame lands as much as a pixel from the ideal curve. The returned `deltas` are
+  the spacing a viewer sees, which `validate_loop` can then measure in the file.
+  (130 tools.)
 - **`validate_loop`** - an animation can now be checked instead of eyeballed. It renders
   every frame once, in a single Aseprite launch, and reports per-frame hashes, content
   bounding boxes, centroids, the bottom row of the drawn content, the spacing series and

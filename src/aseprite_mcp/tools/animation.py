@@ -8,9 +8,19 @@ every frame once, in a single Aseprite launch, and reports what it measured.
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 from ..app import mcp
-from ..core import loopcheck
+from ..core import loopcheck, motion
+from ..core.errors import ValidationFailed
+from ..core.limits import (
+    MAX_CANVAS_DIMENSION,
+    MAX_MOTION_FRAMES,
+    check_count,
+    check_list_length,
+)
 from ..core.manifest import workflow_manifest
+from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
@@ -173,3 +183,121 @@ def validate_loop(
         warnings=report["warnings"],
         suggested_next_actions=_next_actions(report, measurements),
     )
+
+
+_OFFSET_LUA = FRAME_GUARD_LUA + """
+local spr = open_sprite(ARG.src)
+local layer = find_layer(spr, ARG.layer)
+
+local function cel_at(n)
+  local cel = layer:cel(n)
+  if cel == nil then
+    error("layer '" .. tostring(ARG.layer) .. "' has no cel on frame " .. n ..
+          "; draw it or copy_cel onto that frame first", 0)
+  end
+  return cel
+end
+
+-- The first listed frame stays where it is and every other frame is placed relative to
+-- it, so the caller describes a movement rather than a set of coordinates.
+local anchor = cel_at(require_frame(spr, ARG.steps[1].frame, "frame")).position
+local ax, ay = anchor.x, anchor.y
+
+local placed = {}
+app.transaction(function()
+  for i, step in ipairs(ARG.steps) do
+    local n = require_frame(spr, step.frame, "frame")
+    local cel = cel_at(n)
+    cel.position = Point(ax + step.x, ay + step.y)
+    placed[i] = { frame = n, x = ax + step.x, y = ay + step.y }
+  end
+end)
+save_sprite(spr)
+
+RESULT = { layer = layer.name, anchor = { x = ax, y = ay }, positions = placed }
+"""
+
+
+@mcp.tool()
+def offset_cels(
+    filename: str,
+    layer: str,
+    frames: list[int],
+    dx: int = 0,
+    dy: int = 0,
+    ease: str = "linear",
+    arc_height: float = 0.0,
+) -> dict:
+    """Move one layer's drawn cel along a path across frames, in one Aseprite launch.
+
+    The cel on the first listed frame stays where it is; every later frame is placed
+    along the way to `(dx, dy)` from it, and the last frame lands exactly there. This is
+    the same work as one `set_cel_position` per frame, minus the launches and minus
+    computing the intermediate positions by hand.
+
+    Args:
+        frames: The frames to place, in the order the movement passes through them.
+        dx, dy: The whole movement, in pixels, from the first frame to the last.
+        ease: How the movement is *spaced*: `linear`, `ease_in` (starts slow),
+            `ease_out` (arrives slow), `ease_in_out`, or `gravity` (horizontal speed
+            stays even while the vertical accelerates, as a thrown object does).
+        arc_height: Bend the path into an arc this many pixels high at its midpoint,
+            perpendicular to the straight line between the ends. A jump or a thrown
+            object needs this; a slide does not.
+
+    Easing belongs here, in the spacing, and not in the frame durations. Applying a curve
+    to both applies it twice, and the result reads as slow motion rather than as weight.
+
+    Positions are whole pixels, so it is the running position that gets rounded and not
+    each step: the leftover fraction carries forward instead of being reintroduced every
+    frame, which is the difference between spacing that reads as speed and spacing that
+    reads as a limp. The returned `deltas` are the spacing a viewer actually sees, and
+    `max_error_px` is how far the furthest frame sits from the ideal curve, which stays
+    below one pixel.
+    """
+    if len(frames) < 2:
+        raise ValidationFailed(
+            f"frames needs at least two frames to distribute a movement over; got "
+            f"{len(frames)}. To place a single cel, use set_cel_position."
+        )
+    check_list_length(
+        "frames", frames, MAX_MOTION_FRAMES,
+        remedy="Move the cel across fewer frames per call.",
+    )
+    numbered = [FrameRef.arg(f"frames[{i}]", f) for i, f in enumerate(frames)]
+    duplicates = sorted({f for f in numbered if numbered.count(f) > 1})
+    if duplicates:
+        raise ValidationFailed(
+            f"frames lists {duplicates} more than once; a frame can only be placed at one "
+            "position, so the later entry would silently win."
+        )
+    if ease not in motion.EASINGS:
+        raise ValidationFailed(
+            f"bad value for 'ease': {ease!r}; expected one of {', '.join(motion.EASINGS)}."
+        )
+    for name, value in (("dx", dx), ("dy", dy), ("arc_height", arc_height)):
+        check_count(name, abs(int(value)), MAX_CANVAS_DIMENSION,
+                    remedy="That is further than any canvas is wide.")
+
+    plan = motion.plan(len(numbered), int(dx), int(dy),
+                       ease=ease, arc_height=float(arc_height))
+    steps = [{"frame": frame, "x": x, "y": y}
+             for frame, (x, y) in zip(numbered, plan["offsets"], strict=True)]
+    result = run_lua(_OFFSET_LUA, {
+        "src": lua_path(resolve_path(filename)), "layer": layer, "steps": steps,
+    })
+
+    spacing = motion.deltas(plan["offsets"])
+    for entry, (before, after) in zip(spacing, pairwise(numbered), strict=True):
+        entry["from"], entry["to"] = before, after
+    return {
+        "layer": result["layer"],
+        "frames": numbered,
+        "anchor": result["anchor"],
+        "positions": result["positions"],
+        "requested": {"dx": int(dx), "dy": int(dy)},
+        "ease": ease,
+        "arc_height": float(arc_height),
+        "deltas": spacing,
+        "max_error_px": plan["max_error_px"],
+    }

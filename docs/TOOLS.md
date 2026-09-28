@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **129 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **130 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -10,7 +10,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Inspection & preview](#inspection--preview) (4)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (5)
-- [Animation checks](#animation-checks) (1)
+- [Animation checks](#animation-checks) (2)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (5)
 - [Drawing](#drawing) (9)
@@ -426,6 +426,46 @@ while changing frame 1).
 
 
 ## Animation checks
+
+### `offset_cels`
+
+Move one layer's drawn cel along a path across frames, in one Aseprite launch.
+
+The cel on the first listed frame stays where it is; every later frame is placed
+along the way to `(dx, dy)` from it, and the last frame lands exactly there. This is
+the same work as one `set_cel_position` per frame, minus the launches and minus
+computing the intermediate positions by hand.
+
+Args:
+    frames: The frames to place, in the order the movement passes through them.
+    dx, dy: The whole movement, in pixels, from the first frame to the last.
+    ease: How the movement is *spaced*: `linear`, `ease_in` (starts slow),
+        `ease_out` (arrives slow), `ease_in_out`, or `gravity` (horizontal speed
+        stays even while the vertical accelerates, as a thrown object does).
+    arc_height: Bend the path into an arc this many pixels high at its midpoint,
+        perpendicular to the straight line between the ends. A jump or a thrown
+        object needs this; a slide does not.
+
+Easing belongs here, in the spacing, and not in the frame durations. Applying a curve
+to both applies it twice, and the result reads as slow motion rather than as weight.
+
+Positions are whole pixels, so it is the running position that gets rounded and not
+each step: the leftover fraction carries forward instead of being reintroduced every
+frame, which is the difference between spacing that reads as speed and spacing that
+reads as a limp. The returned `deltas` are the spacing a viewer actually sees, and
+`max_error_px` is how far the furthest frame sits from the ideal curve, which stays
+below one pixel.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | yes |  |
+| `frames` | array<integer> | yes |  |
+| `dx` | integer | no | 0 |
+| `dy` | integer | no | 0 |
+| `ease` | string | no | linear |
+| `arc_height` | number | no | 0.0 |
+
 
 ### `validate_loop`
 
