@@ -31,6 +31,15 @@ All notable changes to this project are documented here. The format is based on
   `core/asset_spec.py`. (113 tools.)
 
 ### Fixed
+- **Slice user-data could not carry structure.** `export_slice_metadata` derives a
+  slice's `type` and `id` by parsing its `data`, so `{"type": "hitbox", "id": "body"}` is
+  the shape worth sending, and it could not be sent: `add_slice` / `set_slice` declared
+  `data: str`, while a client either sends structured user-data as an object or has a
+  JSON-looking string parsed into one before the tool is reached. The value arrived as a
+  dict and was refused by validation, or dropped before the call, leaving a slice with no
+  data that exported as `type: "custom"` with a null `id`. A dict or list is now
+  JSON-encoded before validation, so both forms work. The parameter still advertises a
+  plain `string`, which keeps it usable by clients that require a concrete type.
 - **Concurrent edits destroyed sprite files.** An Aseprite run is a read-modify-write
   over a whole sprite and nothing serialized those runs; all but one tool is sync, so
   FastMCP dispatches them through worker threads and a client that batches calls is

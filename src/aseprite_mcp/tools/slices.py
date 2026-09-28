@@ -6,9 +6,43 @@ Slices are exported in sprite-sheet JSON data and are handy for UI atlases,
 
 from __future__ import annotations
 
+import json
+from typing import Annotated
+
+from pydantic import BeforeValidator
+
 from ..app import mcp
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
+
+
+def _coerce_slice_data(value: object) -> object:
+    """JSON-encode structured slice user-data; hand anything else on untouched.
+
+    Aseprite stores `Slice.data` as a string, and `export_slice_metadata` parses it back,
+    deriving a slice's `type` and `id` from it. So `{"type": "hitbox", "id": "body"}` is
+    the useful shape to send, and two client behaviours stopped it arriving: an argument
+    that looks like JSON is parsed into an object before the tool is called, and some
+    clients send structured user-data as an object to begin with. Either way the value
+    reached a parameter declared `str` as a dict, and was refused or dropped; the slice
+    then carried no data at all and exported as `type: "custom"`, `id: null`.
+
+    A non-dict, non-list value is returned unchanged so the ordinary `str | None`
+    validation still applies to it: `data=5` is a mistake and stays an error.
+    """
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return value
+
+
+SliceData = Annotated[str | None, BeforeValidator(_coerce_slice_data)]
+"""Slice user-data as a parameter: a string on the wire, leniently fed.
+
+The advertised schema stays a plain string. Declaring the parameter as the union it
+accepts would cost it its concrete type, and a parameter with no concrete type is the
+one thing strict function-calling clients cannot use; the coercion runs before
+validation instead, so the leniency costs no portability.
+"""
 
 
 @mcp.tool()
@@ -26,7 +60,7 @@ def add_slice(
     pivot_x: int | None = None,
     pivot_y: int | None = None,
     color: str | None = None,
-    data: str | None = None,
+    data: SliceData = None,
 ) -> dict:
     """Create a slice (named region) at (x, y, width, height).
 
@@ -35,7 +69,9 @@ def add_slice(
             top-left**. Provide all four to mark the stretchable middle.
         pivot_*: Optional pivot point (relative to the slice).
         color: Optional slice colour shown in the editor.
-        data: Optional user data string.
+        data: Optional user data. A string is stored as it arrives; a dict or list is
+            JSON-encoded, so {"type": "hitbox", "id": "body"} round-trips through
+            export_slice_metadata, which derives the slice's type and id from it.
     """
     center = None
     if None not in (center_x, center_y, center_width, center_height):
@@ -50,7 +86,7 @@ def add_slice(
         "x": int(x), "y": int(y), "width": int(width), "height": int(height),
         "center": center, "pivot": pivot,
         "color": parse_color(color) if color else None,
-        "data": data,
+        "data": _coerce_slice_data(data),
     }
     body = """
     local spr = open_sprite(ARG.src)
@@ -78,16 +114,20 @@ def set_slice(
     height: int | None = None,
     new_name: str | None = None,
     color: str | None = None,
-    data: str | None = None,
+    data: SliceData = None,
 ) -> dict:
-    """Update an existing slice's bounds, name, colour, or data."""
+    """Update an existing slice's bounds, name, colour, or data.
+
+    data: a string is stored as it arrives; a dict or list is JSON-encoded, so structured
+    user-data round-trips through export_slice_metadata.
+    """
     bounds = None
     if None not in (x, y, width, height):
         bounds = {"x": int(x), "y": int(y), "width": int(width), "height": int(height)}
     args = {
         "src": lua_path(resolve_path(filename)),
         "name": name, "bounds": bounds, "new_name": new_name,
-        "color": parse_color(color) if color else None, "data": data,
+        "color": parse_color(color) if color else None, "data": _coerce_slice_data(data),
     }
     body = """
     local spr = open_sprite(ARG.src)
