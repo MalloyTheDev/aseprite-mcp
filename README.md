@@ -26,7 +26,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **130 tools**, including high-level **workflow** tools that scaffold and validate whole
+- **131 tools**, including high-level **workflow** tools that scaffold and validate whole
   assets in one call, and a **batch op-runner** that applies many edits atomically in a
   single Aseprite process, across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, ramp-aware shading (form light, contact
@@ -41,7 +41,9 @@ Aseprite GUI.
   placeholder timing, spacing that wobbles, a contact edge that drifts. An agent cannot
   watch a GIF play, and those faults are invisible in a still frame. `offset_cels` moves a
   drawn cel along a line or an arc across as many frames as you like, in one launch, with
-  the spacing eased and distributed so it reads as speed rather than as a limp.
+  the spacing eased and distributed so it reads as speed rather than as a limp, and
+  `apply_timing_curve` gives the cycle a shape in time by setting durations, never by
+  duplicating a frame.
 - **Sandboxed file access** — by default the file capability is scoped to the workspace
   (relative paths only; absolute/`..` paths rejected unless you opt in).
 - **No-clobber by default** — output-writing tools refuse to overwrite an existing file;
@@ -350,11 +352,16 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `add_tag` | Tag a frame range with a name, direction, colour. |
 | `set_tag` · `remove_tag` | Edit / delete a tag. |
 
-### Animation checks
+### Animation (motion, timing, checks)
 | Tool | Description |
 | --- | --- |
-| `validate_loop` | Measure a cycle instead of playing it: per-frame hashes, spacing, contact rows, durations, and the faults a still frame hides (a wrap frame repeating the first, duplicated poses, placeholder timing, a drifting contact edge). |
 | `offset_cels` | Move a drawn cel along a line or an arc across frames in one launch, spacing distributed so it reads as speed rather than as a limp. |
+| `apply_timing_curve` | Give a cycle a shape in time (`hold_extremes`, `attack`, `ease_in`, `ease_out`, `flat`), or hold and snap named poses. Sets durations and never duplicates a frame. |
+| `validate_loop` | Measure a cycle instead of playing it: per-frame hashes, spacing, contact rows, durations, and the faults a still frame hides (a wrap frame repeating the first, duplicated poses, placeholder timing, a drifting contact edge). |
+
+Easing belongs in one of these at a time. Eased spacing plus an eased duration curve is the
+same curve applied twice, and reads as slow motion; `apply_timing_curve` measures the cels
+and says so rather than doing it quietly.
 
 ### Drawing
 | Tool | Description |

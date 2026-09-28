@@ -54,6 +54,17 @@ def _spacing(measured: list[dict]) -> list[dict]:
     return series
 
 
+def spacing(frames: list[dict]) -> list[dict]:
+    """The centroid-to-centroid series for frames that carry a `bounds`.
+
+    Public because the timing side needs the same series: whether the cels are already
+    eased is what decides if easing the durations on top would apply the curve twice.
+    """
+    measured = [{"frame": f["frame"], "centroid": _centroid(f.get("bounds"))}
+                for f in frames]
+    return _spacing(measured)
+
+
 def _direction_changes(distances: list[float]) -> tuple[int, float]:
     """Count the reversals in a spacing series, and measure the largest.
 

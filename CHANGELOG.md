@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`apply_timing_curve`** - uniform frame durations are the placeholder every animation
+  starts with, and `validate_loop` has been warning about them with nothing to point at.
+  Now there is: `hold_extremes` holds the ends of a cycle two and a half times as long as
+  the poses it passes through, `attack` lays out anticipation, a strike snapped through in
+  20 to 40ms, a held impact and a recovery, `ease_in` and `ease_out` start or end slow, and
+  `flat` puts everything back. Individual poses can be named in `hold_frames` and
+  `snap_frames`. Every frame comes back with the role it was given, so the result explains
+  itself. A hold is always a longer duration and never a duplicated frame, which would cost
+  a frame, shift every tag index, and hide the repeat from the very check that looks for
+  repeated frames; the returned `frames_added` is there to be asserted on. Because easing
+  the durations on top of eased spacing is the same curve twice, the cels are measured on
+  the way through and the call warns rather than quietly reading as slow motion.
+  (131 tools.)
 - **`offset_cels`** - move a drawn cel along a path across frames in one Aseprite launch,
   instead of one call and one launch per frame with every intermediate position worked out
   by the caller. Give it the frames and the whole movement; the cel on the first frame
