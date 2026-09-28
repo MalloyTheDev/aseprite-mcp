@@ -11,7 +11,7 @@ from __future__ import annotations
 from itertools import pairwise
 
 from ..app import mcp
-from ..core import loopcheck, motion
+from ..core import loopcheck, motion, timing
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_CANVAS_DIMENSION,
@@ -300,4 +300,170 @@ def offset_cels(
         "arc_height": float(arc_height),
         "deltas": spacing,
         "max_error_px": plan["max_error_px"],
+    }
+
+
+# Which frames a call is about, resolved inside Aseprite because a tag's range and the
+# sprite's length are only known there. The same block serves the read and the write.
+_RANGE_LUA = FRAME_GUARD_LUA + """
+local function frame_range(spr)
+  if ARG.tag ~= nil then
+    local tag = nil
+    for _, t in ipairs(spr.tags) do if t.name == ARG.tag then tag = t end end
+    if tag == nil then error("No tag named '" .. tostring(ARG.tag) .. "'", 0) end
+    local list = {}
+    for f = tag.fromFrame.frameNumber, tag.toFrame.frameNumber do list[#list + 1] = f end
+    return list, tag.name
+  end
+  if ARG.frames ~= nil then
+    local list = {}
+    for i, f in ipairs(ARG.frames) do
+      list[i] = require_frame(spr, f, "frames[" .. i .. "]")
+    end
+    return list, nil
+  end
+  local list = {}
+  for f = 1, #spr.frames do list[f] = f end
+  return list, nil
+end
+"""
+
+# Cel rectangles, not opaque content: this is only needed to tell eased spacing from even
+# spacing, and the union of the cel bounds answers that without touching a pixel.
+_FRAME_BOUNDS_LUA = """
+local function frame_bounds(spr, n)
+  local minx, miny, maxx, maxy
+  local function visit(layers)
+    for _, lyr in ipairs(layers) do
+      if lyr.isGroup then
+        visit(lyr.layers)
+      else
+        local cel = lyr:cel(n)
+        if cel ~= nil then
+          local b = cel.bounds
+          if minx == nil or b.x < minx then minx = b.x end
+          if miny == nil or b.y < miny then miny = b.y end
+          if maxx == nil or b.x + b.width > maxx then maxx = b.x + b.width end
+          if maxy == nil or b.y + b.height > maxy then maxy = b.y + b.height end
+        end
+      end
+    end
+  end
+  visit(spr.layers)
+  if minx == nil then return nil end
+  return { x = minx, y = miny, width = maxx - minx, height = maxy - miny }
+end
+"""
+
+_TIMING_READ_LUA = _RANGE_LUA + _FRAME_BOUNDS_LUA + """
+local spr = open_sprite(ARG.src)
+local list, tag_name = frame_range(spr)
+local out = {}
+for i, f in ipairs(list) do
+  out[i] = {
+    frame = f,
+    duration_ms = math.floor(spr.frames[f].duration * 1000 + 0.5),
+    bounds = frame_bounds(spr, f),
+  }
+end
+RESULT = { frames = out, tag = tag_name, sprite_frame_count = #spr.frames }
+"""
+
+_TIMING_WRITE_LUA = FRAME_GUARD_LUA + """
+local spr = open_sprite(ARG.src)
+local before = #spr.frames
+app.transaction(function()
+  for _, item in ipairs(ARG.timings) do
+    local n = require_frame(spr, item.frame, "frame")
+    spr.frames[n].duration = item.duration_ms / 1000.0
+  end
+end)
+save_sprite(spr)
+-- A hold is a duration. If this count ever moved, something duplicated a frame.
+RESULT = { frame_count = #spr.frames, frames_added = #spr.frames - before }
+"""
+
+
+@mcp.tool()
+def apply_timing_curve(
+    filename: str,
+    curve: str = "hold_extremes",
+    frames: list[int] | None = None,
+    tag: str | None = None,
+    base_ms: int = 100,
+    hold_frames: list[int] | None = None,
+    snap_frames: list[int] | None = None,
+) -> dict:
+    """Give an animation a shape in time, by setting durations and never duplicating frames.
+
+    Uniform timing is the placeholder every animation starts with and almost none should
+    keep. A cycle holds its extremes two to four times as long as the poses it passes
+    through; an attack holds the anticipation, snaps through the strike in 20 to 40ms, and
+    holds the impact.
+
+    Args:
+        curve: `hold_extremes` (the ends of a cycle are held, the passing frames are not),
+            `attack` (anticipation, snap, impact, recovery), `ease_in` (starts slow),
+            `ease_out` (ends slow), or `flat` (every frame the same, to start over).
+        frames: The frames to time, in order. Defaults to a tag's frames, or all of them.
+        tag: Time one tag's frames instead of naming them.
+        base_ms: The duration of a passing frame. Everything else is a multiple of it.
+        hold_frames: Frames to hold whatever the curve says, at three times `base_ms`.
+        snap_frames: Frames to snap through, at the shortest duration that still registers.
+
+    A hold is a longer duration on one frame, never a repeated frame: duplicating costs a
+    frame, shifts every tag index, and hides the repeat from `validate_loop`. The returned
+    `frames_added` is always 0, and it is returned so that claim can be checked.
+
+    Easing here and easing the spacing elsewhere are the same curve applied twice, which
+    reads as slow motion rather than as weight. The cels are measured on the way through,
+    so asking for an eased curve over spacing that is already eased comes back with a
+    warning rather than quietly doing it.
+    """
+    if curve not in timing.CURVES:
+        raise ValidationFailed(
+            f"bad value for 'curve': {curve!r}; expected one of {', '.join(timing.CURVES)}."
+        )
+    if frames is not None and tag is not None:
+        raise ValidationFailed(
+            "give either frames or tag, not both: a tag already names its frames."
+        )
+    if frames is not None:
+        check_list_length("frames", frames, MAX_MOTION_FRAMES,
+                          remedy="Time fewer frames per call.")
+        frames = [FrameRef.arg(f"frames[{i}]", f) for i, f in enumerate(frames)]
+    holds = [FrameRef.arg("hold_frames", f) for f in (hold_frames or [])]
+    snaps = [FrameRef.arg("snap_frames", f) for f in (snap_frames or [])]
+
+    src = lua_path(resolve_path(filename))
+    measured = run_lua(_TIMING_READ_LUA, {"src": src, "tag": tag, "frames": frames})
+    numbered = [f["frame"] for f in measured["frames"]]
+    distances = [entry["distance"] for entry in loopcheck.spacing(measured["frames"])]
+
+    try:
+        planned = timing.plan(
+            numbered, curve=curve, base_ms=int(base_ms),
+            hold_frames=holds, snap_frames=snaps, spacing=distances,
+        )
+    except ValueError as exc:
+        raise ValidationFailed(str(exc)) from exc
+
+    timings = [{"frame": frame, "duration_ms": duration}
+               for frame, duration in zip(numbered, planned["durations_ms"], strict=True)]
+    applied = run_lua(_TIMING_WRITE_LUA, {"src": src, "timings": timings})
+
+    return {
+        # Lua drops a nil field, so an untagged run simply has no `tag` key coming back.
+        "tag": measured.get("tag"),
+        "curve": curve,
+        "base_ms": int(base_ms),
+        "snap_ms": planned["snap_ms"],
+        "frames": numbered,
+        "previous_ms": [f["duration_ms"] for f in measured["frames"]],
+        "durations_ms": planned["durations_ms"],
+        "roles": planned["roles"],
+        "total_duration_ms": sum(planned["durations_ms"]),
+        "frame_count": applied["frame_count"],
+        "frames_added": applied["frames_added"],
+        "warnings": planned["warnings"],
     }

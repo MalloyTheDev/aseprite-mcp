@@ -12,7 +12,17 @@ import pytest
 
 from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.core.runner import AsepriteError
-from aseprite_mcp.tools import animation, batch, cels, drawing, frames, layers, sprite, tags
+from aseprite_mcp.tools import (
+    animation,
+    batch,
+    cels,
+    drawing,
+    frames,
+    inspect,
+    layers,
+    sprite,
+    tags,
+)
 
 
 def _ball(name: str, count: int = 8) -> str:
@@ -349,3 +359,134 @@ def test_movement_off_the_canvas_measures_as_less_than_it_moved(request):
     assert planned["positions"][-1]["y"] == 90
     assert measured["frames"][-1]["bounds"] is None, "the cel has left the canvas"
     assert sum(s["distance"] or 0 for s in measured["spacing"]) < 90
+
+
+# ========================================================= apply_timing_curve (issue #89)
+# Uniform timing is the placeholder every animation starts with. The other half of the
+# job is refusing the cheap way to hold a pose: a hold is a duration, never a repeat.
+
+
+def test_hold_extremes_gives_an_idle_a_shape_and_adds_no_frames(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 4)
+    before = inspect.get_sprite_info(name)["frameCount"]
+
+    result = animation.apply_timing_curve(name, curve="hold_extremes", base_ms=100)
+
+    assert result["durations_ms"] == [250, 100, 250, 100]
+    assert result["roles"] == ["extreme", "passing", "extreme", "passing"]
+    assert result["frames_added"] == 0
+    assert inspect.get_sprite_info(name)["frameCount"] == before
+
+
+def test_it_clears_the_warning_validate_loop_raises(request):
+    """The two tools are the two halves of one loop: one says the timing is placeholder,
+    the other fixes it, and the first has to agree afterwards."""
+    name = _ball(f"a/{request.node.name}.aseprite", 6)
+    animation.offset_cels(name, "Layer 1", list(range(1, 7)), dx=18)
+
+    before = animation.validate_loop(name)
+    assert before["animation"]["uniform_timing"] is True
+    assert "timing_varies" in failed(before)
+
+    animation.apply_timing_curve(name, curve="hold_extremes")
+
+    after = animation.validate_loop(name)
+    assert after["animation"]["uniform_timing"] is False
+    assert "timing_varies" not in failed(after)
+
+
+def test_timing_never_touches_a_pixel(request):
+    """Durations are metadata. If a frame's hash moved, something drew."""
+    name = _ball(f"a/{request.node.name}.aseprite", 5)
+    before = [f["hash"] for f in animation.validate_loop(name)["animation"]["frames"]]
+
+    animation.apply_timing_curve(name, curve="attack", base_ms=90)
+
+    after = [f["hash"] for f in animation.validate_loop(name)["animation"]["frames"]]
+    assert after == before
+
+
+def test_attack_holds_the_anticipation_and_snaps_the_strike(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 6)
+    result = animation.apply_timing_curve(name, curve="attack", base_ms=100)
+
+    assert result["roles"] == [
+        "anticipation", "snap", "snap", "impact", "recovery", "recovery",
+    ]
+    durations = animation.validate_loop(name)["animation"]["durations_ms"]
+    assert durations == result["durations_ms"]
+    assert durations[0] > durations[-1] and durations[3] > durations[-1]
+    assert 20 <= durations[1] <= 40
+
+
+def test_a_tag_scopes_the_timing_to_its_own_frames(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 6)
+    tags.add_tag(name, "first", 1, 3)
+    tags.add_tag(name, "second", 4, 6)
+
+    result = animation.apply_timing_curve(name, tag="second", curve="flat", base_ms=250)
+
+    assert result["tag"] == "second"
+    assert result["frames"] == [4, 5, 6]
+    assert animation.validate_loop(name)["animation"]["durations_ms"] == \
+        [100, 100, 100, 250, 250, 250]
+
+
+def test_an_explicit_frame_list_times_only_those_frames(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 5)
+    animation.apply_timing_curve(name, frames=[2, 4], curve="flat", base_ms=300)
+    assert animation.validate_loop(name)["animation"]["durations_ms"] == \
+        [100, 300, 100, 300, 100]
+
+
+def test_naming_the_poses_by_hand_overrides_the_curve(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 4)
+    result = animation.apply_timing_curve(
+        name, curve="flat", base_ms=100, hold_frames=[2], snap_frames=[4],
+    )
+    assert result["roles"] == ["even", "hold", "even", "snap"]
+    assert result["durations_ms"][1] == 300
+    assert 20 <= result["durations_ms"][3] <= 40
+
+
+def test_eased_spacing_and_an_eased_curve_are_called_out(request):
+    """Both are the same curve, and applying it twice reads as slow motion. The cels are
+    measured on the way through, so the warning is about this sprite, not a guess."""
+    name = _ball(f"a/{request.node.name}.aseprite", 6)
+    animation.offset_cels(name, "Layer 1", list(range(1, 7)), dy=40, ease="ease_in")
+
+    result = animation.apply_timing_curve(name, curve="ease_out")
+
+    assert result["warnings"], "eased spacing plus an eased curve should warn"
+    assert "twice" in result["warnings"][0]
+    # It warns and still does what was asked: the caller decides, having been told.
+    assert animation.validate_loop(name)["animation"]["durations_ms"] == \
+        result["durations_ms"]
+
+
+def test_even_spacing_draws_no_warning(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 6)
+    animation.offset_cels(name, "Layer 1", list(range(1, 7)), dx=25, ease="linear")
+    assert animation.apply_timing_curve(name, curve="ease_out")["warnings"] == []
+
+
+# --------------------------------------------------- refused before Aseprite is launched
+def test_an_unknown_curve_lists_the_ones_that_exist():
+    with pytest.raises(ValidationFailed, match="hold_extremes"):
+        animation.apply_timing_curve("unused.aseprite", curve="bouncy")
+
+
+def test_frames_and_tag_together_are_refused():
+    with pytest.raises(ValidationFailed, match="not both"):
+        animation.apply_timing_curve("unused.aseprite", frames=[1, 2], tag="walk")
+
+
+def test_frame_zero_in_a_timing_call_is_refused():
+    with pytest.raises(ValidationFailed, match="1-based"):
+        animation.apply_timing_curve("unused.aseprite", frames=[0, 1])
+
+
+def test_holding_a_frame_that_is_not_being_timed_is_refused(request):
+    name = _ball(f"a/{request.node.name}.aseprite", 3)
+    with pytest.raises(ValidationFailed, match="not being timed"):
+        animation.apply_timing_curve(name, frames=[1, 2], hold_frames=[3])

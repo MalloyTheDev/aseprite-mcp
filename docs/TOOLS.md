@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **130 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **131 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -10,7 +10,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Inspection & preview](#inspection--preview) (4)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (5)
-- [Animation checks](#animation-checks) (2)
+- [Animation (motion, timing, checks)](#animation-motion-timing-checks) (3)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (5)
 - [Drawing](#drawing) (9)
@@ -425,7 +425,46 @@ while changing frame 1).
 | `duration_ms` | integer | yes |  |
 
 
-## Animation checks
+## Animation (motion, timing, checks)
+
+### `apply_timing_curve`
+
+Give an animation a shape in time, by setting durations and never duplicating frames.
+
+Uniform timing is the placeholder every animation starts with and almost none should
+keep. A cycle holds its extremes two to four times as long as the poses it passes
+through; an attack holds the anticipation, snaps through the strike in 20 to 40ms, and
+holds the impact.
+
+Args:
+    curve: `hold_extremes` (the ends of a cycle are held, the passing frames are not),
+        `attack` (anticipation, snap, impact, recovery), `ease_in` (starts slow),
+        `ease_out` (ends slow), or `flat` (every frame the same, to start over).
+    frames: The frames to time, in order. Defaults to a tag's frames, or all of them.
+    tag: Time one tag's frames instead of naming them.
+    base_ms: The duration of a passing frame. Everything else is a multiple of it.
+    hold_frames: Frames to hold whatever the curve says, at three times `base_ms`.
+    snap_frames: Frames to snap through, at the shortest duration that still registers.
+
+A hold is a longer duration on one frame, never a repeated frame: duplicating costs a
+frame, shifts every tag index, and hides the repeat from `validate_loop`. The returned
+`frames_added` is always 0, and it is returned so that claim can be checked.
+
+Easing here and easing the spacing elsewhere are the same curve applied twice, which
+reads as slow motion rather than as weight. The cels are measured on the way through,
+so asking for an eased curve over spacing that is already eased comes back with a
+warning rather than quietly doing it.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `curve` | string | no | hold_extremes |
+| `frames` | array<integer> | no | _none_ |
+| `tag` | string | no | _none_ |
+| `base_ms` | integer | no | 100 |
+| `hold_frames` | array<integer> | no | _none_ |
+| `snap_frames` | array<integer> | no | _none_ |
+
 
 ### `offset_cels`
 
