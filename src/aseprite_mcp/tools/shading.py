@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from ..app import mcp
 from ..core.errors import ValidationFailed
-from ..core.limits import MAX_COLOR_LIST_LENGTH, check_list_length
+from ..core.limits import (
+    MAX_COLOR_LIST_LENGTH,
+    MAX_OUTLINE_THICKNESS,
+    check_list_length,
+)
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
@@ -424,5 +428,449 @@ def shade_region_by_light(
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
                region_pixels = count, shaded_pixels = shaded,
                depth = maxd, ramp_size = #ramp }
+    """
+    return run_lua(body, args)
+
+
+@mcp.tool()
+def contact_shadow(
+    filename: str,
+    ramp: list[str],
+    occluder_color: str,
+    radius: int = 1,
+    depth: int = 1,
+    direction: float | None = None,
+    tolerance: float = 24.0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Darken the pixels where one form meets another, along its ramp.
+
+    Ambient occlusion as pixel artists actually draw it: a line one or two steps darker
+    where two shapes touch. It is what stops a shaded object looking like it is floating
+    in front of the thing it is standing on.
+
+    Args:
+        ramp: Colours darkest first. Darkened pixels stay on this ramp.
+        occluder_color: The colour of the form casting the occlusion, for example the
+            ground a character stands on, or the blade a crossguard meets.
+        radius: How far the darkening reaches from the occluder, in pixels. 1 or 2 is
+            usually right; beyond that it reads as a drop shadow rather than contact.
+        depth: How many ramp steps darker, at the contact line. 1 is the common choice.
+        direction: Degrees, restricting occlusion to one side. Omit for all directions,
+            which is what you want for a contact line; set it when only one side of the
+            form is actually touching something.
+        tolerance: How close a pixel must be to a ramp entry to be darkened. Pixels
+            further away are left alone, so this does not spill onto other materials.
+        layer: Target layer (default: top layer).
+        frame: Target frame, 1-based.
+    """
+    if len(ramp) < 2:
+        raise ValidationFailed("ramp needs at least 2 colours.")
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    if not 1 <= radius <= MAX_OUTLINE_THICKNESS:
+        raise ValidationFailed(
+            f"radius must be between 1 and {MAX_OUTLINE_THICKNESS}; a contact shadow "
+            "reaching further than a couple of pixels is a drop shadow."
+        )
+    if depth < 1:
+        raise ValidationFailed("depth must be at least 1 ramp step.")
+    if tolerance < 0:
+        raise ValidationFailed("tolerance must not be negative.")
+
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "ramp": [parse_color(c) for c in ramp],
+        "occluder": parse_color(occluder_color),
+        "radius": int(radius),
+        "depth": int(depth),
+        "direction": None if direction is None else float(direction),
+        "tolerance": float(tolerance),
+    }
+    body = FRAME_GUARD_LUA + _RAMP_LUA + """
+    local spr = open_sprite(ARG.src)
+    local layer = find_layer(spr, ARG.layer)
+    if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img = get_draw_image(spr, layer, framenum)
+    local W, H = img.width, img.height
+    local ramp, occ = ARG.ramp, ARG.occluder
+    local R = ARG.radius
+
+    -- Which pixels are the occluder. Sampled once up front rather than per neighbour
+    -- lookup, because the inner loop reads every pixel in the radius around every
+    -- candidate and re-decoding each one is the whole cost of the tool.
+    local is_occ = {}
+    local occ_count = 0
+    for y = 0, H - 1 do
+      is_occ[y] = {}
+      for x = 0, W - 1 do
+        local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+        local hit = false
+        if a > 0 then
+          local dr, dg, db = r - occ.r, g - occ.g, b - occ.b
+          hit = math.sqrt(0.299*dr*dr + 0.587*dg*dg + 0.114*db*db) <= ARG.tolerance
+        end
+        is_occ[y][x] = hit
+        if hit then occ_count = occ_count + 1 end
+      end
+    end
+
+    if occ_count == 0 then
+      error("No pixel matched occluder_color, so there is no contact to shade. " ..
+            "Check the colour, or raise tolerance.")
+    end
+
+    local dirx, diry
+    if ARG.direction ~= nil then
+      local rad = math.rad(ARG.direction)
+      dirx, diry = math.cos(rad), -math.sin(rad)
+    end
+
+    local darkened = 0
+    for y = 0, H - 1 do
+      for x = 0, W - 1 do
+        if not is_occ[y][x] then
+          local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+          if a > 0 then
+            -- Nearest occluder within the radius, so the darkening falls off with
+            -- distance instead of being a hard band.
+            local nearest = nil
+            for dy = -R, R do
+              for dx = -R, R do
+                local sx, sy = x + dx, y + dy
+                if sx >= 0 and sy >= 0 and sx < W and sy < H and is_occ[sy][sx] then
+                  local d = math.sqrt(dx*dx + dy*dy)
+                  if d <= R and (nearest == nil or d < nearest) then
+                    if dirx == nil then
+                      nearest = d
+                    elseif (dx * dirx + dy * diry) > 0 then
+                      -- Only count occluders lying in the given direction, so a
+                      -- character standing on ground is occluded from below and not
+                      -- all round.
+                      nearest = d
+                    end
+                  end
+                end
+              end
+            end
+
+            if nearest ~= nil then
+              local idx, dist = ramp_match(ramp, r, g, b)
+              if dist <= ARG.tolerance then
+                -- Full depth at the contact line, tapering to nothing at the radius.
+                local falloff = 1.0 - (nearest - 1) / math.max(1, R)
+                if falloff > 1 then falloff = 1 end
+                local steps = math.floor(ARG.depth * falloff + 0.5)
+                if steps > 0 then
+                  local target = idx - steps
+                  if target < 1 then target = 1 end
+                  if target ~= idx then
+                    local c = ramp[target]
+                    img_set(img, x, y, rgba_to_px(spr, c.r, c.g, c.b, a))
+                    darkened = darkened + 1
+                  end
+                end
+              else
+                note_skipped()
+              end
+            end
+          end
+        end
+      end
+    end
+
+    commit_image(spr, layer, framenum, img)
+    save_sprite(spr)
+    RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
+               occluder_pixels = occ_count, darkened_pixels = darkened }
+    """
+    return run_lua(body, args)
+
+
+@mcp.tool()
+def outline_smart(
+    filename: str,
+    ramp: list[str],
+    mode: str = "colormatched",
+    darken_steps: int = 2,
+    light_angle: float | None = None,
+    tolerance: float = 32.0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Outline a shape in colours drawn from its own ramp, not one flat colour.
+
+    `add_outline` paints a single colour all the way round, which reads as a sticker.
+    Pixel artists vary the outline: darker where the form turns away from the light,
+    and often dropped entirely on the lit side so the shape breathes.
+
+    Args:
+        ramp: Colours darkest first. Outline pixels come from here.
+        mode: "colormatched" takes each outline pixel from the adjacent interior colour
+            shifted `darken_steps` down the ramp. "selective" does the same but leaves
+            the lit side unoutlined, which needs `light_angle`. "single" uses the
+            darkest ramp entry all round, the classic look.
+        darken_steps: How many ramp steps below the neighbouring interior colour.
+        light_angle: Degrees, required for "selective". 135 is the usual key light.
+        tolerance: How close an interior pixel must be to a ramp entry to be used as
+            the source for its outline pixel.
+        layer: Target layer (default: top layer).
+        frame: Target frame, 1-based.
+
+    The outline is drawn outside the silhouette, into transparency, so it never eats
+    into the artwork.
+    """
+    if mode not in ("colormatched", "selective", "single"):
+        raise ValidationFailed(
+            'mode must be "colormatched", "selective" or "single".'
+        )
+    if len(ramp) < 2:
+        raise ValidationFailed("ramp needs at least 2 colours.")
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    if mode == "selective" and light_angle is None:
+        raise ValidationFailed(
+            'mode="selective" needs light_angle: it drops the outline on the lit side, '
+            "so it has to know which side that is."
+        )
+    if darken_steps < 1:
+        raise ValidationFailed("darken_steps must be at least 1.")
+
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "ramp": [parse_color(c) for c in ramp],
+        "mode": mode,
+        "darken": int(darken_steps),
+        "angle": None if light_angle is None else float(light_angle),
+        "tolerance": float(tolerance),
+    }
+    body = FRAME_GUARD_LUA + _RAMP_LUA + """
+    local spr = open_sprite(ARG.src)
+    local layer = find_layer(spr, ARG.layer)
+    if layer.isGroup then error("Cannot outline a group layer: " .. layer.name) end
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img = get_draw_image(spr, layer, framenum)
+    local W, H = img.width, img.height
+    local ramp = ARG.ramp
+
+    local lx, ly
+    if ARG.angle ~= nil then
+      local rad = math.rad(ARG.angle)
+      lx, ly = math.cos(rad), -math.sin(rad)
+    end
+
+    -- Collected first, written after: growing the silhouette while reading it would
+    -- let the outline seed more outline and creep outwards.
+    local pending = {}
+    for y = 0, H - 1 do
+      for x = 0, W - 1 do
+        if not img_solid(spr, img, x, y) then
+          local best_c, best_dot = nil, nil
+          for dy = -1, 1 do
+            for dx = -1, 1 do
+              if not (dx == 0 and dy == 0) then
+                local sx, sy = x + dx, y + dy
+                if img_solid(spr, img, sx, sy) then
+                  -- dot > 0 means this neighbour lies toward the light from here, so
+                  -- the outline pixel is on the shape's lit side.
+                  local dot = 0
+                  if lx ~= nil then dot = (-dx) * lx + (-dy) * ly end
+                  if best_dot == nil or dot > best_dot then
+                    best_dot = dot
+                    local r, g, b = px_to_rgba(spr, img:getPixel(sx, sy))
+                    best_c = { r = r, g = g, b = b }
+                  end
+                end
+              end
+            end
+          end
+
+          if best_c ~= nil then
+            local skip = (ARG.mode == "selective" and best_dot ~= nil and best_dot > 0.35)
+            if not skip then
+              local col
+              if ARG.mode == "single" then
+                col = ramp[1]
+              else
+                local idx, dist = ramp_match(ramp, best_c.r, best_c.g, best_c.b)
+                if dist <= ARG.tolerance then
+                  local target = idx - ARG.darken
+                  if target < 1 then target = 1 end
+                  col = ramp[target]
+                else
+                  col = ramp[1]
+                end
+              end
+              pending[#pending + 1] = { x = x, y = y, c = col }
+            end
+          end
+        end
+      end
+    end
+
+    for _, p in ipairs(pending) do
+      img_set(img, p.x, p.y, rgba_to_px(spr, p.c.r, p.c.g, p.c.b, 255))
+    end
+
+    commit_image(spr, layer, framenum, img)
+    save_sprite(spr)
+    RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
+               mode = ARG.mode, outline_pixels = #pending }
+    """
+    return run_lua(body, args)
+
+
+@mcp.tool()
+def dither_band(
+    filename: str,
+    ramp: list[str],
+    from_step: int,
+    to_step: int,
+    pattern: str = "bayer4",
+    width: int = 2,
+    tolerance: float = 24.0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Dither the boundary between two adjacent ramp steps, widening the transition.
+
+    Dithering in pixel art is a limited-palette necessity rather than a style: it buys
+    an apparent extra shade between two you already have. It reads as dated when applied
+    globally, which is why this is scoped to one boundary rather than offered as a
+    filter over the whole sprite.
+
+    Args:
+        ramp: Colours darkest first.
+        from_step, to_step: 1-based indices into `ramp`, and they must be adjacent.
+            Dithering between distant steps produces visible noise, not a gradient.
+        pattern: "bayer4" (finest, the usual choice), "bayer2" (chunkier) or "checker"
+            (a hard 50/50 that suits a sharp material change).
+        width: How far the dithered zone reaches into each band, in pixels. This is what
+            widens the transition, which is the point of dithering: at width=1 only the
+            seam itself alternates, and every pattern collapses to the same result
+            because a one-pixel-deep band can only alternate.
+        tolerance: How close a pixel must be to one of the two colours to take part.
+        layer: Target layer (default: top layer).
+        frame: Target frame, 1-based.
+
+    Only pixels of the two named colours that border each other are touched, so the
+    rest of the sprite is untouched even where it uses the same ramp.
+    """
+    if pattern not in ("bayer4", "bayer2", "checker"):
+        raise ValidationFailed('pattern must be "bayer4", "bayer2" or "checker".')
+    if len(ramp) < 2:
+        raise ValidationFailed("ramp needs at least 2 colours.")
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    if not 1 <= from_step <= len(ramp) or not 1 <= to_step <= len(ramp):
+        raise ValidationFailed(f"from_step and to_step must be between 1 and {len(ramp)}.")
+    if not 1 <= width <= 16:
+        raise ValidationFailed(
+            "width must be between 1 and 16; a dithered zone wider than that is a "
+            "texture rather than a transition."
+        )
+    if abs(from_step - to_step) != 1:
+        raise ValidationFailed(
+            "from_step and to_step must be adjacent. Dithering between distant ramp "
+            "steps produces noise rather than an intermediate shade."
+        )
+
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "ramp": [parse_color(c) for c in ramp],
+        "from_step": int(from_step),
+        "to_step": int(to_step),
+        "pattern": pattern,
+        "width": int(width),
+        "tolerance": float(tolerance),
+    }
+    body = FRAME_GUARD_LUA + _RAMP_LUA + """
+    local spr = open_sprite(ARG.src)
+    local layer = find_layer(spr, ARG.layer)
+    if layer.isGroup then error("Cannot dither a group layer: " .. layer.name) end
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img = get_draw_image(spr, layer, framenum)
+    local W, H = img.width, img.height
+    local ramp = ARG.ramp
+    local a_col, b_col = ramp[ARG.from_step], ramp[ARG.to_step]
+
+    local BAYER4 = { {0,8,2,10}, {12,4,14,6}, {3,11,1,9}, {15,7,13,5} }
+    local BAYER2 = { {0,2}, {3,1} }
+
+    local function threshold(x, y)
+      if ARG.pattern == "checker" then
+        return ((x + y) % 2 == 0) and 0.25 or 0.75
+      elseif ARG.pattern == "bayer2" then
+        return (BAYER2[(y % 2) + 1][(x % 2) + 1] + 0.5) / 4.0
+      end
+      return (BAYER4[(y % 4) + 1][(x % 4) + 1] + 0.5) / 16.0
+    end
+
+    local function which(x, y)
+      if x < 0 or y < 0 or x >= W or y >= H then return nil end
+      local r, g, b, al = px_to_rgba(spr, img:getPixel(x, y))
+      if al == 0 then return nil end
+      local da = math.sqrt(0.299*(r-a_col.r)^2 + 0.587*(g-a_col.g)^2 + 0.114*(b-a_col.b)^2)
+      local db = math.sqrt(0.299*(r-b_col.r)^2 + 0.587*(g-b_col.g)^2 + 0.114*(b-b_col.b)^2)
+      if da <= ARG.tolerance and da <= db then return "a" end
+      if db <= ARG.tolerance then return "b" end
+      return nil
+    end
+
+    -- Only near where the two bands meet. A pixel of the right colour in the middle of
+    -- its own band has no transition to widen, and dithering it would be the global
+    -- application that makes dithering look dated. `width` sets how far the zone
+    -- reaches in, which is what actually widens the transition.
+    local R = ARG.width
+    local pending = {}
+    for y = 0, H - 1 do
+      for x = 0, W - 1 do
+        local here = which(x, y)
+        if here ~= nil then
+          local other = (here == "a") and "b" or "a"
+          -- Distance to the nearest pixel of the other band. This is what makes the
+          -- result a gradient rather than a texture: comparing the ordered-dither
+          -- threshold against a fixed 0.5 gives a uniform 50/50 checkerboard across the
+          -- whole zone, which is not what dithering is for. The mix has to vary with
+          -- how far through the transition the pixel sits, so a pixel deep in its own
+          -- band almost never flips and one at the seam flips about half the time.
+          local nearest = nil
+          for dy = -R, R do
+            for dx = -R, R do
+              local d2 = dx*dx + dy*dy
+              if d2 <= R*R and which(x + dx, y + dy) == other then
+                local d = math.sqrt(d2)
+                if nearest == nil or d < nearest then nearest = d end
+              end
+            end
+          end
+
+          if nearest ~= nil then
+            local flip_chance = 0.5 * (1.0 - (nearest - 1) / R)
+            if flip_chance < 0 then flip_chance = 0 end
+            if threshold(x, y) < flip_chance then
+              pending[#pending + 1] = {
+                x = x, y = y, c = (other == "a") and a_col or b_col,
+              }
+            end
+          end
+        end
+      end
+    end
+
+    for _, p in ipairs(pending) do
+      local _, _, _, al = px_to_rgba(spr, img:getPixel(p.x, p.y))
+      img_set(img, p.x, p.y, rgba_to_px(spr, p.c.r, p.c.g, p.c.b, al))
+    end
+
+    commit_image(spr, layer, framenum, img)
+    save_sprite(spr)
+    RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
+               pattern = ARG.pattern, dithered_pixels = #pending }
     """
     return run_lua(body, args)
