@@ -14,6 +14,7 @@ tests can export into pytest's tmp_path.
 """
 
 import os
+import pathlib
 
 import pytest
 
@@ -33,9 +34,10 @@ PURE_PYTHON_TESTS = (
 # the per-frame one it replaced and so needs the real editor. It belongs to the
 # --run-aseprite tier, not here.
 
-# NOTE: this is an ALLOWLIST, so a new pure-Python test file defaults to SKIPPED until it is
-# added here -- which looks identical to passing in a summary line. If you add a test file
-# that does not need Aseprite, add it above.
+# NOTE: this is an ALLOWLIST of module names, so a new pure-Python test file defaults to
+# SKIPPED until it is added here -- which looks identical to passing in a summary line. If
+# you add a test file that does not need Aseprite, add it above. Entries are whole module
+# names: `test_timing` means tests/test_timing.py and nothing else.
 
 
 def pytest_addoption(parser):
@@ -66,8 +68,12 @@ def pytest_collection_modifyitems(config, items):
             missing_reason = f"--run-aseprite was given but Aseprite was not found: {exc}"
 
     for item in items:
-        # Pure-Python tests always run (no Aseprite needed).
-        if any(name in item.nodeid for name in PURE_PYTHON_TESTS):
+        # Pure-Python tests always run (no Aseprite needed). The match is on the module's
+        # own name, never on the nodeid: a substring test let any test *function* whose
+        # name contained a listed module's name into the always-run set, and
+        # `test_animation.py::test_timing_never_touches_a_pixel` duly ran on CI, where
+        # there is no Aseprite to launch.
+        if pathlib.Path(str(item.fspath)).stem in PURE_PYTHON_TESTS:
             continue
         if not run_aseprite:
             item.add_marker(pytest.mark.skip(reason="needs --run-aseprite (Aseprite integration test)"))

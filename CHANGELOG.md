@@ -67,6 +67,12 @@ All notable changes to this project are documented here. The format is based on
   `core/asset_spec.py`. (113 tools.)
 
 ### Fixed
+- **One Aseprite integration test was running on CI, where there is no Aseprite.** The
+  allowlist that decides which tests never need Aseprite was matched as a substring of the
+  whole test id, so any test *function* whose name contained a listed module's name joined
+  the always-run set: `test_animation.py::test_timing_never_touches_a_pixel` matched the
+  entry for `tests/test_timing.py`. The match is on the module's own name now, which is
+  what the list always meant.
 - **The README's own tool catalogue was missing the same three domains the generated
   reference was.** Shading, selections and Minecraft resource packs had never been added
   to it by hand, so the front page listed 115 of 130 tools while claiming to be a
