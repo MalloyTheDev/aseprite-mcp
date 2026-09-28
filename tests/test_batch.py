@@ -2,7 +2,7 @@
 
 import pytest
 
-from aseprite_mcp.core.errors import ValidationFailed
+from aseprite_mcp.core.errors import AsepriteError, ValidationFailed
 from aseprite_mcp.core.runner import LuaToolError
 from aseprite_mcp.tools import batch, cels, drawing, frames, inspect, layers, sprite, tags
 from aseprite_mcp.tools.common import resolve_path
@@ -235,3 +235,143 @@ def test_standalone_tools_still_accept_a_valid_frame():
     assert frames.set_frame_duration("b/f61h.aseprite", 2, 250)["frame"] == 2
     assert tags.add_tag("b/f61h.aseprite", "loop", 2, 1)["tags"][0]["from"] == 1
     assert cels.get_cel("b/f61h.aseprite", "Layer 1", 2)["frame"] == 2
+
+
+# ----------------------------------------------- cel and frame batch operations
+# Animation is made of cel operations, and none of them was batchable: moving one drawn
+# cel across eight frames cost eight Aseprite launches. These cover the ops that closed
+# that gap, and above all that adding them did not cost atomicity.
+
+
+def _animated(name: str, frames_wanted: int = 8):
+    sprite.create_sprite(name, 32, 32)
+    drawing.draw_ellipse(name, 8, 8, 3, 3, "#ff4040", filled=True)
+    for _ in range(frames_wanted - 1):
+        frames.add_frame(name)
+    for f in range(2, frames_wanted + 1):
+        cels.copy_cel(name, "Layer 1", 1, f)
+    return name
+
+
+def test_batched_cel_motion_matches_one_call_per_frame(request):
+    """The batch has to be a faster route to the same sprite, not a different one."""
+    per_call = _animated(f"b/{request.node.name}_a.aseprite")
+    batched = _animated(f"b/{request.node.name}_b.aseprite")
+
+    for f in range(1, 9):
+        cels.set_cel_position(per_call, "Layer 1", f, (f - 1) * 3, (f - 1) * 2)
+
+    batch.apply_operations(batched, [
+        {"op": "set_cel_position",
+         "args": {"layer": "Layer 1", "frame": f, "x": (f - 1) * 3, "y": (f - 1) * 2}}
+        for f in range(1, 9)
+    ])
+
+    for f in range(1, 9):
+        a = cels.get_cel(per_call, "Layer 1", f)["position"]
+        b = cels.get_cel(batched, "Layer 1", f)["position"]
+        assert (a["x"], a["y"]) == (b["x"], b["y"]), f"frame {f}: {a} vs {b}"
+
+
+def test_every_new_operation_applies_in_one_batch(request):
+    name = _animated(f"b/{request.node.name}.aseprite")
+
+    result = batch.apply_operations(name, [
+        {"op": "set_all_frame_durations", "args": {"duration_ms": 80}},
+        {"op": "set_cel_opacity", "args": {"layer": "Layer 1", "frame": 3, "opacity": 128}},
+        {"op": "draw_pixels",
+         "args": {"pixels": [{"x": 1, "y": 1}, {"x": 2, "y": 2}], "color": "#00ff00",
+                  "frame": 1}},
+        {"op": "copy_cel", "args": {"layer": "Layer 1", "from_frame": 1, "to_frame": 8}},
+        {"op": "delete_cel", "args": {"layer": "Layer 1", "frame": 7}},
+        {"op": "remove_frame", "args": {"frame": 6}},
+    ])
+
+    assert [o["status"] for o in result["operations"]] == ["applied"] * 6
+    info = inspect.get_sprite_info(name)
+    assert info["frameCount"] == 7
+    assert info["frames"][0]["duration"] == pytest.approx(0.08)
+
+
+def test_copy_cel_accepts_the_standalone_tool_spelling(request):
+    """from_frame/to_frame are aliases, because renaming would break working calls."""
+    name = _animated(f"b/{request.node.name}.aseprite", 3)
+    canonical = batch.apply_operations(name, [
+        {"op": "copy_cel", "args": {"layer": "Layer 1", "from": 1, "to": 2}},
+    ])
+    aliased = batch.apply_operations(name, [
+        {"op": "copy_cel", "args": {"layer": "Layer 1", "from_frame": 1, "to_frame": 3}},
+    ])
+    assert canonical["operations"][0]["status"] == "applied"
+    assert aliased["operations"][0]["status"] == "applied"
+
+
+def test_a_failing_cel_op_rolls_the_whole_batch_back(request):
+    """The property that makes batching safe to reach for. Re-checked because these
+    operations mutate frame structure, not just pixels."""
+    import hashlib
+
+    from aseprite_mcp.tools.common import resolve_path
+
+    name = _animated(f"b/{request.node.name}.aseprite", 4)
+    path = resolve_path(name)
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    mtime = path.stat().st_mtime_ns
+
+    with pytest.raises(AsepriteError, match="does not exist"):
+        batch.apply_operations(name, [
+            {"op": "set_cel_position", "args": {"layer": "Layer 1", "frame": 1, "x": 9, "y": 9}},
+            {"op": "set_cel_opacity", "args": {"layer": "Layer 1", "frame": 2, "opacity": 10}},
+            {"op": "delete_cel", "args": {"layer": "Layer 1", "frame": 99}},
+        ])
+
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    assert path.stat().st_mtime_ns == mtime
+    position = cels.get_cel(name, "Layer 1", 1)["position"]
+    assert (position["x"], position["y"]) == (0, 0), "the first op must have rolled back"
+
+
+def test_draw_pixels_in_a_batch_is_capped_per_operation(request):
+    """The batch cap counts operations, so one op carrying a huge list would slip past."""
+    from aseprite_mcp.core.limits import MAX_PIXEL_LIST_LENGTH
+
+    name = _animated(f"b/{request.node.name}.aseprite", 2)
+    too_many = [{"x": 0, "y": 0}] * (MAX_PIXEL_LIST_LENGTH + 1)
+    with pytest.raises(ValidationFailed, match="maximum"):
+        batch.apply_operations(name, [
+            {"op": "draw_pixels", "args": {"pixels": too_many, "color": "#ff0000"}},
+        ])
+
+
+def test_draw_pixels_in_a_batch_rejects_a_malformed_entry(request):
+    """Refused before Aseprite is launched, so the message names the problem."""
+    name = _animated(f"b/{request.node.name}.aseprite", 2)
+    with pytest.raises(ValidationFailed, match="pixels"):
+        batch.apply_operations(name, [
+            {"op": "draw_pixels", "args": {"pixels": [{"x": 1}], "color": "#ff0000"}},
+        ])
+    with pytest.raises(ValidationFailed, match="non-empty"):
+        batch.apply_operations(name, [
+            {"op": "draw_pixels", "args": {"pixels": [], "color": "#ff0000"}},
+        ])
+
+
+def test_a_cel_operation_on_a_missing_cel_says_which(request):
+    name = _animated(f"b/{request.node.name}.aseprite", 3)
+    batch.apply_operations(name, [
+        {"op": "delete_cel", "args": {"layer": "Layer 1", "frame": 2}},
+    ])
+    with pytest.raises(AsepriteError, match="no cel on frame 2"):
+        batch.apply_operations(name, [
+            {"op": "set_cel_position", "args": {"layer": "Layer 1", "frame": 2, "x": 1, "y": 1}},
+        ])
+
+
+def test_the_generated_reference_lists_the_new_operations():
+    """The docstring is generated from OP_SPECS, so it cannot drift from the registry."""
+    from aseprite_mcp.core import oplib
+
+    reference = oplib.operations_reference()
+    for op in ("set_cel_position", "set_cel_opacity", "copy_cel", "delete_cel",
+               "draw_pixels", "remove_frame", "set_all_frame_durations"):
+        assert op in reference, f"{op} is registered but undocumented"
