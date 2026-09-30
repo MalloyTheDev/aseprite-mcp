@@ -492,20 +492,22 @@ local function ellipse_offsets(rx, ry, filled)
   end
   local pts, n = {}, 0
   local function emit(dx, dy) n = n + 1; pts[n] = { dx, dy } end
-  if filled then
-    for dy = -ry, ry do
-      local t = 1 - (dy * dy) / (ry * ry)
-      if t < 0 then t = 0 end
-      local hw = math.floor(rx * math.sqrt(t) + 0.5)
-      for dx = -hw, hw do emit(dx, dy) end
-    end
-    return pts
-  end
+  -- Filled and outline are one shape rendered two ways. The fill used to have its own
+  -- formula, a per-row half-width of floor(rx * sqrt(1 - dy^2/ry^2) + 0.5), which at the
+  -- pole gives 0 and drew a disc that came to a one-pixel point while the outline of the
+  -- same call had a five-pixel flat top. Now the midpoint pass runs either way, and the
+  -- fill is the span between the edges it found.
+  local half = filled and {} or nil
   local rx2, ry2 = rx * rx, ry * ry
   local x, y = 0, ry
   local dpx, dpy = 0, 2 * rx2 * y
   local function plot4(ox, oy)
-    emit(ox, oy); emit(-ox, oy); emit(ox, -oy); emit(-ox, -oy)
+    if filled then
+      local row = (oy < 0) and -oy or oy
+      if half[row] == nil or ox > half[row] then half[row] = ox end
+    else
+      emit(ox, oy); emit(-ox, oy); emit(ox, -oy); emit(-ox, -oy)
+    end
   end
   local p = ry2 - rx2 * ry + 0.25 * rx2
   while dpx < dpy do
@@ -527,6 +529,12 @@ local function ellipse_offsets(rx, ry, filled)
       p = p + rx2 - dpy
     else
       x = x + 1; dpx = dpx + 2 * ry2; p = p + rx2 - dpy + dpx
+    end
+  end
+  if filled then
+    for dy = -ry, ry do
+      local hw = half[(dy < 0) and -dy or dy] or 0
+      for dx = -hw, hw do emit(dx, dy) end
     end
   end
   return pts
