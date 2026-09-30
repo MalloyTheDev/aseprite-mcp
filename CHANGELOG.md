@@ -77,6 +77,16 @@ All notable changes to this project are documented here. The format is based on
   `core/asset_spec.py`. (113 tools.)
 
 ### Fixed
+- **A filled ellipse was a different shape from its own outline.** The same radii gave a
+  disc that came to a one-pixel point at the pole and an outline with a five-pixel flat
+  top, because the fill had its own per-row half-width formula while the outline was a
+  midpoint ellipse. A filled circle therefore looked like a lemon, and `add_outline`
+  around a filled disc did not reproduce `filled=False`. The fill is now the span between
+  the edges the midpoint pass itself found, so the two are one shape rendered two ways,
+  and `draw_ellipse_in_box` inherits it. **This changes the pixels of every filled
+  ellipse**, including the placeholder in `create_character_sprite`: discs are rounder and
+  slightly larger in area. Nothing in the suite depended on the old silhouette except one
+  pixel count, which now counts the disc instead of remembering it.
 - **One Aseprite integration test was running on CI, where there is no Aseprite.** The
   allowlist that decides which tests never need Aseprite was matched as a substring of the
   whole test id, so any test *function* whose name contained a listed module's name joined

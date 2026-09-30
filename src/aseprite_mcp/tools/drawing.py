@@ -325,9 +325,11 @@ def draw_ellipse(
 ) -> dict:
     """Draw an ellipse centred at (center_x, center_y) with the given radii.
 
-    For a circle, use the same value for radius_x and radius_y. filled=False
-    draws a 1px outline. antialias smooths a *filled* ellipse with sub-pixel
-    coverage (RGB sprites only; ignored otherwise).
+    For a circle, use the same value for radius_x and radius_y. filled=False draws a 1px
+    outline, and a filled ellipse is exactly that outline with its interior: the two are
+    one shape rendered two ways, so a fill and an outline of the same call line up.
+    antialias smooths a *filled* ellipse with sub-pixel coverage (RGB sprites only;
+    ignored otherwise).
     """
     args = {
         "src": lua_path(resolve_path(filename)),

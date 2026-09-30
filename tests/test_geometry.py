@@ -154,3 +154,53 @@ def test_a_zero_sized_box_is_refused():
 def test_a_negative_box_is_refused():
     with pytest.raises(ValidationFailed, match="at least 1"):
         drawing.draw_ellipse_in_box("unused.aseprite", 0, 0, 5, -3, "#ffffff")
+
+
+# ================================ the filled ellipse and its own outline (issue #112)
+# For the same radii the two used to be different shapes: the fill had its own per-row
+# formula that collapsed to a single pixel at the pole, while the outline, a midpoint
+# ellipse, had a five-pixel flat top there. Both now come from the same pass.
+
+
+def _opaque_set(name: str, size: int = 32) -> set[tuple[int, int]]:
+    grid = _grid(name, size)
+    return {(x, y) for y, row in enumerate(grid) for x, px in enumerate(row) if _opaque(px)}
+
+
+@pytest.mark.parametrize("radius", [1, 2, 3, 5, 7, 11, 15])
+def test_a_filled_ellipse_is_exactly_its_own_outline_filled(request, radius):
+    filled = f"g/{request.node.name}_f.aseprite"
+    outline = f"g/{request.node.name}_o.aseprite"
+    for name in (filled, outline):
+        sprite.create_sprite(name, 32, 32)
+    drawing.draw_ellipse(filled, 15, 15, radius, radius, "#ffffff", filled=True)
+    drawing.draw_ellipse(outline, 15, 15, radius, radius, "#ffffff")
+
+    inside, edge = _opaque_set(filled), _opaque_set(outline)
+    assert edge <= inside, "the outline must lie on the filled shape"
+    assert quality.bounding_box(_grid(filled)) == quality.bounding_box(_grid(outline))
+    # Every row of the fill spans exactly between the edges of that row's outline.
+    for y in {py for _, py in edge}:
+        edge_xs = sorted(px for px, py in edge if py == y)
+        fill_xs = sorted(px for px, py in inside if py == y)
+        assert fill_xs == list(range(edge_xs[0], edge_xs[-1] + 1)), y
+
+
+def test_the_pole_of_a_circle_is_flat_rather_than_pointed(request):
+    """A 15px disc used to come to a single pixel at the top, which reads as a lemon."""
+    name = _canvas(request)
+    drawing.draw_ellipse(name, 15, 15, 7, 7, "#ffffff", filled=True)
+
+    grid = _grid(name)
+    top = min(y for y in range(32) if any(_opaque(px) for px in grid[y]))
+    assert sum(1 for px in grid[top] if _opaque(px)) == 5
+
+
+def test_the_box_form_inherits_the_same_shape(request):
+    """Both forms share the geometry, so the correction reaches the even diameters too."""
+    name = _canvas(request)
+    drawing.draw_ellipse_in_box(name, 4, 4, 16, 16, "#ffffff", filled=True)
+
+    grid = _grid(name)
+    top = min(y for y in range(32) if any(_opaque(px) for px in grid[y]))
+    assert sum(1 for px in grid[top] if _opaque(px)) > 1

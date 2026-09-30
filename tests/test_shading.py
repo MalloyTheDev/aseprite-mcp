@@ -54,8 +54,12 @@ def test_shift_along_ramp_keeps_every_pixel_on_the_palette(sphere):
     result = shading.shift_along_ramp(sphere, RAMP, steps=-1)
 
     assert quality.palette_conformance(_grid(sphere), RAMP) == 1.0
-    assert result["pixels_matched"] == 477
-    assert result["pixels_written"] == 477
+    # Every drawn pixel, counted from the sprite rather than written down here: the disc
+    # is whatever draw_ellipse currently draws, and pinning its area made this test fail
+    # when the filled ellipse was corrected to match its own outline.
+    drawn = sum(1 for row in _grid(sphere) for px in row if px[7:9] != "00")
+    assert result["pixels_matched"] == drawn
+    assert result["pixels_written"] == drawn
 
 
 def test_a_brightness_filter_destroys_the_palette_on_the_same_sprite(sphere):
