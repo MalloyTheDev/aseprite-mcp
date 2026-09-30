@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **135 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **136 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -17,7 +17,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Brushes & symmetry](#brushes--symmetry) (4)
 - [Shading & light](#shading--light) (5)
 - [Selections](#selections) (6)
-- [Effects & colour adjustments](#effects--colour-adjustments) (9)
+- [Effects & colour adjustments](#effects--colour-adjustments) (10)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (2)
@@ -1640,6 +1640,44 @@ Invert the RGB colours of a layer's pixels (alpha preserved).
 | `filename` | string | yes |  |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
+
+
+### `remove_stray_pixels`
+
+Replace pixels that have no neighbour of their own colour with the colour around them.
+
+A stray pixel is one whose eight neighbours are all a different colour. They are what
+a shading pass leaves behind at a band boundary, and at any zoom they read as dirt
+rather than as texture. `assess_sprite` counts them as `isolated_pixels`; this is what
+to do about the count.
+
+Each stray takes the most common colour among its opaque neighbours, so **no new
+colour can appear**: the result uses a subset of the colours already there, and art on
+a ramp stays on it. Transparent pixels are left alone, so the silhouette does not
+change.
+
+Args:
+    protect: Colours never to replace. A one-pixel eye highlight or a specular dot is
+        a stray by this definition and is meant to be there, so name its colour.
+
+A pixel whose only same-colour neighbour is **diagonal** is part of a dither pattern,
+not dirt, and is left alone. `assess_sprite` counts isolation orthogonally, which is
+the stricter reading, so a dithered sprite still reports some `isolated_pixels` after
+this has run and that count is the dithering rather than anything to fix.
+
+This is not Aseprite's own Despeckle, which is a median filter: that one averages
+neighbourhoods, introduces colours that were not in the palette, and on a measured
+test left *more* stray pixels than it found. This changes only the pixels that are
+strays, and only to colours already next to them.
+
+Returns how many were replaced, so a second call can be skipped when it says 0.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+| `protect` | array<string> | no | _none_ |
 
 
 ### `replace_color`

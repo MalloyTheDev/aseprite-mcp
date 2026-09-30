@@ -36,6 +36,9 @@ commit_image(spr, layer, framenum, img)
 save_sprite(spr)
 RESULT = { ok = true, filename = spr.filename, layer = layer.name,
            frame = framenum, width = spr.width, height = spr.height }
+-- A snippet that counted something it wants reported sets `_stray_replaced`; the harness
+-- passes it through rather than every drawing tool growing its own RESULT block.
+if _stray_replaced ~= nil then RESULT.replaced = _stray_replaced end
 """
 
 

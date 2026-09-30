@@ -453,3 +453,92 @@ def fill_checkerboard(
     end
     """
     return _draw(args, snippet)
+
+
+@mcp.tool()
+def remove_stray_pixels(
+    filename: str,
+    layer: str | None = None,
+    frame: int = 1,
+    protect: list[str] | None = None,
+) -> dict:
+    """Replace pixels that have no neighbour of their own colour with the colour around them.
+
+    A stray pixel is one whose eight neighbours are all a different colour. They are what
+    a shading pass leaves behind at a band boundary, and at any zoom they read as dirt
+    rather than as texture. `assess_sprite` counts them as `isolated_pixels`; this is what
+    to do about the count.
+
+    Each stray takes the most common colour among its opaque neighbours, so **no new
+    colour can appear**: the result uses a subset of the colours already there, and art on
+    a ramp stays on it. Transparent pixels are left alone, so the silhouette does not
+    change.
+
+    Args:
+        protect: Colours never to replace. A one-pixel eye highlight or a specular dot is
+            a stray by this definition and is meant to be there, so name its colour.
+
+    A pixel whose only same-colour neighbour is **diagonal** is part of a dither pattern,
+    not dirt, and is left alone. `assess_sprite` counts isolation orthogonally, which is
+    the stricter reading, so a dithered sprite still reports some `isolated_pixels` after
+    this has run and that count is the dithering rather than anything to fix.
+
+    This is not Aseprite's own Despeckle, which is a median filter: that one averages
+    neighbourhoods, introduces colours that were not in the palette, and on a measured
+    test left *more* stray pixels than it found. This changes only the pixels that are
+    strays, and only to colours already next to them.
+
+    Returns how many were replaced, so a second call can be skipped when it says 0.
+    """
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "protect": [parse_color(c) for c in (protect or [])],
+    }
+    snippet = """
+    local protected = {}
+    for _, colour in ipairs(ARG.protect) do
+      protected[to_pixel(spr, colour)] = true
+    end
+
+    -- Read first, write after: a stray replaced mid-pass would become a neighbour that
+    -- rescues the next one, and the result would depend on scan order.
+    local w, h = img.width, img.height
+    local replacements, count = {}, 0
+    for y = 0, h - 1 do
+      for x = 0, w - 1 do
+        local here = img:getPixel(x, y)
+        if img_solid(spr, img, x, y) and not protected[here] then
+          local tally, best, best_n, alone = {}, nil, 0, true
+          for dy = -1, 1 do
+            for dx = -1, 1 do
+              if not (dx == 0 and dy == 0) then
+                local nx, ny = x + dx, y + dy
+                if nx >= 0 and ny >= 0 and nx < w and ny < h then
+                  local other = img:getPixel(nx, ny)
+                  if other == here then
+                    alone = false
+                  elseif img_solid(spr, img, nx, ny) then
+                    local n = (tally[other] or 0) + 1
+                    tally[other] = n
+                    if n > best_n then best, best_n = other, n end
+                  end
+                end
+              end
+            end
+          end
+          if alone and best ~= nil then
+            count = count + 1
+            replacements[count] = { x = x, y = y, px = best }
+          end
+        end
+      end
+    end
+
+    for _, item in ipairs(replacements) do
+      img_set(img, item.x, item.y, item.px)
+    end
+    _stray_replaced = count
+    """
+    return _draw(args, snippet)

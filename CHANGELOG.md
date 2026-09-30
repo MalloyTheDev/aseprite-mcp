@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`remove_stray_pixels`** - the noise `assess_sprite` counts, with something to do
+  about it. A stray is a pixel with no neighbour of its own colour in any of the eight
+  directions, which is what a shading pass leaves at a band boundary and what reads as
+  dirt at sprite scale. Each one takes the most common colour among its opaque
+  neighbours, so no colour that was not already there can appear, ramped art stays on its
+  ramp, and the silhouette cannot move. A pixel whose only same-colour neighbour is
+  diagonal is part of a dither and is left alone; `protect` names colours to keep, since
+  a one-pixel specular is a stray by the definition and is meant to be there. This is not
+  Aseprite's own Despeckle, a median filter which on a measured test added a colour, took
+  the art off its ramp, and left *more* strays than it found. (136 tools.)
 - **`assess_sprite`** - the quality metrics existed and nothing could reach them.
   `core/quality.py` has measured twelve things about a sprite since the hardening work,
   is unit-tested, and is how the shading tools prove they keep art on the palette; the
@@ -19,6 +29,17 @@ All notable changes to this project are documented here. The format is based on
   comes back with nothing to say, because a report that comments on every sprite is one
   nobody reads. The thresholds are relative to the art's own size: a raster circle is made
   of steps and is not told off for being round. (135 tools.)
+
+### Changed
+- **The showcase art is cleaned and the creature redrawn.** `assess_sprite` was pointed at
+  every showcase image as its first real job and found stray pixels in all of them, so the
+  generators now clear them: the item sheet went from 60 to 39, the creature from 13 to 6
+  per frame, the skeleton from 27 to 8, and the tile scene from 2,912 to 978 by picking
+  its colour variation per 2x2 block rather than per pixel, which is texture instead of
+  static. The creature also grew its stalk in every facing rather than only when facing
+  away, where it looked like something growing out of the back of its head, and lost the
+  pale belly patch that sat under its eyes and read as a full mouth; it has a small mouth
+  now instead.
 
 ## [0.8.1] - 2026-09-30
 

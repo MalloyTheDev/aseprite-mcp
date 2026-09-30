@@ -131,6 +131,9 @@ for points, colour, band, shade in plan:
     bottom = max(y for _, y in points)
     drawing.draw_pixels(NAME, pixels({(x, y) for x, y in points if y == top}), band[3])
     drawing.draw_pixels(NAME, pixels({(x, y) for x, y in points if y == bottom}), band[1])
+# Shading small shapes leaves lone pixels at the band boundaries; assess_sprite
+# counts them and this clears them, without touching the dithered or hand-lit rows.
+effects.remove_stray_pixels(NAME)
 effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=8, where="outside")
 
 export.export_png(NAME, "items.png", scale=6, overwrite=True)

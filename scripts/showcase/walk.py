@@ -9,7 +9,6 @@ VEC = {"N": (0, -1), "NE": (1, -1), "E": (1, 0), "SE": (1, 1),
 
 BODY = palette.generate_ramp("#59c35a", steps=5, hue_shift=-34.0,
                              saturation_shift=-16.0, light_range=0.70)["colors"]
-BELLY = palette.generate_ramp("#e9d98a", steps=5, hue_shift=-20.0)["colors"]
 OUTLINE = "#20281f"
 EYE_WHITE = "#f4f7f2"
 EYE_DARK = "#20281f"
@@ -41,10 +40,13 @@ for index, name in enumerate(DIRS, start=1):
     shading.shade_region_by_light(NAME, BODY, base_color=BODY[2], light_angle=125,
                                   light_z=0.55, ambient=0.34, rim=0.2, frame=index)
 
-    if dy >= 0:                      # facing the viewer: a belly patch catches the light
-        drawing.draw_pixels(NAME, px(disc(16 + dx * 2, 19, 4, 3)), BELLY[2], frame=index)
-        shading.shade_region_by_light(NAME, BELLY, base_color=BELLY[2], light_angle=125,
-                                      light_z=0.5, ambient=0.4, frame=index)
+    # A stalk on top, in every facing. It used to appear only when the creature faced
+    # away, which made it look like something that grew out of the back of its head.
+    stalk = {(16 + dx, 6), (16 + dx, 5), (16 + dx * 2, 4)}
+    drawing.draw_pixels(NAME, px(stalk), BODY[1], frame=index)
+
+    # No belly patch. On a body this size a pale shape under the eyes reads as a muzzle
+    # whatever it is meant to be, and the face is what carries the facing.
 
     eyes = set()
     pupils = set()
@@ -64,13 +66,17 @@ for index, name in enumerate(DIRS, start=1):
         white, pupil = eye(16 + dx * 4)
         eyes |= white
         pupils |= pupil
-    else:                                         # facing away: the back of the head
-        drawing.draw_pixels(NAME, px({(16 + dx, 6), (16 + dx, 7), (16 + dx * 2, 5)}),
-                            BODY[1], frame=index)
     if eyes:
         drawing.draw_pixels(NAME, px(eyes), EYE_WHITE, frame=index)
         drawing.draw_pixels(NAME, px(pupils), EYE_DARK, frame=index)
+        # A small mouth, two pixels below the eyes. The pale patch used to sit here and
+        # read as something being eaten.
+        mouth = {(16 + dx * 2 + d, 17) for d in (-1, 0, 1)} | {(16 + dx * 2, 18)}
+        drawing.draw_pixels(NAME, px(mouth), EYE_DARK, frame=index)
 
+    # Shading a small round body leaves lone pixels at the band boundaries, which read as
+    # dirt at this size. assess_sprite counts them; this is what clears them.
+    effects.remove_stray_pixels(NAME, frame=index, protect=[EYE_WHITE, EYE_DARK])
     effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=8, where="outside",
                         frame=index)
 
