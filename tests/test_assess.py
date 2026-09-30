@@ -167,3 +167,52 @@ def test_assessing_changes_nothing(request):
 
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
     assert path.stat().st_mtime_ns == mtime
+
+
+# ------------------------------------------- indexed transparency (issue #134)
+# The pixel decode used to live twice in inspect.py, and both copies went straight to
+# the palette without the transparentColor check the prelude does first. On a sprite
+# whose transparent index points at an opaque palette entry, every transparent pixel
+# read back as that colour, so the whole canvas counted as drawn.
+
+
+def _indexed_trap(request) -> str:
+    """An indexed sprite whose transparent index is an opaque palette entry."""
+    from aseprite_mcp.tools import palette as palette_tools
+
+    name = f"as/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 8, 8, color_mode="indexed")
+    palette_tools.set_palette(name, ["#ff00ff", "#204080", "#e0e0e0"])
+    drawing.draw_rectangle(name, 2, 2, 3, 3, "index:1", filled=True)
+    palette_tools.set_transparent_color(name, 0)
+    return name
+
+
+def test_transparent_pixels_are_not_counted_as_drawn_on_an_indexed_sprite(request):
+    name = _indexed_trap(request)
+
+    metrics = inspect.assess_sprite(name)["metrics"]
+
+    assert metrics["drawn_pixels"] == 9, "only the 3x3 rectangle is drawn"
+    assert metrics["bbox"] == [2, 2, 4, 4]
+    assert metrics["canvas_usage"] < 1.0
+
+
+def test_get_pixels_reads_those_pixels_as_transparent(request):
+    name = _indexed_trap(request)
+
+    rows = inspect.get_pixels(name, 0, 0, 8, 8)["pixels"]
+
+    assert rows[0][0].lower().endswith("00"), "a transparent pixel must read transparent"
+    assert not rows[3][3].lower().endswith("00"), "the drawn rectangle is still opaque"
+
+
+def test_the_map_format_shows_the_shape_rather_than_a_full_canvas(request):
+    """The map exists to be readable at a glance, which it was not: every pixel showed
+    as the transparent index's palette colour."""
+    name = _indexed_trap(request)
+
+    mapped = inspect.get_pixels(name, 0, 0, 8, 8, format="map")
+
+    assert mapped["rows"][0] == "........"
+    assert mapped["rows"][3][2:5] == "aaa"
