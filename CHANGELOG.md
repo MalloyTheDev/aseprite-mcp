@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **The showcase art is redrawn and now reproducible.** The item sheet and the
+  eight-direction sheet were from the earliest version of the server: the sword was a
+  clipped diagonal, and the eight facings were green blobs with a red line for a nose.
+  Both are redrawn with the current tools, along with the tilemap scene and the skeleton,
+  each item carrying its own ramp so a potion's glass, liquid and cork shade independently.
+  The generators live in `scripts/showcase/` and reproduce every committed image
+  byte-for-byte, so the pictures that advertise a tool change when the tool does.
+
 ## [0.8.0] - 2026-09-30
 
 The release that made the server usable by any MCP client and gave it an opinion about
