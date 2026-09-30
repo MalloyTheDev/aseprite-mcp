@@ -1,0 +1,43 @@
+name: Bug report
+description: Something the server did that it should not have, or did not do that it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include the tool call and what came back. A sprite that reproduces it is
+        worth more than a description of one.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The tool call, the result you got, and the result you expected.
+      placeholder: |
+        draw_ellipse_in_box("orb.aseprite", 0, 0, 16, 16, "#fff", filled=True)
+        -> the disc is off by one pixel on the right
+    validations:
+      required: true
+  - type: textarea
+    id: health-check
+    attributes:
+      label: health_check output
+      description: >
+        Run the `health_check` tool and paste the JSON. It reports the Aseprite version,
+        the resolved workspace and the tool count, which is most of what triage needs.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: Claude Desktop 1.x, Claude Code, Cursor, Codex CLI, ...
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: false

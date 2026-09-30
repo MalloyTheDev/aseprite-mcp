@@ -6,106 +6,162 @@
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-server-purple.svg)](https://modelcontextprotocol.io)
 
 <p align="center">
-  <img src="assets/slime.gif" width="170" alt="Animated slime made entirely via Aseprite MCP">
-  &nbsp;&nbsp;&nbsp;
-  <img src="assets/slime.png" width="170" alt="Slime sprite made entirely via Aseprite MCP">
+  <img src="docs/assets/showcase/throw.gif" width="330" alt="A shaded ball thrown along an arc, its shadow tracking along the ground">
+  &nbsp;&nbsp;
+  <img src="docs/assets/showcase/shading_stages.png" width="330" alt="One disc taken from flat colour to a shaded, outlined form">
 </p>
 <p align="center">
-  <sub>This slime was drawn, shaded, outlined, and animated <strong>entirely through MCP tool calls</strong> — no manual pixel-pushing.</sub>
+  <sub>Drawn, shaded, animated, timed and then <strong>measured</strong>: entirely through MCP tool calls, with no manual pixel-pushing.</sub>
 </p>
 
 An extensive [Model Context Protocol](https://modelcontextprotocol.io) server that lets an
 AI agent (Claude Code, Claude Desktop, or any MCP client) **create and edit
-[Aseprite](https://www.aseprite.org/) sprites** — draw pixel art, build animations,
-manage layers/frames/tags/palettes, and export to PNG/GIF/sprite sheets — all headlessly.
+[Aseprite](https://www.aseprite.org/) sprites**: draw pixel art, build animations,
+manage layers/frames/tags/palettes, and export to PNG/GIF/sprite sheets, all headlessly.
 
-📖 **Full tool reference:** [`docs/TOOLS.md`](docs/TOOLS.md) — every tool with its parameters.
+📖 **Full tool reference:** [`docs/TOOLS.md`](docs/TOOLS.md): every tool with its parameters.
 
 It works by generating **Lua scripts** and running them through Aseprite's batch mode
 (`aseprite -b --script ...`), plus the Aseprite CLI for exports. Every operation opens a
-real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
+real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **134 tools**, including high-level **workflow** tools that scaffold and validate whole
-  assets in one call, and a **batch op-runner** that applies many edits atomically in a
-  single Aseprite process, across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
-  anti-aliased modes), custom brushes & symmetry, ramp-aware shading (form light, contact
-  shadow, smart outline, dither bands), selections that scope later edits, palettes
-  (extract/sort/ramps), animation tags, slices/9-patch, effects (gradients/outline/
-  drop-shadow/colour adjustments), text rendering, tilemaps, image stamping,
-  reference/rotoscope layers, transforms, rich export (per-layer/per-tag, sprite sheets,
-  onion-skin), Minecraft resource packs, a GUI companion view, and a `health_check`
-  self-test.
-- **Animation you can check** - `validate_loop` renders a cycle once and reports what is
-  wrong with it: a wrap frame that repeats the first, a pose held by duplicating a frame,
-  placeholder timing, spacing that wobbles, a contact edge that drifts. An agent cannot
-  watch a GIF play, and those faults are invisible in a still frame. `offset_cels` moves a
-  drawn cel along a line or an arc across as many frames as you like, in one launch, with
-  the spacing eased and distributed so it reads as speed rather than as a limp, and
-  `apply_timing_curve` gives the cycle a shape in time by setting durations, never by
-  duplicating a frame.
-- **Sandboxed file access** — by default the file capability is scoped to the workspace
+- **134 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+  custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
+  palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
+  tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
+  Godot, Minecraft). See the [tool catalogue](#tool-catalogue) or the full
+  [reference](docs/TOOLS.md).
+- **Whole assets in one call** - **workflow** tools scaffold and validate a character, an
+  icon set, a tileset or an eight-direction walk template, and a **batch op-runner**
+  applies hundreds of edits atomically in a single Aseprite process.
+- **Shading that stays on the palette** - `shade_region_by_light` turns a flat region
+  into a lit form from a ramp and a light direction, and `contact_shadow`,
+  `outline_smart` and `dither_band` finish it. A brightness filter moves every pixel off
+  the palette; these move pixels *along the ramp*, so the art still uses exactly the
+  colours it was given.
+- **Animation you can check** - `offset_cels` moves a cel along a line or an arc across
+  any number of frames in one launch, with the spacing distributed so it reads as speed
+  rather than as a limp; `apply_timing_curve` gives the cycle a shape in time by setting
+  durations, never by duplicating a frame; and `validate_loop` measures the result and
+  names the faults a still frame hides: a wrap frame repeating the first, a pose held by
+  duplication, placeholder timing, a contact edge that drifts.
+- **Sandboxed file access**: by default the file capability is scoped to the workspace
   (relative paths only; absolute/`..` paths rejected unless you opt in).
-- **No-clobber by default** — output-writing tools refuse to overwrite an existing file;
+- **No-clobber by default**: output-writing tools refuse to overwrite an existing file;
   pass `overwrite=True` to replace it intentionally.
-- **Structured results** — every tool returns JSON describing the updated sprite.
+- **Structured results**: every tool returns JSON describing the updated sprite.
 - **`render_preview`** returns a PNG so the agent can *see* its work and self-correct.
-- **Deterministic, stateless, robust** — each call is an isolated, headless Aseprite run.
+- **Deterministic, stateless, robust**: each call is an isolated, headless Aseprite run.
+
+---
+
+## Contents
+
+| | |
+| --- | --- |
+| [Showcase](#showcase) | What the tools produce, with the numbers behind it |
+| [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
+| [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
+| [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
+| [Tool catalogue](#tool-catalogue) | All 134 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
+| [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
+| [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
 
 ---
 
 ## Showcase
 
-Everything below was produced **entirely through MCP tool calls** — no manual pixel-pushing.
+Every image here was produced **entirely through MCP tool calls**, and every number under
+them is real output from the same run.
 
-### 🟢 Easy — one call scaffolds usable pixel art
+### Shade a form, not a filter
 
 <p align="center">
-  <img src="docs/assets/showcase/easy_item_sheet.png" width="420" alt="Pixel-art item sheet with heart, coin, potion, and sword icons">
+  <img src="docs/assets/showcase/shading_stages.png" width="640" alt="One disc shown three times: flat colour, then shaded by light direction, then outlined and dithered">
 </p>
 <p align="center">
-  <sub><code>create_rpg_item_sheet</code> lays out named item slices in one call; filled here with the drawing tools — heart / coin / potion / sword, each its own export-ready slice.</sub>
+  <sub>Flat fill, then <code>shade_region_by_light</code>, then <code>dither_band</code> and <code>outline_smart</code>.</sub>
 </p>
 
-### 🟡 Medium — animation & tag generation
+```python
+ramp = generate_ramp("#5a7fd4", steps=5, hue_shift=-40, saturation_shift=-18)["colors"]
+draw_ellipse_in_box("orb.aseprite", 4, 4, 24, 24, ramp[2], filled=True)
+shade_region_by_light("orb.aseprite", ramp, light_angle=125, light_z=0.55, rim=0.25)
+dither_band("orb.aseprite", ramp, from_step=1, to_step=2, pattern="bayer4", width=2)
+outline_smart("orb.aseprite", ramp, darken_steps=2, light_angle=125)
+```
+
+A brightness filter would have moved every pixel off the palette. These tools move pixels
+*along the ramp*, so the result still uses exactly the five colours it was given: the
+shading is made of the palette rather than applied on top of it.
+
+### Animate it, then measure the animation
 
 <p align="center">
-  <img src="docs/assets/showcase/medium_walk8.gif" width="120" alt="Animated sprite cycling through eight facing directions">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/assets/showcase/medium_walk8_sheet.png" width="460" alt="Eight-direction walk sheet: one frame and animation tag per compass direction">
+  <img src="docs/assets/showcase/throw.gif" width="420" alt="A shaded ball thrown along an arc with its shadow tracking along the ground">
 </p>
 <p align="center">
-  <sub><code>make_8_direction_walk_template</code> generates the frames <strong>and one animation tag per direction</strong> (N / NE / E / SE / S / SW / W / NW) — ready to draw the walk cycle into.</sub>
+  <sub>One <code>offset_cels</code> call for the arc, one for the shadow, one
+  <code>apply_timing_curve</code> for the timing, then <code>validate_loop</code> to check it.</sub>
 </p>
 
-### 🔴 Hard — the full pipeline: create → animate → validate → export
+```python
+frames = list(range(1, 13))
+offset_cels("throw.aseprite", "ball",   frames, dx=46, arc_height=20)   # the arc
+offset_cels("throw.aseprite", "shadow", frames, dx=46)                  # straight along the ground
+apply_timing_curve("throw.aseprite", curve="hold_extremes", base_ms=70)
+validate_loop("throw.aseprite", layer="ball", loops=False)
+```
+
+```text
+spacing      8.06  6.4  6.4  5.0  4.03  4.0  4.03  5.0  6.4  6.4  8.06
+contact_row    32   25   20   16    13   12    12   13   16   20   25   32
+durations     175   70   70   70    70   70   175   70   70   70   70   70
+passed: true
+```
+
+An agent cannot watch a GIF play. It can read that the spacing is symmetric about the
+apex, that the ball slows as it rises and speeds as it falls, and that the extremes are
+held two and a half times as long as the passing frames.
+
+### Scaffold a whole asset in one call
 
 <p align="center">
-  <img src="docs/assets/showcase/hard_pipeline.gif" width="160" alt="Animated idle bounce of a blue character produced by the full pipeline">
+  <img src="docs/assets/showcase/easy_item_sheet.png" width="360" alt="Pixel-art item sheet with heart, coin, potion, and sword icons">
+  &nbsp;&nbsp;
+  <img src="docs/assets/showcase/medium_walk8_sheet.png" width="360" alt="Eight-direction walk sheet: one frame and animation tag per compass direction">
 </p>
 <p align="center">
-  <sub>One agent run: <code>create_character_sprite</code> → draw → <code>make_4_frame_idle_animation</code> → <code>validate_sprite_for_game_export</code> → <code>export_game_asset_bundle</code>.</sub>
+  <sub><code>create_rpg_item_sheet</code> lays out named item slices;
+  <code>make_8_direction_walk_template</code> generates the frames <strong>and one
+  animation tag per direction</strong>, ready to draw into.</sub>
 </p>
 
 ```text
-validate_sprite_for_game_export → passed ✅  (width, height, color_mode, min_frames, required_tags)
-export_game_asset_bundle        → hero.png · hero.gif · hero_sheet.png (+JSON) · hero_idle.gif · manifest.json
+validate_sprite_for_game_export -> passed  (width, height, color_mode, min_frames, required_tags)
+export_game_asset_bundle        -> hero.png, hero.gif, hero_sheet.png (+JSON), hero_idle.gif, manifest.json
 ```
 
 <details>
 <summary>More examples</summary>
 
 <p align="center">
+  <img src="docs/assets/showcase/medium_walk8.gif" width="110" alt="Animated sprite cycling through eight facing directions">
+  &nbsp;
   <img src="assets/slime.gif" width="110" alt="Animated bouncing slime">
   &nbsp;
   <img src="assets/skeleton.png" width="110" alt="Pixel-art skeleton">
   &nbsp;
-  <img src="assets/tilemap_scene.png" width="200" alt="Tilemap scene with grass, dirt, water, and stone">
+  <img src="assets/tilemap_scene.png" width="180" alt="Tilemap scene with grass, dirt, water, and stone">
   &nbsp;
-  <img src="assets/ramp.png" width="200" alt="Hue-shifted shading ramp from generate_ramp">
+  <img src="assets/ramp.png" width="180" alt="Hue-shifted shading ramp from generate_ramp">
 </p>
 <p align="center">
-  <sub>A bouncing slime, a skeleton, a tilemap scene from 4 painted tiles, and a hue-shifted <code>generate_ramp</code> palette.</sub>
+  <sub>The eight-direction template playing through, a bouncing slime, a skeleton, a
+  tilemap scene built from four painted tiles, and a hue-shifted <code>generate_ramp</code>
+  palette.</sub>
 </p>
 
 </details>
@@ -116,7 +172,7 @@ export_game_asset_bundle        → hero.png · hero.gif · hero_sheet.png (+JSO
 
 - **Aseprite 1.3+** (the scripting API). The Steam and standalone builds both work.
 - **Python 3.10+**
-- **[uv](https://docs.astral.sh/uv/)** (recommended) — or any PEP 517 installer.
+- **[uv](https://docs.astral.sh/uv/)** (recommended), or any PEP 517 installer.
 
 ## Install
 
@@ -155,7 +211,7 @@ access the local user has. Bind to loopback, or put authentication in front of i
 
 On this machine Aseprite was detected at
 `C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe`, so `ASEPRITE_PATH`
-is not strictly required — but setting it explicitly is the most reliable.
+is not strictly required, but setting it explicitly is the most reliable.
 
 ---
 
@@ -189,7 +245,7 @@ claude mcp add aseprite \
 
 Add this to your client's MCP server config (e.g. `claude_desktop_config.json`). A
 ready-to-copy template lives in [`mcp-config.example.json`](mcp-config.example.json)
-(Windows-style paths shown — adjust for your OS):
+(Windows-style paths shown; adjust for your OS):
 
 ```json
 {
@@ -218,8 +274,8 @@ like.
 
 Beyond the low-level tools, a few **workflow tools** scaffold a whole asset in one call
 and return a manifest (created files, paths, frames, tags, dimensions, and suggested next
-steps) so an agent can keep going. They compose the low-level tools — deterministic
-scaffolding, no AI generation.
+steps) so an agent can keep going. They compose the low-level tools:
+deterministic scaffolding, no AI generation.
 
 | Tool | Description |
 | --- | --- |
@@ -228,20 +284,20 @@ scaffolding, no AI generation.
 | `create_tileset_project` | Canvas + tilemap layer + a starter tileset (grass/dirt/water/stone, or your own). |
 | `create_icon_set` | Grid sheet of icon cells, each a placeholder inside a named slice (`icon_0`, …). |
 | `create_rpg_item_sheet` | Grid sheet with a named slice per item (sword/shield/potion/…). |
-| `make_8_direction_walk_template` | 8-direction walk template — frames + one tag per direction (N/NE/E/…). |
+| `make_8_direction_walk_template` | 8-direction walk template: frames + one tag per direction (N/NE/E/…). |
 | `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. |
-| `export_godot_spriteframes` | Godot 4 `SpriteFrames` resource (.tres) + packed sheet — one animation per tag, timed from frame durations. |
-| `export_slice_metadata` | Engine-agnostic `<sprite>_slices.json` — hitbox/hurtbox/collision/attach/9-slice/pivot from slice names or JSON data. |
+| `export_godot_spriteframes` | Godot 4 `SpriteFrames` resource (.tres) + packed sheet; one animation per tag, timed from frame durations. |
+| `export_slice_metadata` | Engine-agnostic `<sprite>_slices.json`: hitbox/hurtbox/collision/attach/9-slice/pivot from slice names or JSON data. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
-| `validate_asset_spec` / `plan_asset_spec` / `build_asset_from_spec` | Describe an asset once (`aseprite_mcp.asset_spec.v1`), then validate it, dry-run the plan, or build it (structure only — canvas/layers/frames/tags/slices/palette + exports; you draw the art). |
+| `validate_asset_spec` / `plan_asset_spec` / `build_asset_from_spec` | Describe an asset once (`aseprite_mcp.asset_spec.v1`), then validate it, dry-run the plan, or build it (structure only, canvas/layers/frames/tags/slices/palette + exports; you draw the art). |
 
 > "Make me an idle-animated hero and a game-ready bundle."
 
-1. `create_character_sprite("hero", 32, 32, base_color="#3878c8")` — layers + palette + placeholder.
+1. `create_character_sprite("hero", 32, 32, base_color="#3878c8")` builds layers, palette and a placeholder.
 2. Draw the character on the `body` / `details` layers (low-level tools).
-3. `make_4_frame_idle_animation("hero.aseprite")` — 4-frame loop tagged `idle`.
-4. `validate_sprite_for_game_export("hero.aseprite", expected_width=32, required_tags=["idle"])` — confirm it's game-ready.
-5. `export_game_asset_bundle("hero.aseprite", scale=8)` — PNG/GIF/sheet+JSON/manifest in `hero_bundle/`.
+3. `make_4_frame_idle_animation("hero.aseprite")` makes a 4-frame loop tagged `idle`.
+4. `validate_sprite_for_game_export("hero.aseprite", expected_width=32, required_tags=["idle"])` confirms it is game-ready.
+5. `export_game_asset_bundle("hero.aseprite", scale=8)` writes PNG/GIF/sheet+JSON/manifest into `hero_bundle/`.
 
 ### Workflow manifest contract
 
@@ -271,7 +327,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 ## Batch operations
 
 `apply_operations` applies a list of edits to one sprite in a **single Aseprite process**,
-**atomically** — open once → run every op inside one transaction → save only if all
+**atomically**: open once → run every op inside one transaction → save only if all
 succeed. This collapses multi-launch agent flows (add layer → draw → add frame → tag)
 into one fast, all-or-nothing call. Pass `dry_run=true` to validate the op list **without
 launching Aseprite**.
@@ -296,7 +352,7 @@ slice add/remove · replace_color.
 ## Tool catalogue
 
 Relative filenames resolve inside the workspace (absolute paths require
-`ASEPRITE_MCP_ALLOW_ABSOLUTE=1` — see [Security](#security)).
+`ASEPRITE_MCP_ALLOW_ABSOLUTE=1`; see [Security](#security)).
 Frames and palette-aware operations are **1-based** for frames, **0-based** for palette
 indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name
 (`black`, `white`, `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `transparent`, …).
@@ -504,7 +560,7 @@ The server edits files **headlessly**, but you can watch the work in the real As
 window. Call `open_in_editor("sprite.aseprite")` and Aseprite opens it in a normal,
 non-blocking window. As the agent keeps saving edits with the other tools, Aseprite
 detects the on-disk change and offers to reload (or reloads automatically, depending on
-your Aseprite preferences) — so edits appear without re-opening.
+your Aseprite preferences), so edits appear without re-opening.
 
 **What this is and isn't:** Aseprite's Lua scripting sandbox has no networking or timers,
 so the server can't *stream* a live canvas into the GUI frame-by-frame. The companion view
@@ -594,7 +650,7 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
   disables the timeout.
 - **No shell, no injection.** Aseprite is invoked with list-form arguments (never a
   shell), and every user value is passed into generated Lua through an escaped `ARG`
-  table — user input is never concatenated into Lua source.
+  table: user input is never concatenated into Lua source.
 - **Bring your own Aseprite.** The server only runs the Aseprite binary you point it at.
 
 Run `health_check` to confirm the configuration (Aseprite path, workspace, sandbox state).
@@ -610,7 +666,7 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
   layer on top of this without changing the tool API.
 - Use a `.aseprite`/`.ase` extension to keep layers, frames, and tags editable. Saving to
   `.png`/`.gif` flattens.
-- `get_pixels` is capped at 4096 px (e.g. 64×64) per call — read in tiles for larger areas.
+- `get_pixels` is capped at 4096 px (e.g. 64×64) per call; read in tiles for larger areas.
 - Anti-aliasing (`antialias=True`) only applies to RGB sprites; it's ignored on
   indexed/gray. Tilemaps and reference layers require **Aseprite 1.3+**.
 
@@ -620,7 +676,7 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 - **Nothing happens / permission denied on save.** Ensure the workspace path is writable.
   Relative filenames go under `ASEPRITE_MCP_WORKSPACE` (default `<repo>/workspace`).
 - **Timeouts** on big operations: raise `ASEPRITE_MCP_TIMEOUT` (seconds).
-- **A tool errors with a Lua message.** The message is surfaced verbatim from Aseprite —
+- **A tool errors with a Lua message.** The message is surfaced verbatim from Aseprite,
   it usually names the bad argument (e.g. a missing layer/frame).
 - **Tests all skip.** That's expected when Aseprite isn't installed/found; set
   `ASEPRITE_PATH` to run them for real.

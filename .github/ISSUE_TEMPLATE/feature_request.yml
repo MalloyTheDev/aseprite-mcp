@@ -1,0 +1,30 @@
+name: Feature request
+description: A tool or a behaviour that is missing
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        The pixel-art or pipeline problem, not the API you imagine for it. What does the
+        work look like today, and where does it break down?
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: What would the tool look like?
+      description: A signature and an example call, if you have one in mind.
+      render: python
+    validations:
+      required: false
+  - type: textarea
+    id: verification
+    attributes:
+      label: How would you know it worked?
+      description: >
+        What would you measure or look at to say the result is correct? This server
+        prefers tools whose output can be checked rather than eyeballed.
+    validations:
+      required: false
