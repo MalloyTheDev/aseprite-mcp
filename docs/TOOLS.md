@@ -1,13 +1,13 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **134 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **135 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
 ## Contents
 
 - [Sprite lifecycle](#sprite-lifecycle) (10)
-- [Inspection & preview](#inspection--preview) (4)
+- [Inspection & preview](#inspection--preview) (5)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (5)
 - [Animation (motion, timing, checks)](#animation-motion-timing-checks) (3)
@@ -184,6 +184,41 @@ Auto-crop the canvas to the bounding box of all non-transparent content
 
 
 ## Inspection & preview
+
+### `assess_sprite`
+
+Measure the drawing itself and say what is worth fixing.
+
+`get_sprite_info` says what a sprite contains and `render_preview` returns a picture
+a text-only model cannot read. This answers the question in between: is the art any
+good, in the ways that can be counted.
+
+Reports how many colours are in use and roughly how many ramps they form, pixels with
+no neighbour of their own colour (noise), jagged corners on diagonals, the drawn
+bounding box, how much of the canvas it fills, whether it sits centred, and how far
+the silhouette is from its own mirror. Each measurement that is worth acting on comes
+back with a line saying why, so the numbers do not have to be interpreted.
+
+Args:
+    ramp: Declare the ramp the art should be on and the report adds palette
+        conformance: the fraction of drawn pixels sitting exactly on it. This is the
+        measurement that separates shading from filtering, and it is omitted rather
+        than reported as a meaningless 1.0 when no ramp is given.
+    check_tiling: For a tile, also measure how much worse the wrapping edge looks
+        than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
+    layer: Measure one layer instead of the flattened frame.
+
+Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
+the measurements, so this is cheap to call after every pass.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `frame` | integer | no | 1 |
+| `layer` | string | no | _none_ |
+| `ramp` | array<string> | no | _none_ |
+| `check_tiling` | boolean | no | False |
+
 
 ### `get_pixels`
 

@@ -279,6 +279,7 @@ def score(grid: Grid, ramp: list[str] | None = None) -> dict:
     box = bounding_box(grid)
     result = {
         "colors": distinct_colors(grid),
+        "drawn_pixels": len(_opaque_cells(grid)),
         "ramps": ramp_count(grid),
         "isolated_pixels": isolated_pixels(grid),
         "jaggy_corners": jaggy_corners(grid),
@@ -290,3 +291,69 @@ def score(grid: Grid, ramp: list[str] | None = None) -> dict:
     if ramp:
         result["palette_conformance"] = round(palette_conformance(grid, ramp), 3)
     return result
+
+# --------------------------------------------------------------------------- readings
+# A number is not a verdict. These turn each measurement into the sentence a pixel artist
+# would say about it, with the thresholds written down rather than implied, because the
+# caller cannot see the sprite and "isolated_pixels: 14" means nothing on its own.
+
+# Under a third of the canvas drawn on usually means the art is lost in it, which matters
+# because a sprite is normally exported at its canvas size.
+SPARSE_CANVAS = 0.3
+# A handful of lone pixels is texture; more than this reads as noise at any zoom.
+NOISY_ISOLATED = 8
+# Corners where two diagonal runs meet, as a share of the drawn box's half-perimeter. A
+# raster circle is made of steps and always scores some; the threshold is relative so a
+# 28px disc does not get told off for being round.
+JAGGY_SHARE = 0.6
+# Asymmetry is only worth a word when the art is *nearly* symmetric, which reads as a
+# mistake. Wildly asymmetric art is just art, and saying so on every sprite is noise.
+NEARLY_SYMMETRIC = 0.12
+
+
+def readings(metrics: dict, *, width: int, height: int) -> list[str]:
+    """One line per measurement worth acting on, and nothing for the ones that are fine."""
+    out: list[str] = []
+    box = metrics.get("bbox")
+    if box is None:
+        out.append("Nothing is drawn on this frame.")
+        return out
+
+    usage = metrics.get("canvas_usage", 0.0)
+    if usage < SPARSE_CANVAS:
+        drawn_w = box[2] - box[0] + 1
+        drawn_h = box[3] - box[1] + 1
+        out.append(
+            f"The art fills {usage:.0%} of the canvas ({drawn_w}x{drawn_h} of "
+            f"{width}x{height}). trim_sprite or resize_canvas would centre it."
+        )
+    if not metrics.get("centred", True):
+        out.append("The drawn content is off-centre, which shows up when the sprite is "
+                   "scaled or flipped.")
+    isolated = metrics.get("isolated_pixels", 0)
+    if isolated > NOISY_ISOLATED:
+        out.append(f"{isolated} pixels have no neighbour of their own colour, which reads "
+                   "as noise rather than as texture.")
+    jaggies = metrics.get("jaggy_corners", 0)
+    drawn_w, drawn_h = box[2] - box[0] + 1, box[3] - box[1] + 1
+    if jaggies > JAGGY_SHARE * (drawn_w + drawn_h):
+        out.append(f"{jaggies} jagged corners across a {drawn_w}x{drawn_h} shape: the "
+                   "diagonals are stepping rather than running evenly.")
+    conformance = metrics.get("palette_conformance")
+    if conformance is not None and conformance < 1.0:
+        out.append(f"{1 - conformance:.0%} of the drawn pixels are off the declared ramp. "
+                   "shift_along_ramp and gradient_map put pixels back on it; a brightness "
+                   "or hue filter is what usually takes them off.")
+    colours = metrics.get("colors", 0)
+    ramps = metrics.get("ramps", 0)
+    if ramps and colours > ramps * 8:
+        out.append(f"{colours} colours across about {ramps} ramps, which is more than a "
+                   "pixel-art palette usually carries.")
+    asymmetry = metrics.get("silhouette_asymmetry", 0)
+    # Against the painted pixels, not the box: a small sprite with a few stray dots has a
+    # large box and is not nearly anything.
+    drawn = metrics.get("drawn_pixels", drawn_w * drawn_h)
+    if 0 < asymmetry <= NEARLY_SYMMETRIC * drawn:
+        out.append(f"Nearly symmetric, but {asymmetry} pixels differ from their horizontal "
+                   "mirror. If that was meant to be symmetric, mirror_layer fixes it.")
+    return out

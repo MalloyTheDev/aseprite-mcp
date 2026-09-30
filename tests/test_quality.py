@@ -131,3 +131,81 @@ def test_score_omits_palette_conformance_when_no_ramp_was_declared():
     g = grid([".aa.", ".aa."], RED)
     assert "palette_conformance" not in quality.score(g)
     assert "palette_conformance" in quality.score(g, ["#ff0000ff"])
+
+
+# ------------------------------------------------------------------------ readings
+# A number is not a verdict, and the caller cannot see the sprite. These check the
+# reading is produced when it should be and, more importantly, kept quiet when it
+# should not: a report that comments on every sprite is one nobody reads.
+
+
+def _grid(width: int, height: int, points) -> quality.Grid:
+    """A blank canvas with the given (x, y, colour) pixels painted on it."""
+    canvas = [[T for _ in range(width)] for _ in range(height)]
+    for x, y, colour in points:
+        canvas[y][x] = colour
+    return canvas
+
+
+def _metrics(picture, ramp=None):
+    return quality.score(picture, ramp)
+
+
+def test_an_empty_frame_says_so_and_stops():
+    notes = quality.readings(_metrics(_grid(4, 4, [])), width=4, height=4)
+    assert notes == ["Nothing is drawn on this frame."]
+
+
+def test_art_lost_in_its_canvas_is_reported_with_both_sizes():
+    grid = _grid(32, 32, [(x, y, "#ffffffff") for x in range(4) for y in range(4)])
+    notes = quality.readings(_metrics(grid), width=32, height=32)
+    assert any("4x4 of 32x32" in line for line in notes)
+    assert any("trim_sprite" in line for line in notes)
+
+
+def test_a_sprite_that_fills_its_canvas_draws_no_comment_about_size():
+    grid = _grid(8, 8, [(x, y, "#ffffffff") for x in range(8) for y in range(8)])
+    notes = quality.readings(_metrics(grid), width=8, height=8)
+    assert not any("canvas" in line for line in notes)
+
+
+def test_off_ramp_pixels_name_the_tools_that_put_them_back():
+    ramp = ["#202040ff", "#4060a0ff", "#80c0ffff"]
+    grid = _grid(8, 8, [(x, 0, "#ff00ffff") for x in range(8)])
+    notes = quality.readings(_metrics(grid, ramp), width=8, height=8)
+    assert any("off the declared ramp" in line for line in notes)
+    assert any("shift_along_ramp" in line for line in notes)
+
+
+def test_a_round_shape_is_not_told_off_for_being_round():
+    """A raster circle is made of steps. The threshold is a share of the shape's size,
+    so stepping that is inherent to the resolution stays quiet."""
+    points = [(x, y, "#ffffffff") for x in range(24) for y in range(24)
+              if ((x - 11.5) / 12) ** 2 + ((y - 11.5) / 12) ** 2 <= 1.0]
+    notes = quality.readings(_metrics(_grid(24, 24, points)), width=24, height=24)
+    assert not any("jagged" in line for line in notes)
+
+
+def test_near_symmetry_is_worth_a_word_and_gross_asymmetry_is_not():
+    symmetric = [(x, y, "#ffffffff") for x in range(4, 12) for y in range(4, 12)]
+    nearly = _grid(16, 16, [*symmetric, (2, 5, "#ffffffff")])
+    assert any("Nearly symmetric" in line
+               for line in quality.readings(_metrics(nearly), width=16, height=16))
+
+    lopsided = _grid(16, 16, [(x, y, "#ffffffff") for x in range(0, 6) for y in range(16)])
+    assert not any("symmetric" in line
+                   for line in quality.readings(_metrics(lopsided), width=16, height=16))
+
+
+def test_clean_art_produces_no_readings_at_all():
+    """The report has to be able to say nothing, or it says nothing worth reading."""
+    points = [(x, y, "#4060a0ff") for x in range(3, 13) for y in range(3, 13)]
+    notes = quality.readings(_metrics(_grid(16, 16, points), ["#4060a0ff"]),
+                             width=16, height=16)
+    assert notes == []
+
+
+def test_drawn_pixels_counts_the_painted_ones_not_the_box():
+    grid = _grid(16, 16, [(0, 0, "#ffffffff"), (15, 15, "#ffffffff")])
+    assert quality.score(grid)["drawn_pixels"] == 2
+    assert quality.score(grid)["canvas_usage"] == 1.0

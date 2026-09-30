@@ -56,6 +56,13 @@ MAX_OUTLINE_THICKNESS = 64
 # 4,096 is smooth for any curve that fits in a sprite (the default is 32).
 MAX_CURVE_STEPS = 4_096
 
+# --- Assessment ------------------------------------------------------------ #
+# Pixels one `assess_sprite` call will measure. The metrics are O(pixels) in Python and
+# the grid is read in a single launch, so the cap is about the caller's patience rather
+# than about correctness: a 1024x1024 frame is already far past any sprite, and a photo
+# imported at full size is the case that would otherwise stall for a minute.
+MAX_ASSESS_PIXELS = 1_048_576
+
 # --- Animation ------------------------------------------------------------- #
 # Frames one call may move a cel across. The distribution is computed in Python and
 # applied inside a single transaction, so the work is one launch whatever the count; the
