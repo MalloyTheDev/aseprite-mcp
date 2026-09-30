@@ -33,7 +33,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **137 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **139 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -77,7 +77,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 137 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 139 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -526,6 +526,8 @@ and every result that touched pixels reports `selection_applied`.
 | `extract_palette` | Collect the unique colours used in a sprite/image. |
 | `sort_palette` | Sort by hue/luminance/saturation/value (remaps indexed pixels). |
 | `generate_ramp` | Build a hue-shifted shading ramp from a base colour. |
+| `ramp_between` | Build a ramp from its two ends, the cool shadow and the warm highlight, interpolated in Oklab so the middle is a blend rather than a hue rotation. |
+| `ramp_from_art` | Recover the ramp a sprite is already painted with, ordered dark to light, with the share of the art each step covers. |
 
 ### Transform & export
 | Tool | Description |

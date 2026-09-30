@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **137 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **139 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -21,7 +21,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (2)
-- [Palette](#palette) (10)
+- [Palette](#palette) (12)
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (10)
@@ -2021,6 +2021,64 @@ Load a palette from a file (.gpl, .pal, .aseprite, .png, ...) and apply it.
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `palette_file` | string | yes |  |
+
+
+### `ramp_between`
+
+Build a ramp from its two ends, which is how a ramp is usually decided.
+
+`generate_ramp` grows a ramp outward from one base colour, so reaching a particular
+shadow and a particular highlight means guessing at `hue_shift` until the ends land
+near what was wanted. This takes the ends directly: pick the cool shadow and the warm
+highlight, and the middle is interpolated between them.
+
+Both ends come back **exactly** as given. They were chosen, and a ramp whose endpoints
+are approximations of the caller's own colours is not the ramp that was asked for.
+
+Args:
+    easing: "perceptual" (the default) walks the straight line between the ends in
+        Oklab, so the middle steps are evenly spaced to the eye and the ramp keeps its
+        hue. "linear" is the naive sRGB blend, which darkens and greys the middle.
+    filename, apply: As `generate_ramp`. "append" or "replace" writes the ramp into
+        that sprite's palette.
+
+Neither mode rotates hue. Interpolating hue between distant colours is what turns a
+blue-to-cream ramp magenta in the middle: at that distance both ways round the wheel
+are equally short, and neither is the blend anybody wanted.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `shadow_color` | string | yes |  |
+| `light_color` | string | yes |  |
+| `steps` | integer | no | 5 |
+| `easing` | string | no | perceptual |
+| `filename` | string | no | _none_ |
+| `apply` | string | no | none |
+
+
+### `ramp_from_art`
+
+Recover the ramp an existing sprite is painted with.
+
+`extract_palette` reports the colours a sprite uses as a set. A set is not a ramp: the
+shading tools need them ordered dark to light, and an agent asked to add to somebody
+else's sprite has no way to get that order today.
+
+The colours are grouped by luminance into `steps` bands, and each band is represented
+by the colour most of its pixels use, so every entry is a colour that is actually in
+the art and can be matched against it. `coverage` says what share of the drawn pixels
+each step covers, which is how to tell a real ramp from one step plus four stragglers.
+
+Says so when the colours are not a ramp: art spanning many hues is several materials
+sharing a sprite, and comes back with a warning rather than with a plausible-looking
+five colours. Scope the read with `layer` when that happens.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `steps` | integer | no | 5 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
 
 
 ### `resize_palette`

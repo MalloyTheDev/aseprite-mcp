@@ -7,6 +7,20 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`ramp_between` and `ramp_from_art`.** Every shading tool takes a `ramp`, and the only
+  way to get one was `generate_ramp`, which grows a ramp outward from a single base
+  colour: reaching a particular shadow and a particular highlight meant guessing at
+  `hue_shift` until the ends landed near what was wanted. `ramp_between` takes the ends
+  directly and returns them exactly as given. The middle is interpolated in Oklab, because
+  interpolating hue between distant colours is what turns a blue-to-cream ramp magenta in
+  the middle: at that distance both ways round the wheel are equally short and neither is
+  a blend. `ramp_from_art` recovers the ramp a sprite is already painted with, which
+  `extract_palette` could not do because a set of colours is not a ramp: the colours are
+  grouped by luminance, each band is represented by the colour most of its pixels use, and
+  `coverage` says what share of the art each step carries. It says when the art is not a
+  ramp at all, by looking for colours of the same brightness with very different hues,
+  which is two materials sharing a sprite; spread *along* a ramp is not a signal, since a
+  cool shadow to a warm highlight legitimately crosses half the wheel. (139 tools.)
 - **`gradient_map`** - the tool that brings art onto a ramp at all. Every other shading
   tool starts from art that is already on one: `shift_along_ramp` moves pixels between
   steps they belong to, and `shade_region_by_light` shades a region painted in one of the
