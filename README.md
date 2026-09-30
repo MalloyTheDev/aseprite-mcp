@@ -33,7 +33,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **139 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **141 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -77,7 +77,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 139 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 141 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -411,6 +411,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `add_frame` | Append a frame (empty, or a copy of another). |
 | `duplicate_frame` · `remove_frame` | Duplicate / delete a frame. |
 | `set_frame_duration` · `set_all_frame_durations` | Set per-frame / uniform durations (ms). |
+| `reverse_frames` · `move_frame` | Turn a run of frames round, or move one frame to another position. Cels on every layer, durations and cel links all travel with the frame. |
 
 ### Cels (a layer's image at a frame)
 | Tool | Description |
@@ -423,7 +424,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 ### Animation tags
 | Tool | Description |
 | --- | --- |
-| `add_tag` | Tag a frame range with a name, direction, colour. |
+| `add_tag` | Tag a frame range with a name, direction, colour, and a repeat count (0 means forever, which is how a cycle is marked). |
 | `set_tag` · `remove_tag` | Edit / delete a tag. |
 
 ### Animation (motion, timing, checks)

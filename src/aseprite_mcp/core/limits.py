@@ -64,6 +64,10 @@ MAX_CURVE_STEPS = 4_096
 MAX_ASSESS_PIXELS = 1_048_576
 
 # --- Animation ------------------------------------------------------------- #
+# How many times a tag may say it plays. Aseprite stores the count in 16 bits and treats
+# 0 as "forever", which is how a cycle is marked; the cap is the format's, not ours.
+MAX_TAG_REPEATS = 65_535
+
 # Frames one call may move a cel across. The distribution is computed in Python and
 # applied inside a single transaction, so the work is one launch whatever the count; the
 # cap is here because the frame list comes from the caller, and a request for more frames
