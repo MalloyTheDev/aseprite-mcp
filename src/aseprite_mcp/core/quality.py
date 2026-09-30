@@ -105,6 +105,11 @@ def isolated_pixels(grid: Grid) -> int:
 
     Reads as noise or dirt at sprite scale. A deliberate single-pixel highlight counts
     here too, so a small non-zero number is normal and a jump is the signal.
+
+    Orthogonal on purpose: a checkerboard dither is diagonally connected and nothing
+    else, so counting diagonals would score a dithered band as clean. `remove_stray_pixels`
+    takes the opposite view for the same reason, replacing only pixels with no neighbour
+    of their colour in any of the eight directions, so it cannot eat a dither.
     """
     lookup = {(x, y): px for x, y, px in _opaque_cells(grid)}
     count = 0

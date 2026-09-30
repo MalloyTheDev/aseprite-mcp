@@ -49,6 +49,9 @@ px(disc(13, 9, 2, 2) | disc(19, 9, 2, 2), DARK)      # eye sockets
 px({(16, 11), (16, 12)}, DARK)                        # nose
 px({(x, 14) for x in range(12, 21, 2)}, DARK)         # teeth
 
+# The teeth and eye sockets are deliberately lone dark pixels, so they are named
+# rather than cleaned away with the shading strays.
+effects.remove_stray_pixels(NAME, protect=[DARK])
 effects.add_outline(NAME, DARK, thickness=1, connectivity=8, where="outside")
 export.export_png(NAME, "skeleton.png", scale=8, overwrite=True)
 print("wrote skeleton.png")

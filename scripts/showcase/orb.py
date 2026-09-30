@@ -3,7 +3,7 @@ import pathlib
 
 from PIL import Image
 
-from aseprite_mcp.tools import drawing, export, palette, shading, sprite
+from aseprite_mcp.tools import drawing, effects, export, palette, shading, sprite
 
 RAMP = palette.generate_ramp("#5a7fd4", steps=5, hue_shift=-40.0,
                              saturation_shift=-18.0, light_range=0.74)["colors"]
@@ -28,6 +28,9 @@ full = disc("orb_3_full.aseprite")
 shading.shade_region_by_light(full, RAMP, light_angle=125, light_z=0.55, bulge=1.0,
                               ambient=0.30, rim=0.25)
 shading.dither_band(full, RAMP, from_step=1, to_step=2, pattern="bayer4", width=2)
+# Strays first, outline second. The dithered band survives: its pixels have
+# diagonal neighbours of their own colour, which is what makes it a pattern.
+effects.remove_stray_pixels(full)
 shading.outline_smart(full, RAMP, mode="colormatched", darken_steps=2, light_angle=125)
 
 stages = []

@@ -15,19 +15,28 @@ STONE = ["#4a4f5c", "#636b7a", "#7d8695", "#9aa3b2"]
 rng = random.Random(7)
 
 
-def scatter(rows, colours, weights, seed_offset=0):
-    """Speckles that do not repeat across the tile's seam."""
+def scatter(rows, colours, weights, seed_offset=0, block=2):
+    """Variation in small blocks rather than per pixel.
+
+    A different colour chosen for every pixel independently is static, not texture: at
+    1x it reads as dirt and assess_sprite counts nearly every pixel as isolated. Picking
+    per 2x2 block keeps the variation and gives each patch neighbours of its own colour.
+    """
     local = random.Random(11 + seed_offset)
     out = []
-    for y in range(TS):
-        for x in range(TS):
+    for by in range(0, TS, block):
+        for bx in range(0, TS, block):
             roll = local.random()
             total = 0.0
+            chosen = colours[-1]
             for colour, weight in zip(colours, weights, strict=True):
                 total += weight
                 if roll < total:
-                    out.append({"x": x, "y": y, "color": colour})
+                    chosen = colour
                     break
+            for y in range(by, min(by + block, TS)):
+                for x in range(bx, min(bx + block, TS)):
+                    out.append({"x": x, "y": y, "color": chosen})
     return out
 
 

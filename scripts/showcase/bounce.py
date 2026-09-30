@@ -5,6 +5,7 @@ from aseprite_mcp.tools import (
     animation,
     cels,
     drawing,
+    effects,
     export,
     frames,
     layers,
@@ -35,6 +36,7 @@ drawing.draw_ellipse_in_box(NAME, BX, GROUND - 2, BALL, 4, SHADOW, filled=True, 
 drawing.draw_ellipse_in_box(NAME, BX, BY, BALL, BALL, RAMP[2], filled=True, layer="ball")
 shading.shade_region_by_light(NAME, RAMP, light_angle=125, light_z=0.55,
                               ambient=0.32, rim=0.2, layer="ball")
+effects.remove_stray_pixels(NAME, layer="ball")
 shading.outline_smart(NAME, RAMP, darken_steps=2, light_angle=125, layer="ball")
 
 for _ in range(FRAMES - 1):

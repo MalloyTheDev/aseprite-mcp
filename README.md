@@ -33,7 +33,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **135 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **136 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -51,7 +51,7 @@ Aseprite GUI.
   neighbour of their own colour, jagged diagonals, how much of the canvas the art fills,
   whether it is centred, and what fraction of it sits exactly on a declared ramp. An agent
   cannot look at its own sprite, so every fault comes back as a line saying what it is and
-  which tool puts it right.
+  which tool puts it right, and `remove_stray_pixels` is the one that answers for noise.
 - **Animation you can check** - `offset_cels` moves a cel along a line or an arc across
   any number of frames in one launch, with the spacing distributed so it reads as speed
   rather than as a limp; `apply_timing_curve` gives the cycle a shape in time by setting
@@ -76,7 +76,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 135 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 136 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -491,6 +491,7 @@ and every result that touched pixels reports `selection_applied`.
 | `add_outline` | Pixel outline around art (outside/inside, 4/8-connectivity, thickness). |
 | `add_drop_shadow` | Hard drop shadow on a new layer beneath the art. |
 | `replace_color` | Swap a colour (with per-channel tolerance). |
+| `remove_stray_pixels` | Replace pixels with no neighbour of their own colour by the colour around them: the dirt a shading pass leaves, without touching a dither or introducing a colour. |
 | `invert_colors` | Invert RGB (alpha preserved). |
 | `adjust_brightness_contrast` · `adjust_hue_saturation` · `desaturate` | Colour grading. |
 
