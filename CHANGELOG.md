@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`link_cels` / `unlink_cels`, and `get_cel` now reports links.** A linked cel is one
+  image appearing on several frames: editing any of them edits all of them, and the file
+  stores the image once instead of once per frame. It is in every Aseprite file and how a
+  held pose is actually drawn, and none of it was reachable from here. `get_cel` answers
+  with `linked` and `linked_with`, so a held pose is visible as what it is rather than as
+  frames that happen to look alike; the frames are reported rather than Aseprite's image
+  ids, which are assigned per open and would look like state a caller could keep.
+  `link_cels` keeps the first listed frame's image and drops what the others were showing,
+  which is what linking means, so it is marked destructive and says so in its own
+  description. (134 tools.)
 - **`draw_ellipse_in_box`** - there was no way to draw an even-diameter circle. Every
   ellipse came from a centre and radii, so it was always an odd 2*radius+1 across: a disc
   could not be centred on a 32x32 canvas, and a circle could not line up with an
