@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from ..app import mcp
+from ..core import ramps
 from ..core.errors import ValidationFailed
 from ..core.limits import MAX_COLOR_LIST_LENGTH, check_count, check_list_length
+from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -361,33 +363,45 @@ def generate_ramp(
         colors.append(f"#{round(rr * 255):02x}{round(gg * 255):02x}{round(bb * 255):02x}")
 
     result = {"steps": steps, "colors": colors}
-    if apply != "none":
-        if apply not in ("append", "replace"):
-            raise ValidationFailed('apply must be "none", "append", or "replace"')
-        if not filename:
-            raise ValidationFailed("filename is required when apply is not 'none'.")
-        parsed = [parse_color(c) for c in colors]
-        args = {
-            "src": lua_path(resolve_path(filename)),
-            "colors": parsed, "mode": apply,
-        }
-        body = """
-        local spr = open_sprite(ARG.src)
-        local pal = spr.palettes[1]
-        if ARG.mode == "replace" then
-          local np = Palette(#ARG.colors)
-          for i, c in ipairs(ARG.colors) do np:setColor(i - 1, mkcolor(c)) end
-          spr:setPalette(np)
-        else
-          local n = #pal
-          pal:resize(n + #ARG.colors)
-          for i, c in ipairs(ARG.colors) do pal:setColor(n + i - 1, mkcolor(c)) end
-        end
-        save_sprite(spr)
-        RESULT = { ok = true, size = #spr.palettes[1] }
-        """
-        result["applied"] = run_lua(body, args)
+    applied = _apply_palette(filename, colors, apply)
+    if applied is not None:
+        result["applied"] = applied
     return result
+
+
+def _apply_palette(filename: str | None, colors: list[str], apply: str) -> dict | None:
+    """Write a generated ramp into a sprite's palette, or do nothing.
+
+    Shared by the ramp builders: they differ in how they arrive at the colours and not at
+    all in what "apply" means.
+    """
+    if apply == "none":
+        return None
+    if apply not in ("append", "replace"):
+        raise ValidationFailed('apply must be "none", "append", or "replace"')
+    if not filename:
+        raise ValidationFailed("filename is required when apply is not 'none'.")
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "colors": [parse_color(c) for c in colors],
+        "mode": apply,
+    }
+    body = """
+    local spr = open_sprite(ARG.src)
+    local pal = spr.palettes[1]
+    if ARG.mode == "replace" then
+      local np = Palette(#ARG.colors)
+      for i, c in ipairs(ARG.colors) do np:setColor(i - 1, mkcolor(c)) end
+      spr:setPalette(np)
+    else
+      local n = #pal
+      pal:resize(n + #ARG.colors)
+      for i, c in ipairs(ARG.colors) do pal:setColor(n + i - 1, mkcolor(c)) end
+    end
+    save_sprite(spr)
+    RESULT = { ok = true, size = #spr.palettes[1] }
+    """
+    return run_lua(body, args)
 
 
 @mcp.tool()
@@ -404,3 +418,134 @@ def set_transparent_color(filename: str, index: int) -> dict:
     RESULT = { ok = true, transparentColor = spr.transparentColor }
     """
     return run_lua(body, args)
+
+
+@mcp.tool()
+def ramp_between(
+    shadow_color: str,
+    light_color: str,
+    steps: int = 5,
+    easing: str = "perceptual",
+    filename: str | None = None,
+    apply: str = "none",
+) -> dict:
+    """Build a ramp from its two ends, which is how a ramp is usually decided.
+
+    `generate_ramp` grows a ramp outward from one base colour, so reaching a particular
+    shadow and a particular highlight means guessing at `hue_shift` until the ends land
+    near what was wanted. This takes the ends directly: pick the cool shadow and the warm
+    highlight, and the middle is interpolated between them.
+
+    Both ends come back **exactly** as given. They were chosen, and a ramp whose endpoints
+    are approximations of the caller's own colours is not the ramp that was asked for.
+
+    Args:
+        easing: "perceptual" (the default) walks the straight line between the ends in
+            Oklab, so the middle steps are evenly spaced to the eye and the ramp keeps its
+            hue. "linear" is the naive sRGB blend, which darkens and greys the middle.
+        filename, apply: As `generate_ramp`. "append" or "replace" writes the ramp into
+            that sprite's palette.
+
+    Neither mode rotates hue. Interpolating hue between distant colours is what turns a
+    blue-to-cream ramp magenta in the middle: at that distance both ways round the wheel
+    are equally short, and neither is the blend anybody wanted.
+    """
+    parsed_shadow = parse_color(shadow_color)
+    parsed_light = parse_color(light_color)
+    steps = int(steps)
+    check_count(
+        "steps", steps, MAX_COLOR_LIST_LENGTH, minimum=2,
+        remedy=f"A ramp of more than {MAX_COLOR_LIST_LENGTH} shades exceeds a palette.",
+    )
+    if easing not in ("linear", "perceptual"):
+        raise ValidationFailed('easing must be "linear" or "perceptual".')
+
+    colors = ramps.interpolate(
+        (parsed_shadow["r"], parsed_shadow["g"], parsed_shadow["b"]),
+        (parsed_light["r"], parsed_light["g"], parsed_light["b"]),
+        steps,
+        easing,
+    )
+    result = {"steps": steps, "colors": colors}
+    applied = _apply_palette(filename, colors, apply)
+    if applied is not None:
+        result["applied"] = applied
+    return result
+
+
+@mcp.tool()
+def ramp_from_art(
+    filename: str,
+    steps: int = 5,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Recover the ramp an existing sprite is painted with.
+
+    `extract_palette` reports the colours a sprite uses as a set. A set is not a ramp: the
+    shading tools need them ordered dark to light, and an agent asked to add to somebody
+    else's sprite has no way to get that order today.
+
+    The colours are grouped by luminance into `steps` bands, and each band is represented
+    by the colour most of its pixels use, so every entry is a colour that is actually in
+    the art and can be matched against it. `coverage` says what share of the drawn pixels
+    each step covers, which is how to tell a real ramp from one step plus four stragglers.
+
+    Says so when the colours are not a ramp: art spanning many hues is several materials
+    sharing a sprite, and comes back with a warning rather than with a plausible-looking
+    five colours. Scope the read with `layer` when that happens.
+    """
+    steps = int(steps)
+    check_count(
+        "steps", steps, MAX_COLOR_LIST_LENGTH, minimum=2,
+        remedy="A ramp longer than a palette is not a ramp.",
+    )
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+    }
+    body = FRAME_GUARD_LUA + """
+    local spr = open_sprite(ARG.src)
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img
+    if ARG.layer ~= nil then
+      img = get_draw_image(spr, find_layer(spr, ARG.layer), framenum)
+    else
+      img = Image(spr.spec); img:clear(); img:drawSprite(spr, framenum)
+    end
+
+    -- A histogram rather than the pixels: the ordering work is arithmetic over colours,
+    -- and there are never many of those even when there are a great many pixels.
+    local counts, order, n = {}, {}, 0
+    for yy = 0, img.height - 1 do
+      for xx = 0, img.width - 1 do
+        local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
+        if a > 0 then
+          local hex = string.format("#%02x%02x%02x", r, g, b)
+          if counts[hex] == nil then
+            counts[hex] = 0
+            n = n + 1
+            order[n] = hex
+          end
+          counts[hex] = counts[hex] + 1
+        end
+      end
+    end
+
+    local entries = {}
+    for i, hex in ipairs(order) do entries[i] = { color = hex, count = counts[hex] } end
+    RESULT = { frame = framenum, entries = entries }
+    """
+    measured = run_lua(body, args)
+    histogram = {entry["color"]: entry["count"] for entry in measured["entries"]}
+    found = ramps.cluster_by_luminance(histogram, steps)
+    return {
+        "ok": True,
+        "frame": measured["frame"],
+        "layer": layer,
+        "colors": found["colors"],
+        "coverage": found["coverage"],
+        "distinct_colors": len(histogram),
+        "warnings": found["warnings"],
+    }
