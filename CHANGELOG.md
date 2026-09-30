@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`gradient_map`** - the tool that brings art onto a ramp at all. Every other shading
+  tool starts from art that is already on one: `shift_along_ramp` moves pixels between
+  steps they belong to, and `shade_region_by_light` shades a region painted in one of the
+  ramp's colours. Nothing handled the common starting point, which is an imported image,
+  a photo traced over, or a gradient fill with more colours than the palette wants. Each
+  pixel's luminance now picks its step, darkest to lightest, so a 64-colour gradient comes
+  out as exactly the five colours it was given and `assess_sprite` reports a palette
+  conformance of 1.0. `contrast` stretches the mapping around mid-grey and `bias` shifts
+  it, because the useful control is not which colours are used but how much of the art
+  each step takes; `dither` resolves the fraction between two steps with an ordered
+  pattern, which reads as a gradient without adding a colour. Alpha is carried through, so
+  anti-aliased edges keep their coverage and the silhouette does not move.
 - **`remove_stray_pixels`** - the noise `assess_sprite` counts, with something to do
   about it. A stray is a pixel with no neighbour of its own colour in any of the eight
   directions, which is what a shading pass leaves at a band boundary and what reads as

@@ -874,3 +874,139 @@ def dither_band(
                pattern = ARG.pattern, dithered_pixels = #pending }
     """
     return run_lua(body, args)
+
+
+@mcp.tool()
+def gradient_map(
+    filename: str,
+    ramp: list[str],
+    contrast: float = 1.0,
+    bias: float = 0.0,
+    dither: str | None = None,
+    x: int = 0,
+    y: int = 0,
+    width: int | None = None,
+    height: int | None = None,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Put every pixel on a ramp by its brightness, whatever it started as.
+
+    The other shading tools all begin with art that is *already* on a ramp:
+    `shift_along_ramp` moves pixels between steps they already belong to, and
+    `shade_region_by_light` shades a flat region painted in one of the ramp's colours.
+    This is the one that brings art onto a ramp in the first place, which is what an
+    imported image, a photo traced over, or a gradient fill actually needs.
+
+    Each pixel's luminance decides its step: darkest to `ramp[0]`, lightest to the last
+    entry, the rest in between. Afterwards the art uses the ramp's colours and nothing
+    else, so `assess_sprite(..., ramp=...)` reports a palette conformance of 1.0.
+
+    Args:
+        ramp: The ramp, darkest first. Order is the mapping, so a reversed ramp inverts
+            the image.
+        contrast: Stretch the mapping around mid-grey. Above 1.0 pushes pixels toward
+            the ends of the ramp and drops the middle steps; below 1.0 crowds everything
+            into the middle. The interesting control is not which colours are used but
+            how much of the art each step takes.
+        bias: Shift the whole mapping after contrast, from -1.0 to 1.0. Positive is
+            lighter. Use it when an image maps too dark to read.
+        dither: "bayer4", "bayer2" or "checker" to break the bands. A pixel landing
+            between two steps takes the darker or the lighter one by an ordered pattern,
+            which reads as a gradient without adding a colour.
+        x, y, width, height: Restrict the change to a region.
+
+    Luminance is weighted 0.299/0.587/0.114, the same weighting the ramp matching uses,
+    so a saturated red and a dull red of the same weight land on the same step. Alpha is
+    carried through untouched, so the silhouette does not move and anti-aliased edges
+    keep their coverage, even though their colour is now a ramp entry.
+    """
+    if len(ramp) < 2:
+        raise ValidationFailed("ramp needs at least 2 colours to map onto.")
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    if contrast <= 0:
+        raise ValidationFailed(
+            f"contrast must be greater than 0; got {contrast}. A contrast of 0 would map "
+            "every pixel to the same step, which is fill_layer."
+        )
+    if not -1.0 <= bias <= 1.0:
+        raise ValidationFailed(f"bias must be between -1.0 and 1.0; got {bias}.")
+    if dither is not None and dither not in ("bayer4", "bayer2", "checker"):
+        raise ValidationFailed('dither must be "bayer4", "bayer2" or "checker".')
+
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "ramp": [parse_color(c) for c in ramp],
+        "contrast": float(contrast),
+        "bias": float(bias),
+        "dither": dither,
+        "x": int(x), "y": int(y), "width": width, "height": height,
+    }
+    body = FRAME_GUARD_LUA + """
+    local spr = open_sprite(ARG.src)
+    local layer = find_layer(spr, ARG.layer)
+    if layer.isGroup then error("Cannot map a group layer: " .. layer.name) end
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img = get_draw_image(spr, layer, framenum)
+
+    local rx, ry = ARG.x, ARG.y
+    local rw = ARG.width or (spr.width - rx)
+    local rh = ARG.height or (spr.height - ry)
+    local ramp = ARG.ramp
+    local last = #ramp - 1
+
+    local BAYER4 = { {0,8,2,10}, {12,4,14,6}, {3,11,1,9}, {15,7,13,5} }
+    local BAYER2 = { {0,2}, {3,1} }
+    local function threshold(x, y)
+      if ARG.dither == "checker" then
+        return ((x + y) % 2 == 0) and 0.25 or 0.75
+      elseif ARG.dither == "bayer2" then
+        return (BAYER2[(y % 2) + 1][(x % 2) + 1] + 0.5) / 4.0
+      end
+      return (BAYER4[(y % 4) + 1][(x % 4) + 1] + 0.5) / 16.0
+    end
+
+    local written, histogram = 0, {}
+    for i = 1, #ramp do histogram[i] = 0 end
+
+    for yy = ry, ry + rh - 1 do
+      for xx = rx, rx + rw - 1 do
+        if xx >= 0 and yy >= 0 and xx < img.width and yy < img.height then
+          local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
+          if a > 0 then
+            local t = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+            -- Contrast about mid-grey, then bias. Stated in that order because the two
+            -- do not commute and the caller has to know which it is.
+            t = 0.5 + (t - 0.5) * ARG.contrast + ARG.bias
+            if t < 0 then t = 0 elseif t > 1 then t = 1 end
+
+            local scaled = t * last
+            local index
+            if ARG.dither ~= nil then
+              -- The fraction between two steps becomes the odds of taking the lighter
+              -- one, resolved by the ordered pattern rather than by rounding, which is
+              -- what turns a band edge into a gradient.
+              local low = math.floor(scaled)
+              index = low + ((scaled - low) > threshold(xx, yy) and 1 or 0)
+            else
+              index = math.floor(scaled + 0.5)
+            end
+            if index < 0 then index = 0 elseif index > last then index = last end
+
+            local c = ramp[index + 1]
+            img_set(img, xx, yy, rgba_to_px(spr, c.r, c.g, c.b, a))
+            written = written + 1
+            histogram[index + 1] = histogram[index + 1] + 1
+          end
+        end
+      end
+    end
+
+    commit_image(spr, layer, framenum, img)
+    save_sprite(spr)
+    RESULT = { ok = true, layer = layer.name, frame = framenum,
+               pixels_written = written, steps = #ramp, per_step = histogram }
+    """
+    return run_lua(body, args)
