@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-30
+
 ### Changed
 - **The showcase art is redrawn and now reproducible.** The item sheet and the
   eight-direction sheet were from the earliest version of the server: the sword was a
@@ -422,6 +424,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.8.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.1
 [0.8.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.0
 [0.7.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.7.0
 [0.6.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.1
