@@ -192,6 +192,8 @@ READ_ONLY_TOOLS = frozenset({
 DESTRUCTIVE_TOOLS = frozenset({
     # Removes an object outright.
     "clear_layer",
+    # Keeps the first listed frame's image and drops what the others were showing.
+    "link_cels",
     "delete_cel",
     "remove_frame",
     "remove_layer",

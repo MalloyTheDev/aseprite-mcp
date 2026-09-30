@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **132 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **134 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -12,7 +12,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Frames (animation)](#frames-animation) (5)
 - [Animation (motion, timing, checks)](#animation-motion-timing-checks) (3)
 - [Animation tags](#animation-tags) (3)
-- [Cels](#cels) (5)
+- [Cels](#cels) (7)
 - [Drawing](#drawing) (10)
 - [Brushes & symmetry](#brushes--symmetry) (4)
 - [Shading & light](#shading--light) (5)
@@ -622,13 +622,43 @@ Delete a cel (the layer becomes empty at that frame).
 
 ### `get_cel`
 
-Inspect a cel: whether it exists, its position, bounds, and opacity.
+Inspect a cel: whether it exists, its position, bounds, opacity, and links.
+
+`linked_with` lists the other frames sharing this cel's image, so a held pose is
+visible as what it is. An edit to any of them changes all of them.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `layer` | string | yes |  |
 | `frame` | integer | no | 1 |
+
+
+### `link_cels`
+
+Make several frames share one image, which is how a held pose is authored.
+
+A linked cel is one image appearing on several frames: editing any of them edits all
+of them, and the file stores the image once instead of once per frame. Use it for a
+pose that genuinely repeats, such as the two extremes of a cycle that return to the
+same drawing.
+
+**The first listed frame's image is the one kept.** Every other listed frame loses
+whatever was drawn on it and shows the first frame's image instead, which is the point
+of linking and is not undoable from here, so check with `get_cel` first if the frames
+differ.
+
+To hold a pose for longer rather than to repeat a drawing, lengthen the frame instead
+(`set_frame_duration`, or `apply_timing_curve`): a duration costs nothing, while a
+repeated frame shifts every tag index.
+
+Returns the layer's link groups: the frames that now share an image, in groups.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | yes |  |
+| `frames` | array<integer> | yes |  |
 
 
 ### `set_cel_opacity`
@@ -654,6 +684,22 @@ Move a cel's image to position (x, y) within the canvas.
 | `frame` | integer | yes |  |
 | `x` | integer | yes |  |
 | `y` | integer | yes |  |
+
+
+### `unlink_cels`
+
+Give frames their own copy of a shared image again, so they can differ again.
+
+The reverse of `link_cels`: each listed frame keeps what it currently shows and stops
+following the others. Nothing is lost; the image is copied rather than moved.
+
+Returns the layer's link groups afterwards.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | yes |  |
+| `frames` | array<integer> | yes |  |
 
 
 ## Drawing

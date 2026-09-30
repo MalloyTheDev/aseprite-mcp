@@ -26,7 +26,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves — so your files stay fully editable in the
 Aseprite GUI.
 
-- **132 tools**, including high-level **workflow** tools that scaffold and validate whole
+- **134 tools**, including high-level **workflow** tools that scaffold and validate whole
   assets in one call, and a **batch op-runner** that applies many edits atomically in a
   single Aseprite process, across sprites, layers, frames, cels, drawing (incl. pixel-perfect &
   anti-aliased modes), custom brushes & symmetry, ramp-aware shading (form light, contact
@@ -345,6 +345,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `get_cel` | Inspect a cel (exists, position, bounds, opacity). |
 | `set_cel_position` · `set_cel_opacity` | Move / fade a cel. |
 | `copy_cel` · `delete_cel` | Copy a cel between frames / delete it. |
+| `link_cels` · `unlink_cels` | Share one image across frames (a held pose: editing any of them edits all, and the file stores it once) / give a frame its own copy back. |
 
 ### Animation tags
 | Tool | Description |
