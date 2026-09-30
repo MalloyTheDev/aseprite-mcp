@@ -10,8 +10,9 @@ from pathlib import Path
 from mcp.server.mcpserver import Image
 
 from ..app import mcp
-from ..core import config
+from ..core import config, quality
 from ..core.errors import ValidationFailed
+from ..core.limits import MAX_ASSESS_PIXELS
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import AsepriteError, run_cli, run_lua
 from .common import lua_path, resolve_path
@@ -236,3 +237,152 @@ def list_sprites() -> dict:
             })
     files.sort(key=lambda entry: entry["name"])
     return {"workspace": str(ws), "count": len(files), "files": files}
+
+
+# The whole frame, run-length encoded against a colour table. `get_pixels` caps a read at
+# 4096 pixels because its rows go back to the caller and a model should not be handed a
+# megabyte of hex; here the pixels never leave the process, only the measurements do, so
+# the cap that applies is the one on how long the measuring takes.
+_ASSESS_LUA = FRAME_GUARD_LUA + """
+local spr = open_sprite(ARG.src)
+local framenum = require_frame(spr, ARG.frame, "frame")
+if spr.width * spr.height > ARG.max_pixels then
+  error("This frame is " .. spr.width .. "x" .. spr.height .. " (" ..
+        (spr.width * spr.height) .. " px); assess_sprite measures at most " ..
+        ARG.max_pixels .. ". Assess a smaller sprite, or crop a copy of this one.", 0)
+end
+
+local function px_hex(px)
+  local cm = spr.colorMode
+  local r, g, b, a
+  if cm == ColorMode.RGB then
+    r = app.pixelColor.rgbaR(px); g = app.pixelColor.rgbaG(px)
+    b = app.pixelColor.rgbaB(px); a = app.pixelColor.rgbaA(px)
+  elseif cm == ColorMode.GRAY then
+    local v = app.pixelColor.grayaV(px)
+    r = v; g = v; b = v; a = app.pixelColor.grayaA(px)
+  else
+    local col = spr.palettes[1]:getColor(px)
+    r = col.red; g = col.green; b = col.blue; a = col.alpha
+  end
+  return string.format("#%02x%02x%02x%02x", r, g, b, a)
+end
+
+local img
+if ARG.layer ~= nil then
+  img = get_draw_image(spr, find_layer(spr, ARG.layer), framenum)
+else
+  img = Image(spr.spec); img:clear(); img:drawSprite(spr, framenum)
+end
+
+local palette, seen, rows = {}, {}, {}
+for yy = 0, spr.height - 1 do
+  local row, n, run, length = {}, 0, nil, 0
+  for xx = 0, spr.width - 1 do
+    local hex = px_hex(img:getPixel(xx, yy))
+    local index = seen[hex]
+    if index == nil then
+      palette[#palette + 1] = hex
+      index = #palette
+      seen[hex] = index
+    end
+    if index == run then
+      length = length + 1
+    else
+      if run ~= nil then
+        n = n + 1; row[n] = run
+        n = n + 1; row[n] = length
+      end
+      run, length = index, 1
+    end
+  end
+  n = n + 1; row[n] = run
+  n = n + 1; row[n] = length
+  rows[yy + 1] = row
+end
+
+RESULT = {
+  width = spr.width, height = spr.height, frame = framenum,
+  palette = palette, rows = rows,
+}
+"""
+
+
+def _expand(measured: dict) -> quality.Grid:
+    """Turn the run-length rows back into the grid the metrics read.
+
+    The colour strings are shared rather than copied, so a 512x512 frame of twelve
+    colours costs twelve strings and a list of references to them.
+    """
+    palette = measured["palette"]
+    grid: quality.Grid = []
+    for row in measured["rows"]:
+        line: list[str] = []
+        for i in range(0, len(row), 2):
+            line.extend([palette[row[i] - 1]] * row[i + 1])
+        grid.append(line)
+    return grid
+
+
+@mcp.tool()
+def assess_sprite(
+    filename: str,
+    frame: int = 1,
+    layer: str | None = None,
+    ramp: list[str] | None = None,
+    check_tiling: bool = False,
+) -> dict:
+    """Measure the drawing itself and say what is worth fixing.
+
+    `get_sprite_info` says what a sprite contains and `render_preview` returns a picture
+    a text-only model cannot read. This answers the question in between: is the art any
+    good, in the ways that can be counted.
+
+    Reports how many colours are in use and roughly how many ramps they form, pixels with
+    no neighbour of their own colour (noise), jagged corners on diagonals, the drawn
+    bounding box, how much of the canvas it fills, whether it sits centred, and how far
+    the silhouette is from its own mirror. Each measurement that is worth acting on comes
+    back with a line saying why, so the numbers do not have to be interpreted.
+
+    Args:
+        ramp: Declare the ramp the art should be on and the report adds palette
+            conformance: the fraction of drawn pixels sitting exactly on it. This is the
+            measurement that separates shading from filtering, and it is omitted rather
+            than reported as a meaningless 1.0 when no ramp is given.
+        check_tiling: For a tile, also measure how much worse the wrapping edge looks
+            than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
+        layer: Measure one layer instead of the flattened frame.
+
+    Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
+    the measurements, so this is cheap to call after every pass.
+    """
+    src = resolve_path(filename)
+    measured = run_lua(_ASSESS_LUA, {
+        "src": lua_path(src), "frame": int(frame), "layer": layer,
+        "max_pixels": MAX_ASSESS_PIXELS,
+    })
+    grid = _expand(measured)
+    metrics = quality.score(grid, ramp)
+    if check_tiling:
+        horizontal, vertical = quality.tile_seam_ratio(grid)
+        metrics["tile_seam"] = {"horizontal": round(horizontal, 3),
+                                "vertical": round(vertical, 3)}
+
+    notes = quality.readings(metrics, width=measured["width"], height=measured["height"])
+    if check_tiling and "tile_seam" in metrics:
+        seam = metrics["tile_seam"]
+        for axis in ("horizontal", "vertical"):
+            if seam[axis] > 1.5:
+                notes.append(
+                    f"The {axis} wrap is {seam[axis]:.1f}x as different as the interior, "
+                    "so this tile shows a seam on that axis."
+                )
+    return {
+        "ok": True,
+        "frame": measured["frame"],
+        "layer": layer,
+        "width": measured["width"],
+        "height": measured["height"],
+        "metrics": metrics,
+        "readings": notes,
+    }

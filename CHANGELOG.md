@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`assess_sprite`** - the quality metrics existed and nothing could reach them.
+  `core/quality.py` has measured twelve things about a sprite since the hardening work,
+  is unit-tested, and is how the shading tools prove they keep art on the palette; the
+  only way to run it was a script. An agent could ask what a sprite *contains* and never
+  whether it was any good. It now reports colours and ramps in use, painted pixels, noise
+  (pixels with no neighbour of their own colour), jagged diagonals, the drawn box and how
+  much of the canvas it fills, centring, silhouette asymmetry, palette conformance against
+  a declared ramp, and optionally the tile seam per axis. Each measurement worth acting on
+  comes back as a sentence naming the fault and the tool that fixes it, and clean art
+  comes back with nothing to say, because a report that comments on every sprite is one
+  nobody reads. The thresholds are relative to the art's own size: a raster circle is made
+  of steps and is not told off for being round. (135 tools.)
+
 ## [0.8.1] - 2026-09-30
 
 ### Changed
