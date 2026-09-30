@@ -129,14 +129,17 @@ held two and a half times as long as the passing frames.
 ### Scaffold a whole asset in one call
 
 <p align="center">
-  <img src="docs/assets/showcase/easy_item_sheet.png" width="360" alt="Pixel-art item sheet with heart, coin, potion, and sword icons">
-  &nbsp;&nbsp;
-  <img src="docs/assets/showcase/medium_walk8_sheet.png" width="360" alt="Eight-direction walk sheet: one frame and animation tag per compass direction">
+  <img src="docs/assets/showcase/item_sheet.png" width="520" alt="Pixel-art item sheet: a heart, a coin, a potion and a sword, each shaded on its own ramp">
 </p>
 <p align="center">
-  <sub><code>create_rpg_item_sheet</code> lays out named item slices;
+  <img src="docs/assets/showcase/walk8_sheet.png" width="640" alt="Eight-direction sheet: one creature facing each compass point, one frame and animation tag per direction">
+</p>
+<p align="center">
+  <sub><code>create_rpg_item_sheet</code> lays out a named slice per item and
   <code>make_8_direction_walk_template</code> generates the frames <strong>and one
-  animation tag per direction</strong>, ready to draw into.</sub>
+  animation tag per direction</strong>; both are then drawn into with the drawing and
+  shading tools. Each item carries its own ramp, so the potion's glass, liquid and cork
+  are shaded independently.</sub>
 </p>
 
 ```text
@@ -148,7 +151,7 @@ export_game_asset_bundle        -> hero.png, hero.gif, hero_sheet.png (+JSON), h
 <summary>More examples</summary>
 
 <p align="center">
-  <img src="docs/assets/showcase/medium_walk8.gif" width="110" alt="Animated sprite cycling through eight facing directions">
+  <img src="docs/assets/showcase/walk8.gif" width="110" alt="Animated sprite cycling through eight facing directions">
   &nbsp;
   <img src="assets/slime.gif" width="110" alt="Animated bouncing slime">
   &nbsp;
