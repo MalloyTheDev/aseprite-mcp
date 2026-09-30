@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-30
+
+The release that made the server usable by any MCP client and gave it an opinion about
+pixel art. It moves to the mcp 2.x SDK, closes two defects that silently corrupted files,
+adds four new domains (shading, selections, animation, Minecraft resource packs) and takes
+the tool count from 96 to 134.
+
+Two behaviour changes to know about: a filled ellipse is now the same shape as its own
+outline, so every filled ellipse has different pixels, and concurrent calls to one sprite
+are now serialized rather than racing.
+
 ### Added
 - **`link_cels` / `unlink_cels`, and `get_cel` now reports links.** A linked cel is one
   image appearing on several frames: editing any of them edits all of them, and the file
@@ -402,6 +413,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.8.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.0
 [0.7.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.7.0
 [0.6.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.1
 [0.6.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.6.0
