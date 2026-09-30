@@ -33,7 +33,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **136 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **137 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -43,8 +43,9 @@ Aseprite GUI.
   icon set, a tileset or an eight-direction walk template, and a **batch op-runner**
   applies hundreds of edits atomically in a single Aseprite process.
 - **Shading that stays on the palette** - `shade_region_by_light` turns a flat region
-  into a lit form from a ramp and a light direction, and `contact_shadow`,
-  `outline_smart` and `dither_band` finish it. A brightness filter moves every pixel off
+  into a lit form from a ramp and a light direction, `gradient_map` brings imported or
+  filtered art onto a ramp in the first place, and `contact_shadow`, `outline_smart` and
+  `dither_band` finish it. A brightness filter moves every pixel off
   the palette; these move pixels *along the ramp*, so the art still uses exactly the
   colours it was given.
 - **Work you can check** - `assess_sprite` measures the drawing itself: pixels with no
@@ -76,7 +77,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 136 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 137 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -459,6 +460,7 @@ and says so rather than doing it quietly.
 | Tool | Description |
 | --- | --- |
 | `shade_region_by_light` | Shade a flat region as a lit form, from a ramp and a light direction. |
+| `gradient_map` | Put every pixel on a ramp by its brightness, whatever it started as: the tool that brings imported or filtered art onto a palette at all. Optional ordered dithering. |
 | `shift_along_ramp` | Move pixels along a colour ramp, keeping every one of them on the palette. |
 | `contact_shadow` | Darken the pixels where one form meets another, along its ramp. |
 | `outline_smart` | Outline a shape in colours taken from its own ramp, not one flat colour. |

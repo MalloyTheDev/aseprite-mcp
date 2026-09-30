@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **136 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **137 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -15,7 +15,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Cels](#cels) (7)
 - [Drawing](#drawing) (10)
 - [Brushes & symmetry](#brushes--symmetry) (4)
-- [Shading & light](#shading--light) (5)
+- [Shading & light](#shading--light) (6)
 - [Selections](#selections) (6)
 - [Effects & colour adjustments](#effects--colour-adjustments) (10)
 - [Text](#text) (1)
@@ -1236,6 +1236,54 @@ rest of the sprite is untouched even where it uses the same ramp.
 | `pattern` | string | no | bayer4 |
 | `width` | integer | no | 2 |
 | `tolerance` | number | no | 24.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `gradient_map`
+
+Put every pixel on a ramp by its brightness, whatever it started as.
+
+The other shading tools all begin with art that is *already* on a ramp:
+`shift_along_ramp` moves pixels between steps they already belong to, and
+`shade_region_by_light` shades a flat region painted in one of the ramp's colours.
+This is the one that brings art onto a ramp in the first place, which is what an
+imported image, a photo traced over, or a gradient fill actually needs.
+
+Each pixel's luminance decides its step: darkest to `ramp[0]`, lightest to the last
+entry, the rest in between. Afterwards the art uses the ramp's colours and nothing
+else, so `assess_sprite(..., ramp=...)` reports a palette conformance of 1.0.
+
+Args:
+    ramp: The ramp, darkest first. Order is the mapping, so a reversed ramp inverts
+        the image.
+    contrast: Stretch the mapping around mid-grey. Above 1.0 pushes pixels toward
+        the ends of the ramp and drops the middle steps; below 1.0 crowds everything
+        into the middle. The interesting control is not which colours are used but
+        how much of the art each step takes.
+    bias: Shift the whole mapping after contrast, from -1.0 to 1.0. Positive is
+        lighter. Use it when an image maps too dark to read.
+    dither: "bayer4", "bayer2" or "checker" to break the bands. A pixel landing
+        between two steps takes the darker or the lighter one by an ordered pattern,
+        which reads as a gradient without adding a colour.
+    x, y, width, height: Restrict the change to a region.
+
+Luminance is weighted 0.299/0.587/0.114, the same weighting the ramp matching uses,
+so a saturated red and a dull red of the same weight land on the same step. Alpha is
+carried through untouched, so the silhouette does not move and anti-aliased edges
+keep their coverage, even though their colour is now a ramp entry.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `contrast` | number | no | 1.0 |
+| `bias` | number | no | 0.0 |
+| `dither` | string | no | _none_ |
+| `x` | integer | no | 0 |
+| `y` | integer | no | 0 |
+| `width` | integer | no | _none_ |
+| `height` | integer | no | _none_ |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
