@@ -112,19 +112,13 @@ def get_pixels(
     if w * h > 4096 then
       error("Region too large (" .. (w * h) .. " px). Max 4096 (e.g. 64x64) per call.")
     end
+    -- The prelude's decode, not a local copy of it. Two copies of this function used to
+    -- live here and both went straight to the palette, missing the transparentColor
+    -- check that px_to_rgba does first: on an indexed sprite whose transparent index
+    -- points at an opaque palette entry, every transparent pixel read back as that
+    -- colour and the whole canvas counted as drawn.
     local function px_hex(px)
-      local cm = spr.colorMode
-      local r, g, b, a
-      if cm == ColorMode.RGB then
-        r = app.pixelColor.rgbaR(px); g = app.pixelColor.rgbaG(px)
-        b = app.pixelColor.rgbaB(px); a = app.pixelColor.rgbaA(px)
-      elseif cm == ColorMode.GRAY then
-        local v = app.pixelColor.grayaV(px)
-        r = v; g = v; b = v; a = app.pixelColor.grayaA(px)
-      else
-        local col = spr.palettes[1]:getColor(px)
-        r = col.red; g = col.green; b = col.blue; a = col.alpha
-      end
+      local r, g, b, a = px_to_rgba(spr, px)
       return string.format("#%02x%02x%02x%02x", r, g, b, a)
     end
     local img = Image(spr.spec)
@@ -253,18 +247,7 @@ if spr.width * spr.height > ARG.max_pixels then
 end
 
 local function px_hex(px)
-  local cm = spr.colorMode
-  local r, g, b, a
-  if cm == ColorMode.RGB then
-    r = app.pixelColor.rgbaR(px); g = app.pixelColor.rgbaG(px)
-    b = app.pixelColor.rgbaB(px); a = app.pixelColor.rgbaA(px)
-  elseif cm == ColorMode.GRAY then
-    local v = app.pixelColor.grayaV(px)
-    r = v; g = v; b = v; a = app.pixelColor.grayaA(px)
-  else
-    local col = spr.palettes[1]:getColor(px)
-    r = col.red; g = col.green; b = col.blue; a = col.alpha
-  end
+  local r, g, b, a = px_to_rgba(spr, px)
   return string.format("#%02x%02x%02x%02x", r, g, b, a)
 end
 

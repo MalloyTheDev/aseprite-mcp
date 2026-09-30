@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Transparent pixels counted as drawn on indexed sprites.** The Lua prelude resolves an
+  indexed pixel through `spr.transparentColor` before the palette, and `tools/inspect.py`
+  had two local copies of that decode, neither of which did. On a sprite whose transparent
+  index points at a palette entry that is itself opaque, every transparent pixel read back
+  as that colour: `assess_sprite` reported an 8x8 sprite with nine drawn pixels as having
+  all sixty-four, along with the canvas usage, bounding box, colour count and silhouette
+  that follow from it, and `get_pixels` returned opaque colours for pixels that were not
+  there, including in the `map` format whose whole purpose is to be readable at a glance.
+  Both copies are gone; there is one decode now, the prelude's, which is what everything
+  else already used. Found while designing `diff_sprites`, which has to pick one
+  definition of transparent and would otherwise have disagreed with `assess_sprite`.
+
 ### Added
 - **A tag can say how many times it plays, and frames can be reordered.** Three gaps in
   the frame and tag layer, each of which forced a workaround that damaged the sprite.
