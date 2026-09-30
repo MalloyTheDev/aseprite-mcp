@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **139 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **141 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -9,7 +9,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Sprite lifecycle](#sprite-lifecycle) (10)
 - [Inspection & preview](#inspection--preview) (5)
 - [Layers](#layers) (8)
-- [Frames (animation)](#frames-animation) (5)
+- [Frames (animation)](#frames-animation) (7)
 - [Animation (motion, timing, checks)](#animation-motion-timing-checks) (3)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (7)
@@ -422,6 +422,30 @@ valid range rather than clamped to it.
 | `frame` | integer | yes |  |
 
 
+### `move_frame`
+
+Move one frame to another position, taking its cels and its duration with it.
+
+Fixing an ordering mistake otherwise means deleting and redrawing. Nothing is copied:
+the frame keeps its identity, so linked cels stay linked.
+
+Args:
+    frame: The frame to move, 1-based.
+    to: Where it should end up, 1-based, in the numbering *after* the move. Moving
+        frame 2 to 5 on a six-frame sprite gives 1, 3, 4, 5, 2, 6.
+
+**Tags mark positions, not pictures.** A tag between the two positions keeps its own
+range and now covers a different set of drawings. The result names every tag that
+overlapped the frames in between, because that is the part worth checking and it is
+invisible in the frame count.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `frame` | integer | yes |  |
+| `to` | integer | yes |  |
+
+
 ### `remove_frame`
 
 Delete a frame (1-based). The sprite must have more than one frame.
@@ -433,6 +457,35 @@ valid range rather than clamped to it (which used to delete a different frame).
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `frame` | integer | yes |  |
+
+
+### `reverse_frames`
+
+Reverse the order of a run of frames, keeping their timing with them.
+
+Reversing a walk to get its mirror, or a grow to get a shrink, is a normal move and
+otherwise means re-authoring the whole thing. Whole frames move: every layer's cel
+travels together, and each frame keeps its own duration.
+
+Args:
+    tag: Reverse one tag's frames.
+    frames: Reverse these frames instead. They must be one unbroken run, because
+        Aseprite reverses everything between the first and the last: a gapped list
+        would silently take in the frames in between.
+
+Defaults to the whole sprite when neither is given.
+
+**Tags mark positions, not pictures.** A tag over the reversed frames keeps its own
+range and now covers them in their new order, which is usually what was wanted for a
+tag that spans the whole run and rarely what was wanted for one that spans part of
+it. The result lists every tag that overlapped, so the ones worth revisiting are
+named rather than left to be discovered later.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `tag` | string | no | _none_ |
+| `frames` | array<integer> | no | _none_ |
 
 
 ### `set_all_frame_durations`
@@ -588,8 +641,14 @@ Both frames must already exist: an out-of-range number is rejected with the spri
 valid range rather than clamped to it (which used to report a tag added while
 creating it over a different range).
 
-direction: "forward" (default), "reverse", "pingpong", or "pingpong_reverse".
-color: optional tag colour (shown in the timeline).
+Args:
+    direction: "forward" (default), "reverse", "pingpong", or "pingpong_reverse".
+    color: Optional tag colour, shown in the timeline.
+    repeats: How many times the tag plays. **0, the default, means forever**, which
+        is how a cycle is marked in the file; 1 is a one-shot such as an attack, a
+        hurt or a death. This is the sprite's own answer to whether these frames
+        loop, and `validate_loop` reads it: a repeated last frame is an error for a
+        cycle and only a warning for a one-shot.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -599,6 +658,7 @@ color: optional tag colour (shown in the timeline).
 | `to_frame` | integer | yes |  |
 | `direction` | string | no | forward |
 | `color` | string | no | _none_ |
+| `repeats` | integer | no | 0 |
 
 
 ### `remove_tag`
@@ -619,6 +679,9 @@ Note: changing from_frame/to_frame recreates the tag in place to update its
 range reliably across Aseprite versions. A frame that does not exist is rejected
 with the sprite's valid range rather than clamped into it.
 
+`repeats` is how many times the tag plays, with 0 meaning forever. It survives the
+recreate above along with the name, direction and colour.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -628,6 +691,7 @@ with the sprite's valid range rather than clamped into it.
 | `new_name` | string | no | _none_ |
 | `direction` | string | no | _none_ |
 | `color` | string | no | _none_ |
+| `repeats` | integer | no | _none_ |
 
 
 ## Cels

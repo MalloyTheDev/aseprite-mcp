@@ -699,6 +699,9 @@ local function sprite_info(spr)
       to = tg.toFrame.frameNumber,
       aniDir = anidir_name(tg.aniDir),
       color = color_hex(tg.color),
+      -- 0 is how the file says "play forever". Reported because a tag that plays a set
+      -- number of times is a one-shot, and nothing else in the sprite says so.
+      repeats = tg.repeats or 0,
     }
   end
   local slices = {}

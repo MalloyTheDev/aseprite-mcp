@@ -7,6 +7,26 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **A tag can say how many times it plays, and frames can be reordered.** Three gaps in
+  the frame and tag layer, each of which forced a workaround that damaged the sprite.
+  `add_tag` and `set_tag` now take `repeats`, which Aseprite has always stored and nothing
+  here could write: 0 means forever, which is how a cycle is marked in the file, and 1 is
+  a one-shot such as an attack or a death. `get_sprite_info` reports it, and `validate_loop`
+  already read it, so a sprite now answers for itself whether its frames wrap instead of
+  having to be told. A negative count is refused rather than passed on, because Aseprite
+  stores -1 as 0, which means the opposite of the one-shot that was asked for; and a range
+  edit no longer turns a one-shot into a loop, which it did because changing a tag's range
+  recreates it and a new tag starts at 0.
+- **`reverse_frames` and `move_frame`.** Reversing a walk to get its mirror, or fixing an
+  ordering mistake, previously meant re-authoring the frames. Aseprite has no command that
+  moves a frame, so a move is expressed as two reversals of the block between the two
+  positions: nothing is copied, which means cels on every layer, frame durations and cel
+  links all travel with the frame. A gapped frame list is refused, because Aseprite
+  reverses everything between the first and the last frame of a selection and would
+  silently take in the frames nobody named. Both tools report which tags overlapped the
+  frames they touched: tags mark positions rather than pictures, so a tag over reordered
+  frames now covers different drawings, and naming them is more use than either quietly
+  re-pointing them or refusing the edit. (141 tools.)
 - **`ramp_between` and `ramp_from_art`.** Every shading tool takes a `ramp`, and the only
   way to get one was `generate_ramp`, which grows a ramp outward from a single base
   colour: reaching a particular shadow and a particular highlight meant guessing at
