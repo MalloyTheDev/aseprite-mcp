@@ -1,6 +1,6 @@
 """Integration tests for the high-level workflow tools.
 
-Asserts the shared workflow_manifest.v1 contract. Requires Aseprite — runs only
+Asserts the shared workflow_manifest.v1 contract. Requires Aseprite: runs only
 under `pytest --run-aseprite`.
 """
 

@@ -1,4 +1,4 @@
-"""Pure-Python tests for the export-validation logic — no Aseprite (always run)."""
+"""Pure-Python tests for the export-validation logic: no Aseprite (always run)."""
 
 from aseprite_mcp.core import validation
 

@@ -1,4 +1,4 @@
-"""Integration tests for engine export presets — require Aseprite (--run-aseprite)."""
+"""Integration tests for engine export presets: require Aseprite (--run-aseprite)."""
 
 from pathlib import Path
 

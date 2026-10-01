@@ -1,4 +1,4 @@
-"""Pure-Python tests for the slice-metadata builder — no Aseprite (always run)."""
+"""Pure-Python tests for the slice-metadata builder: no Aseprite (always run)."""
 
 from aseprite_mcp.core.slice_metadata import SCHEMA, build_slice_metadata
 

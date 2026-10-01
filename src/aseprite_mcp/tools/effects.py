@@ -54,7 +54,7 @@ def fill_gradient(
         gradient_type: "linear" or "radial".
         angle: Direction in degrees for linear gradients (0 = left->right).
         dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
-            interpolation — great for limited palettes / retro looks.
+            interpolation, great for limited palettes / retro looks.
         x, y, width, height: Region (defaults to the whole canvas).
         respect_alpha: Leave transparent pixels transparent (default). The gradient
             then shades the artwork inside the region rather than filling the region.

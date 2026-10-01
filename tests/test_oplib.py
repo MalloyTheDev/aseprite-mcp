@@ -1,4 +1,4 @@
-"""Pure-Python tests for the batch operation registry — no Aseprite (always run)."""
+"""Pure-Python tests for the batch operation registry: no Aseprite (always run)."""
 
 import inspect
 

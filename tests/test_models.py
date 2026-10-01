@@ -1,4 +1,4 @@
-"""Pure-Python tests for the typed value models — no Aseprite (always run)."""
+"""Pure-Python tests for the typed value models: no Aseprite (always run)."""
 
 import pytest
 

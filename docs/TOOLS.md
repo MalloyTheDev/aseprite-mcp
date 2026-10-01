@@ -1,4 +1,4 @@
-# Aseprite MCP — Tool Reference
+# Aseprite MCP Tool Reference
 
 Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **147 tools.**
 
@@ -1199,7 +1199,7 @@ Draw a straight line from (x1,y1) to (x2,y2).
 
 Args:
     pixel_perfect: Remove L-shaped corner pixels for a clean 1px pixel-art line.
-    antialias: Smooth (Xiaolin Wu) line with alpha blending — RGB sprites only;
+    antialias: Smooth (Xiaolin Wu) line with alpha blending, RGB sprites only;
         ignored on indexed/gray. Takes precedence over pixel_perfect.
 
 Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
@@ -1400,7 +1400,7 @@ Args:
         '.', or '0' is a filled cell. e.g. a plus brush: ["010", "111", "010"].
     points: Positions to stamp at, list of {"x": int, "y": int}.
     color: Colour to stamp the brush in.
-    anchor: "center" (default) or "topleft" — where each point sits in the brush.
+    anchor: "center" (default) or "topleft", where each point sits in the brush.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2161,7 +2161,7 @@ Args:
     gradient_type: "linear" or "radial".
     angle: Direction in degrees for linear gradients (0 = left->right).
     dither: Ordered (Bayer 4x4) dithering between 2 colours instead of smooth
-        interpolation — great for limited palettes / retro looks.
+        interpolation, great for limited palettes / retro looks.
     x, y, width, height: Region (defaults to the whole canvas).
     respect_alpha: Leave transparent pixels transparent (default). The gradient
         then shades the artwork inside the region rather than filling the region.
@@ -3011,7 +3011,7 @@ Args:
 Export a sprite as a Godot 4 ``SpriteFrames`` resource (.tres) + a packed sheet.
 
 Produces three files: a packed PNG sprite sheet, its JSON frame/tag metadata, and a
-``SpriteFrames`` .tres that references the sheet via ``AtlasTexture`` regions — one
+``SpriteFrames`` .tres that references the sheet via ``AtlasTexture`` regions, one
 Godot animation per Aseprite tag (or a single ``default`` animation if untagged), with
 per-frame timing taken from Aseprite frame durations.
 
@@ -3048,7 +3048,7 @@ Export every slice as engine-agnostic JSON (``aseprite_mcp.slice_metadata.v1``).
 Each slice becomes ``{name, type, id, bounds, pivot, nine_slice, color, data,
 raw_data}``. **Type detection:** a slice's user-data JSON ``type`` wins; otherwise the
 name convention ``<type>:<id>`` (recognized types: hitbox, hurtbox, collision, interact,
-pivot, origin, attach, spawn, nine_slice — anything else becomes ``"custom"``, never an
+pivot, origin, attach, spawn, nine_slice; anything else becomes ``"custom"``, never an
 error). ``id`` comes from the data ``id`` or the name's ``:<id>`` suffix. ``nine_slice``
 (Aseprite's 9-patch center) and ``pivot`` are emitted whenever the slice has them. Slice
 user-data that is valid JSON is parsed into ``data``; the raw string is kept in ``raw_data``.
@@ -3371,10 +3371,10 @@ Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifes
 
 Check whether a sprite is game-ready against the criteria you specify.
 
-Runs a series of checks — does the file open, do dimensions match (exactly or as
+Runs a series of checks: does the file open, do dimensions match (exactly or as
 a tile multiple), is the colour mode allowed, are frame counts / required animation
 tags present, is the background transparent, is the palette within budget, do
-expected export files exist, and is sprite-sheet metadata readable — plus soft
+expected export files exist, and is sprite-sheet metadata readable, plus soft
 warnings for oversized canvases, missing tags, and default/blank layer names.
 
 All criteria are optional; only the ones you pass are enforced. Returns a
@@ -3466,7 +3466,7 @@ Arguments not listed for an op are rejected rather than ignored.
 
 Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
 error names the failing op index. `dry_run=True` validates the op list and returns
-the plan **without launching Aseprite** (shape checks only — runtime issues like a
+the plan **without launching Aseprite** (shape checks only; runtime issues like a
 missing layer surface on a real run).
 
 Frames are 1-based, and an `arg=frame` argument must name a frame that already
@@ -3526,7 +3526,7 @@ _No parameters._
 Open a sprite in the Aseprite GUI window (non-blocking) for live viewing.
 
 The window stays open and runs independently of this server. Keep editing the
-file with the other tools — Aseprite detects the on-disk change and prompts to
+file with the other tools; Aseprite detects the on-disk change and prompts to
 reload (or reloads automatically, depending on your Aseprite preferences), so
 you can watch edits land without re-opening.
 

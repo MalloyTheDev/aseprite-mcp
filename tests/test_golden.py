@@ -1,7 +1,7 @@
 """Golden-output tests: deterministic sprites with exact assertions on dimensions,
 pixel colours, frame/layer counts, tag metadata, and exported image geometry.
 
-Requires Aseprite — runs only under `pytest --run-aseprite`.
+Requires Aseprite: runs only under `pytest --run-aseprite`.
 """
 
 from PIL import Image as PILImage

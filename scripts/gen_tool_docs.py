@@ -1,4 +1,4 @@
-"""Generate docs/TOOLS.md — a complete reference of every MCP tool.
+"""Generate docs/TOOLS.md: a complete reference of every MCP tool.
 
 Introspects the live FastMCP registry so the docs always match the code.
 
@@ -119,7 +119,7 @@ async def main(check: bool = False) -> int:
         )
 
     out = [
-        "# Aseprite MCP — Tool Reference",
+        "# Aseprite MCP Tool Reference",
         "",
         f"Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. "
         f"**{len(tools)} tools.**",

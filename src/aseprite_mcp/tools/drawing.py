@@ -157,7 +157,7 @@ def draw_line(
 
     Args:
         pixel_perfect: Remove L-shaped corner pixels for a clean 1px pixel-art line.
-        antialias: Smooth (Xiaolin Wu) line with alpha blending — RGB sprites only;
+        antialias: Smooth (Xiaolin Wu) line with alpha blending, RGB sprites only;
             ignored on indexed/gray. Takes precedence over pixel_perfect.
     """
     args = {

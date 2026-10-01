@@ -1,4 +1,4 @@
-# Bug / Hardening / Security Audit — aseprite-mcp
+# Bug / Hardening / Security Audit: aseprite-mcp
 
 > **Status: closed. This is a historical record, not a live list of exploitable problems.**
 >
@@ -27,7 +27,7 @@ covered `core/` (config, runner, luagen, errors, models, manifest, validation, o
 **Gate at audit time:** `ruff F,E9` clean · `pytest` 74 passed (pure) · `pytest --run-aseprite`
 132 passed · `gen_tool_docs.py --check` in sync (108 tools).
 
-**Headline:** the recent typed-errors / typed-models / core-split / batch work is solid —
+**Headline:** the recent typed-errors / typed-models / core-split / batch work is solid;
 the bug audit is mostly *confirmed-OK*. The real, actionable gaps are in **hardening**
 (no release-gate script, no property tests, no size limits, no overwrite policy) and
 **security posture** (overwrite/clobber, GitHub Actions permissions, missing SECURITY.md,
@@ -51,7 +51,7 @@ Description: `apply_operations` runs all ops inside `app.transaction(...)` and c
 Evidence: `core/oplib.py` `BATCH_LUA_BODY` (transaction wraps the op loop; `save_sprite`
 is after it); `tests/test_batch.py::test_mid_batch_failure_rolls_back_and_saves_nothing`
 asserts the on-disk pixels are unchanged after a mid-batch failure.
-Impact: none — behaves as intended.
+Impact: none; behaves as intended.
 Recommended fix: none.
 Suggested PR: n/a.
 Resolution: nothing to fix. Still true: `core/oplib.BATCH_LUA_BODY` and the named test
@@ -81,7 +81,7 @@ Evidence: `core/errors.py`; `tests/test_errors.py` (alias identity, `FileNotFoun
 back-compat, runner/CLI/timeout mapping).
 Impact: none.
 Recommended fix: none. (Note: `AsepriteNotFoundError(FileNotFoundError)` is a deliberate
-compat base — a future cleanup may switch those three catch sites to
+compat base; a future cleanup may switch those three catch sites to
 `AsepriteNotFoundError` and drop the extra base.)
 Suggested PR: n/a.
 Resolution: nothing to fix, and the deliberate compat base is still deliberate.
@@ -111,7 +111,7 @@ Description: moving `config.py` into `core/` changed its depth; `PROJECT_ROOT` w
 default workspace resolves to `<repo>/workspace` (not `src/workspace`).
 Evidence: `core/config.py:PROJECT_ROOT`; runtime check during audit printed
 `PROJECT_ROOT: <repo>` / `workspace: <repo>/workspace`.
-Impact: none — but there is **no regression test** locking this. (The audit gave this gap
+Impact: none, but there is **no regression test** locking this. (The audit gave this gap
 no finding of its own; the hardening section's property-test item is the nearest relative.)
 Recommended fix: none for the bug; add a guard test (hardening).
 Suggested PR: harden/release-gate-and-property-tests.
@@ -210,13 +210,13 @@ anything but `ValueError`, channels always 0 to 255", and `config.resolve` /
 Severity: Medium · Category: Hardening (also Security S-Clobber) · Area: config/tools · Status: **Fixed in PR #13, extended in PR #47**
 
 Description: `create_sprite`, `save_sprite_as`, all `export_*`, `import_image`, and the batch
-save write to the resolved path unconditionally — existing files are silently overwritten.
+save write to the resolved path unconditionally; existing files are silently overwritten.
 Evidence: `core/config.resolve` only sandboxes/creates parent dirs; the 8 `.exists()` checks
 in the tree are **input** existence checks (e.g. `inspect.render_preview`, `gui.open_in_editor`),
 not output guards.
 Impact: an agent can silently destroy an existing workspace file (e.g. overwrite a hand-made
 `hero.aseprite`). Data-loss risk; worse with `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
-Recommended fix: an opt-in no-clobber policy — e.g. `ASEPRITE_MCP_NO_CLOBBER=1` and/or an
+Recommended fix: an opt-in no-clobber policy, e.g. `ASEPRITE_MCP_NO_CLOBBER=1` and/or an
 `overwrite: bool = True` arg on creating/exporting tools that raises `WorkspaceError` when a
 target exists and overwrite is disallowed.
 Suggested PR: fix/audit-critical-fixes. Coverage: pure (resolve/policy) + `--run-aseprite`
@@ -243,7 +243,7 @@ Description: `apply_operations` accepts an unbounded `operations` list; `draw_pi
 lists. Only `draw_text` caps output (200k px).
 Evidence: `core/oplib.validate_operations` has no length cap; `tools/drawing.py` checks
 non-empty but not max.
-Impact: a pathological list produces a giant generated Lua script / very long run — a local
+Impact: a pathological list produces a giant generated Lua script / very long run, a local
 DoS / memory spike.
 Recommended fix: cap op lists (e.g. 1000) and pixel/point lists (e.g. 100k) with a clear
 `ValidationFailed`/`ValueError` naming the limit.
@@ -279,7 +279,7 @@ Severity: Low · Category: Hardening · Area: CI · Status: **Fixed in PR #14**
 Description: matrix is `3.10` + `3.12`; `requires-python = ">=3.10"` implies 3.11/3.13 should
 also be sane.
 Evidence: `.github/workflows/ci.yml`.
-Impact: minor — version-specific issues could slip.
+Impact: minor; version-specific issues could slip.
 Recommended fix: add `3.11` and `3.13`.
 Suggested PR: harden/release-gate-and-property-tests.
 Resolution: done as recommended. The matrix in `.github/workflows/ci.yml` is now
@@ -318,7 +318,7 @@ Resolution: fixed. See the Hardening entry above for the mechanism
 the README feature list, and the residual risk is stated plainly under *Out of scope*: the
 agent may still overwrite a workspace file when the caller passes `overwrite=True`.
 
-## Finding: Workspace traversal & symlink escape are handled — but untested
+## Finding: Workspace traversal & symlink escape are handled, but untested
 Severity: Info · Category: Security · Area: config · Status: Confirmed (no issue) · **Test gap fixed in PR #13; widened later**
 
 Description: `config.resolve` rejects absolute paths and `..` escapes unless opted in, and
@@ -359,7 +359,7 @@ Those three came out of issues #55 and #56, closed in PR #67, and are described 
 (reserved device names, alternate data streams, trailing dots) were closed in the same
 pass; `core/config._check_component` is the guard.
 
-## Finding: Generated-Lua injection — not exploitable
+## Finding: Generated-Lua injection, not exploitable
 Severity: Info · Category: Security · Area: luagen · Status: Confirmed (no issue) · **Re-verified at v0.8.1; since strengthened**
 
 Description: every user value (filenames, layer/tag/slice names, colours, batch op args,
@@ -485,9 +485,9 @@ finding: `pydantic>=2` is declared explicitly because the tool layer imports
 line, so the order the work was actually taken in stays legible.
 
 ### 1. Must fix before next feature
-- **Overwrite / clobber policy** (S-High / H-Med) — prevents silent data loss. *Done: PR #13, completed PR #47.*
-- **GitHub Actions `permissions: contents: read`** (S-Med) — one-line, high value. *Done: PR #13.*
-- **Symlink-escape regression test** (S, test gap) — locks the sandbox guarantee. *Done: PR #13; widened in PR #67.*
+- **Overwrite / clobber policy** (S-High / H-Med): prevents silent data loss. *Done: PR #13, completed PR #47.*
+- **GitHub Actions `permissions: contents: read`** (S-Med): one-line, high value. *Done: PR #13.*
+- **Symlink-escape regression test** (S, test gap): locks the sandbox guarantee. *Done: PR #13; widened in PR #67.*
 
 ### 2. Should fix soon
 - `scripts/release_gate.py` (H-Med). *Done: PR #14.*
@@ -503,7 +503,7 @@ line, so the order the work was actually taken in stays legible.
 - Action SHA-pinning + Dependabot (S-Low). *Done: PR #19.*
 - Untrusted-file caveat note (S-Low, folds into SECURITY.md). *Done: PR #14, by scope.*
 
-### 4. Explicitly safe — no issue found
+### 4. Explicitly safe: no issue found
 Batch rollback · dry_run no-launch · typed-error catch compat · core shims/no-cycles ·
 workspace path anchor · generated-Lua injection · subprocess shell safety · temp Lua
 placement/cleanup.

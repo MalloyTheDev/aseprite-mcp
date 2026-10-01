@@ -1,4 +1,4 @@
-"""Health check — verify the server can actually drive Aseprite end to end.
+"""Health check: verify the server can actually drive Aseprite end to end.
 
 Lets a user ask the agent "is the Aseprite MCP working?" and get a useful answer:
 is Aseprite found, can it run Lua, can it create a sprite, can it export a PNG.

@@ -5,7 +5,7 @@ Turns Aseprite ``--format json-array`` sprite-sheet metadata into a Godot 4
 animation when the sprite is untagged), each frame an ``AtlasTexture`` region into the
 exported sheet, with per-frame timing derived from Aseprite frame durations.
 
-v1 scope: SpriteFrames only — no pivot/origin/hitbox/9-slice. Aseprite tag *direction*
+v1 scope: SpriteFrames only, no pivot/origin/hitbox/9-slice. Aseprite tag *direction*
 (reverse/pingpong) is not represented (Godot animations only carry a ``loop`` flag); every
 animation uses the caller's ``default_loop``.
 
@@ -23,7 +23,7 @@ DEFAULT_ANIMATION_NAME = "default"
 
 
 def _fmt_float(x: float) -> str:
-    """Godot-style float literal — always has a decimal point (e.g. 10 -> '10.0')."""
+    """Godot-style float literal: always has a decimal point (e.g. 10 -> '10.0')."""
     s = f"{float(x):.6f}".rstrip("0").rstrip(".")
     return s if "." in s else s + ".0"
 
@@ -85,7 +85,7 @@ def build_spriteframes(
     frames = sheet_data.get("frames")
     if not isinstance(frames, list):
         raise ValueError(
-            "sheet_data['frames'] must be a list — export with --format json-array."
+            "sheet_data['frames'] must be a list; export with --format json-array."
         )
     if not frames:
         raise ValueError("sheet_data has no frames.")

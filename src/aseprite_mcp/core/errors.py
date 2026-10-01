@@ -2,7 +2,7 @@
 
 A single base (`AsepriteMCPError`) with specific subclasses so callers and agents can
 distinguish configuration failures, a missing Aseprite, workspace/path-sandbox
-rejection, process timeouts, Lua tool failures, and CLI/export failures — and recover
+rejection, process timeouts, Lua tool failures, and CLI/export failures, then recover
 accordingly.
 
 Backwards compatibility: `AsepriteError` is an alias of the base, so existing

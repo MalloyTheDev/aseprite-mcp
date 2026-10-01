@@ -1,4 +1,4 @@
-"""Stamp external images onto a sprite — from a file path or inline base64 PNG."""
+"""Stamp external images onto a sprite, from a file path or inline base64 PNG."""
 
 from __future__ import annotations
 

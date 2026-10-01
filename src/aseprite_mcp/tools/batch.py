@@ -1,7 +1,7 @@
-"""Batch operation runner — apply many edits to one sprite in a single Aseprite
+"""Batch operation runner: apply many edits to one sprite in a single Aseprite
 process, atomically.
 
-`apply_operations` validates the op list (pure Python), then — unless `dry_run` —
+`apply_operations` validates the op list (pure Python), then, unless `dry_run`,
 opens the sprite once, runs every op inside one `app.transaction`, and saves only if
 all succeed. Any failure aborts the whole batch (rollback) and saves nothing. This
 collapses multi-launch agent workflows (add layer -> draw -> add frame -> tag) into a
@@ -45,7 +45,7 @@ def apply_operations(filename: str, operations: list[dict], dry_run: bool = Fals
 
     Atomic: if any op fails the whole batch is rolled back and nothing is saved; the
     error names the failing op index. `dry_run=True` validates the op list and returns
-    the plan **without launching Aseprite** (shape checks only — runtime issues like a
+    the plan **without launching Aseprite** (shape checks only; runtime issues like a
     missing layer surface on a real run).
 
     Frames are 1-based, and an `arg=frame` argument must name a frame that already

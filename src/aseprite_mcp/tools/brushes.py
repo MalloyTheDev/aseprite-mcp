@@ -35,7 +35,7 @@ def draw_brush(
             '.', or '0' is a filled cell. e.g. a plus brush: ["010", "111", "010"].
         points: Positions to stamp at, list of {"x": int, "y": int}.
         color: Colour to stamp the brush in.
-        anchor: "center" (default) or "topleft" — where each point sits in the brush.
+        anchor: "center" (default) or "topleft", where each point sits in the brush.
     """
     if not brush or not points:
         raise ValidationFailed("brush and points must be non-empty.")

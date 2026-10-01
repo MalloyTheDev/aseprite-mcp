@@ -35,7 +35,7 @@ def open_in_editor(filename: str) -> dict:
     """Open a sprite in the Aseprite GUI window (non-blocking) for live viewing.
 
     The window stays open and runs independently of this server. Keep editing the
-    file with the other tools — Aseprite detects the on-disk change and prompts to
+    file with the other tools; Aseprite detects the on-disk change and prompts to
     reload (or reloads automatically, depending on your Aseprite preferences), so
     you can watch edits land without re-opening.
 
