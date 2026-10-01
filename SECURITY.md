@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes target the latest released `0.7.x` line and `main`. Older tags are not
+Security fixes target the latest released `0.8.x` line and `main`. Older tags are not
 patched — upgrade to the newest release.
 
 ## Threat model
@@ -27,18 +27,18 @@ the workspace — see *Out of scope* below.
   (`config.resolve` calls `.resolve()` before checking containment, and now does so on the
   permissive branch too, so a returned path never still contains `..`). Opt out only with
   `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
-  - **Junctions, and directory listings (unreleased).** An NTFS junction is not a symlink to
-    Python (`Path.is_symlink()` is False), so through v0.7.1 `list_sprites` walked through
+  - **Junctions, and directory listings (v0.8.0).** An NTFS junction is not a symlink to
+    Python (`Path.is_symlink()` is False), so through v0.7.0 `list_sprites` walked through
     one and reported filenames and byte sizes from outside the workspace. It now re-checks
     every directory and every file with `os.path.realpath` before including it, which also
     stops a junction aimed at a drive root from walking the drive. Opening those paths was
     always refused, so the exposure was names and sizes, not content.
-  - **No directory creation on reads (unreleased).** `config.resolve` no longer creates the
+  - **No directory creation on reads (v0.8.0).** `config.resolve` no longer creates the
     parent directory; only the output helpers (`core/paths.py`) do, via
-    `create_parent=True`. Through v0.7.1 a read of `a/b/c/d/e/absent.png` left five
+    `create_parent=True`. Through v0.7.0 a read of `a/b/c/d/e/absent.png` left five
     directories behind, so a caller could build arbitrary trees inside the workspace out of
     nothing but failing calls.
-  - **Windows-hostile path components (unreleased).** On Windows, each component of a caller
+  - **Windows-hostile path components (v0.8.0).** On Windows, each component of a caller
     path is rejected if it is a reserved device name (`NUL`, `CON`, `COM1`, `LPT1`, ...,
     checked on the stem so `NUL.png` is refused too), contains `:` (an NTFS alternate data
     stream, which is invisible to every listing and export tool here), or ends with a space
@@ -46,13 +46,19 @@ the workspace — see *Out of scope* below.
     disk). On every platform, input that names no file (empty, `.`, `a/..`) is rejected
     instead of silently resolving to the workspace directory. A write to `NUL` previously
     succeeded, wrote nothing, and reported the path as created.
-- **Workspace default (unreleased).** With `ASEPRITE_MCP_WORKSPACE` unset, the default is a
+  - **Null bytes (v0.8.0).** A filename containing `\x00` is rejected explicitly, on every
+    platform, before anything touches it. Through Python 3.12 an embedded NUL made
+    `Path.resolve()` raise and the sandbox failed closed as a side effect; 3.13 resolves
+    such a path without complaint, so on the newest interpreter the project supports the
+    guard had already stopped holding. It is now a check of its own rather than a
+    standard-library implementation detail.
+- **Workspace default (v0.8.0).** With `ASEPRITE_MCP_WORKSPACE` unset, the default is a
   sibling `workspace/` directory *only* when the package runs from a source checkout.
   Installed (`uvx aseprite-mcp`), it is a per-user data directory
-  (`%LOCALAPPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME`); through v0.7.1 the
+  (`%LOCALAPPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME`); through v0.7.0 the
   same path arithmetic aimed it inside the Python installation. An unusable workspace
   raises `WorkspaceError` naming `ASEPRITE_MCP_WORKSPACE`, never a raw `PermissionError`.
-- **No-clobber output (v0.6.1+, completed in v0.7.1).** Every output-writing tool refuses
+- **No-clobber output (v0.6.1+, completed in v0.8.0).** Every output-writing tool refuses
   to overwrite an existing file unless `overwrite=True`; multi-file exports validate every
   target before writing any of them. Pattern exports (`frames/walk_{frame}.png`) are
   expanded by Aseprite itself, so they are checked against everything the pattern could
@@ -67,7 +73,7 @@ the workspace — see *Out of scope* below.
   covered by Hypothesis property tests asserting strings can't break out of their literal.
 - **Size limits (DoS guard, v0.6.x+).** Batch op-lists and pixel/tile/colour lists are
   capped (`core/limits.py`); exceeding a cap raises `ValidationFailed` before any work
-  begins, with a message explaining how to split the request. Since v0.7.1 the same module
+  begins, with a message explaining how to split the request. Since v0.8.0 the same module
   also bounds **canvas geometry** (16384px per axis *and* 16,777,216 pixels of area, so a
   pair of individually-legal axes can't add up to gigabytes), **inline base64 images**
   (32 MB **and** their declared raster dimensions, so a compressed decompression bomb
@@ -79,8 +85,10 @@ the workspace — see *Out of scope* below.
   clamped to 1-3600s so a hostile or fat-fingered value can't disable the guard).
 - **Bring your own Aseprite.** The server only executes the Aseprite binary you point it
   at via `ASEPRITE_PATH` / PATH.
-- **Least-privilege CI.** The GitHub Actions workflow runs with `permissions: contents: read`
-  and pins every action to a commit SHA. CodeQL scans `main` and every PR.
+- **Least-privilege CI.** Both GitHub Actions workflows declare `permissions: contents: read`
+  at the top level and pin every action to a commit SHA. CodeQL (`security-extended`) scans
+  `main`, every PR, and weekly on a schedule; its analysis job is the only thing granted a
+  write scope, `security-events: write`, which is what uploading the SARIF results needs.
 
 ## Out of scope (your responsibility)
 
