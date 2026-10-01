@@ -22,9 +22,20 @@ body:
     attributes:
       label: health_check output
       description: >
-        Run the `health_check` tool and paste the JSON. It reports the Aseprite version,
-        the resolved workspace and the tool count, which is most of what triage needs.
+        Run the `health_check` tool and paste the JSON. It reports this server's
+        version, the Aseprite version, the resolved workspace and the tool count,
+        which is most of what triage needs.
       render: json
+    validations:
+      required: false
+  - type: input
+    id: aseprite-version
+    attributes:
+      label: Aseprite version
+      description: >
+        The `health_check` output above already carries this; fill it in here if you
+        could not run it. Aseprite's Lua API differs between 1.2 and 1.3.
+      placeholder: "1.3.7"
     validations:
       required: false
   - type: input
