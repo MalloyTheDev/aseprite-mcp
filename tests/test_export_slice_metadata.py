@@ -139,3 +139,76 @@ def test_a_client_can_also_send_it_as_a_json_string():
     torso = next(s for s in _slice_doc(m)["slices"] if s["name"] == "torso")
     assert (torso["type"], torso["id"]) == ("hurtbox", "core")
     assert torso["data"] == {"type": "hurtbox", "id": "core"}
+
+
+# ------------------------------------------- reading a slice back without exporting (#106)
+def test_list_slices_reads_structured_data_back_on_its_own():
+    """The gap that made confirming #24 inconclusive: `list_slices` showed the same thing
+    for a slice with data and one without, so the only way to see what a slice carried
+    was to write an export file and parse it."""
+    sprite.create_sprite("w/read.aseprite", 16, 16)
+    slices.add_slice("w/read.aseprite", "body", 0, 0, 8, 8,
+                     data={"type": "hitbox", "id": "body"}, color="#ff0000ff")
+    slices.add_slice("w/read.aseprite", "plain", 8, 8, 4, 4)
+
+    by_name = {s["name"]: s for s in slices.list_slices("w/read.aseprite")["slices"]}
+
+    assert by_name["body"]["data_parsed"] == {"type": "hitbox", "id": "body"}
+    assert json.loads(by_name["body"]["data"]) == {"type": "hitbox", "id": "body"}
+    assert by_name["body"]["color"] == "#ff0000ff"
+    assert "data" not in by_name["plain"], "a slice that carries nothing says nothing"
+    assert "data_parsed" not in by_name["plain"]
+
+
+def test_user_data_that_is_not_json_comes_back_as_the_string():
+    """User-data is a free string in Aseprite and a slice labelled by convention rather
+    than by JSON is ordinary, so this is not a parse failure to report."""
+    sprite.create_sprite("w/plainstr.aseprite", 16, 16)
+    slices.add_slice("w/plainstr.aseprite", "body", 0, 0, 8, 8, data="hitbox")
+
+    entry = slices.list_slices("w/plainstr.aseprite")["slices"][0]
+
+    assert entry["data"] == "hitbox"
+    assert "data_parsed" not in entry
+
+
+def test_the_data_string_round_trips_through_set_slice_unchanged():
+    """`data` is reported as stored rather than re-encoded, so reading and writing it
+    back is not an edit."""
+    sprite.create_sprite("w/trip.aseprite", 16, 16)
+    slices.add_slice("w/trip.aseprite", "body", 0, 0, 8, 8, data='{"type":"hurtbox"}')
+
+    first = slices.list_slices("w/trip.aseprite")["slices"][0]["data"]
+    slices.set_slice("w/trip.aseprite", "body", data=first)
+    second = slices.list_slices("w/trip.aseprite")["slices"][0]["data"]
+
+    assert first == second == '{"type":"hurtbox"}'
+
+
+def test_get_sprite_info_reports_the_data_too():
+    """`list_slices` returns `sprite_info`'s slices, so the fix belongs in the shared
+    serializer rather than in the one tool that was noticed to be missing it."""
+    from aseprite_mcp.tools import inspect as inspect_tools
+
+    sprite.create_sprite("w/info.aseprite", 16, 16)
+    slices.add_slice("w/info.aseprite", "body", 0, 0, 8, 8, data={"type": "hitbox"})
+
+    entry = inspect_tools.get_sprite_info("w/info.aseprite")["slices"][0]
+
+    assert json.loads(entry["data"]) == {"type": "hitbox"}
+    assert entry["color"].startswith("#")
+
+
+def test_the_export_still_reads_colour_and_data_from_the_shared_serializer():
+    """The export had a private slice reader that was the only thing reporting colour and
+    user-data, and launched Aseprite a second time to use it. Deleting it must not cost
+    the exported document either field."""
+    _setup("w/shared")
+
+    doc = _slice_doc(export_presets.export_slice_metadata("w/shared.aseprite"))
+    by_name = {s["name"]: s for s in doc["slices"]}
+
+    assert by_name["hitbox"]["color"] == "#ff0000ff"
+    assert by_name["body"]["data"] == {"type": "hurtbox", "id": "core"}
+    assert by_name["body"]["raw_data"] == '{"type":"hurtbox","id":"core"}'
+    assert by_name["hitbox"]["raw_data"] == "", "no data is an empty string, as before"

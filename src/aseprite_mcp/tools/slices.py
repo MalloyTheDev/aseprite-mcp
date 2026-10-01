@@ -13,6 +13,7 @@ from pydantic import BeforeValidator
 
 from ..app import mcp
 from ..core.runner import run_lua
+from ..core.slice_metadata import parse_user_data
 from .common import lua_path, parse_color, resolve_path
 
 
@@ -164,10 +165,28 @@ def remove_slice(filename: str, name: str) -> dict:
 
 @mcp.tool()
 def list_slices(filename: str) -> dict:
-    """List all slices in the sprite with their bounds, center, and pivot."""
+    """List every slice with its bounds, center, pivot, colour and user-data.
+
+    User-data comes back two ways, because it is one string that is sometimes a document.
+    `data` is the string exactly as Aseprite stores it, so it round-trips through
+    `set_slice` unchanged. `data_parsed` is added only when that string is valid JSON,
+    which is the shape worth sending: `{"type": "hitbox", "id": "body"}` is what
+    `export_slice_metadata` reads a slice's type and id from, and what
+    `build_asset_from_spec` writes. A slice with no user-data has neither field, so "set
+    and forgot" and "never set" are now distinguishable, which they were not while this
+    tool reported the same thing for both.
+    """
     body = """
     local spr = open_sprite(ARG.src)
     local info = sprite_info(spr)
     RESULT = { count = #info.slices, slices = info.slices }
     """
-    return run_lua(body, {"src": lua_path(resolve_path(filename))})
+    result = run_lua(body, {"src": lua_path(resolve_path(filename))})
+    for entry in result.get("slices") or []:
+        raw = entry.get("data")
+        if not isinstance(raw, str):
+            continue
+        parsed, _ = parse_user_data(raw)
+        if parsed is not None:
+            entry["data_parsed"] = parsed
+    return result
