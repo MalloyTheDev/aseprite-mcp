@@ -43,7 +43,7 @@ jobs:
       - name: Import check (server + all tool modules register)
         run: uv run --python ${{ matrix.python-version }} python -c "import asyncio; from aseprite_mcp.server import mcp; print('tools:', len(asyncio.run(mcp.list_tools())))"
 
-      - name: Run unit tests
+      - name: Run unit tests (pure tier only; runners have no Aseprite)
         # CI runners have no Aseprite, so the integration/golden suites are gated
         # behind --run-aseprite (not passed here). The pure-Python unit tests
         # (colour parsing, Lua serialization, path sandbox) always run for real.
