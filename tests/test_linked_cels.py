@@ -131,3 +131,106 @@ def test_a_frame_that_does_not_exist_says_so(request):
     name = _strip(request, 2)
     with pytest.raises(AsepriteError, match="does not exist"):
         cels.link_cels(name, "Layer 1", [1, 9])
+
+
+# ----------------------------- a write to a linked frame says where it landed (#148)
+def test_an_edit_to_a_linked_frame_reports_the_frames_it_also_changed():
+    """The defect that #148 actually describes. The propagation is correct and is what
+    linking is for, but `draw_pixels(..., frame=2)` on four linked frames changed all
+    four and returned `frame: 2, pixels_written: 1`: the only way to know was to have
+    called `get_cel` beforehand and thought about it.
+
+    Not parametrised on the tool, deliberately: every pixel-editing tool in this server
+    commits through one helper, so a second case would re-test the same line.
+    """
+    name = "lc/report_linked.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_rectangle(name, 4, 4, 8, 8, "#ff4040", filled=True)
+    for _ in range(3):
+        frames.add_frame(name, copy_from=1)
+    cels.link_cels(name, "Layer 1", [1, 2, 3, 4])
+
+    result = drawing.draw_pixels(name, [{"x": 0, "y": 0}], "#ffffff", frame=2)
+
+    assert result["frame"] == 2
+    assert result["linked_frames_also_changed"] == [1, 3, 4]
+
+
+def test_an_unlinked_frame_reports_nothing_extra():
+    """The common case must not grow the field, which would read as a claim that other
+    frames changed when none did."""
+    name = "lc/report_unlinked.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_rectangle(name, 4, 4, 8, 8, "#ff4040", filled=True)
+    frames.add_frame(name, copy_from=1)
+
+    result = drawing.draw_pixels(name, [{"x": 0, "y": 0}], "#ffffff", frame=2)
+
+    assert "linked_frames_also_changed" not in result
+
+
+def test_a_shading_pass_reports_it_too():
+    """The helper is shared, so the report has to arrive from every tool that commits an
+    image and not only from the drawing ones."""
+    from aseprite_mcp.tools import effects
+
+    name = "lc/report_shading.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_rectangle(name, 4, 4, 8, 8, "#ff4040", filled=True)
+    for _ in range(2):
+        frames.add_frame(name, copy_from=1)
+    cels.link_cels(name, "Layer 1", [1, 2, 3])
+
+    result = effects.add_outline(name, "#ffffff", frame=2)
+
+    assert result["linked_frames_also_changed"] == [1, 3]
+
+
+def test_linking_still_means_the_frames_move_together():
+    """Pinned here as well as in the pre-existing test, because the first attempt at
+    #148 broke exactly this: it gave the edited frame its own cel, which turned linking
+    into copying. The frames sharing an image must keep sharing it."""
+    name = "lc/report_still_linked.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_rectangle(name, 4, 4, 8, 8, "#ff4040", filled=True)
+    for _ in range(3):
+        frames.add_frame(name, copy_from=1)
+    cels.link_cels(name, "Layer 1", [1, 2, 3, 4])
+
+    drawing.draw_pixels(name, [{"x": 0, "y": 0}], "#ffffff", frame=2)
+
+    assert cels.get_cel(name, "Layer 1", 2)["linked_with"] == [1, 3, 4]
+    for f in (1, 3, 4):
+        px = inspect.get_pixels(name, 0, 0, 1, 1, frame=f)["pixels"][0][0]
+        assert px[7:9] != "00", f"frame {f} did not follow frame 2"
+
+
+# -------------------------- sorting a palette must not remap a shared image twice
+def test_sorting_a_palette_remaps_a_linked_image_once(request):
+    """Found while closing #148. `sort_palette` looped over `spr.cels` and assigned
+    `cel.image`, so a shared image was remapped once per linked frame: a four frame hold
+    came back remapped four times (index 1 to 2 to 0 to 3 to 1), and art drawn in the
+    darkest colour of a four colour palette read back mid grey while the tool promised
+    the image would look identical."""
+    from aseprite_mcp.tools import palette
+
+    name = f"lc/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 8, 8, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", "#111111ff", "#eeeeeeff", "#888888ff"])
+    for _ in range(3):
+        frames.add_frame(name)
+    for f in (1, 2, 3, 4):
+        drawing.draw_rectangle(name, 2, 2, 3, 3, "index:1", filled=True, frame=f)
+    cels.link_cels(name, "Layer 1", [1, 2, 3, 4])
+
+    def pixel(frame):
+        return inspect.get_pixels(name, 2, 2, 1, 1, frame=frame)["pixels"][0][0]
+
+    before = [pixel(f) for f in (1, 2, 3, 4)]
+    assert before == ["#111111ff"] * 4
+
+    palette.sort_palette(name, by="luminance", reverse=True)
+
+    assert [pixel(f) for f in (1, 2, 3, 4)] == before, "the shared image was remapped twice"
+    assert cels.get_cel(name, "Layer 1", 1)["linked_with"] == [2, 3, 4], \
+        "sorting a palette must not break the links"

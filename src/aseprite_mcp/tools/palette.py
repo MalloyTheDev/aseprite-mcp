@@ -3,12 +3,53 @@
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import ramps
+from ..core import indexed, ramps
 from ..core.errors import ValidationFailed
 from ..core.limits import MAX_COLOR_LIST_LENGTH, check_count, check_list_length
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
+
+# What the pure diagnosis in `core.indexed.palette_readings` needs, measured where the
+# palette actually is. Appended to the body of every tool that writes a palette, because
+# an entry that cannot be drawn is created by *writing* one, and the caller who wrote it
+# is the one who can still do something about it.
+#
+# Only the four numbers, not the colours: `get_palette` already returns those, and a
+# tool that edits one entry should not answer with 256.
+_PALETTE_STATE_LUA = """
+do
+  local pal = spr.palettes[1]
+  local ti = spr.transparentColor
+  local shadowed = nil
+  if ti >= 0 and ti < #pal then shadowed = color_hex(pal:getColor(ti)) end
+  local drawable = 0
+  for i = 0, #pal - 1 do
+    if i ~= ti and pal:getColor(i).alpha > 0 then drawable = drawable + 1 end
+  end
+  RESULT.color_mode = colormode_name(spr.colorMode)
+  RESULT.palette = {
+    size = #pal,
+    transparent_index = ti,
+    at_transparent_index = shadowed,
+    drawable = drawable,
+  }
+end
+"""
+
+
+def _with_palette_readings(result: dict) -> dict:
+    """Attach `warnings` when the palette now holds something it cannot draw.
+
+    The judgement is pure and lives in `core.indexed`; this only hands it the
+    measurement and drops the result in. Absent rather than empty when there is nothing
+    to say, so a `warnings` key always means there is.
+    """
+    notes = indexed.palette_readings(result.get("palette") or {},
+                                     result.get("color_mode") or "")
+    if notes:
+        result["warnings"] = notes
+    return result
 
 
 @mcp.tool()
@@ -42,8 +83,8 @@ def set_palette(filename: str, colors: list[str]) -> dict:
     spr:setPalette(pal)
     save_sprite(spr)
     RESULT = { ok = true, size = #pal }
-    """
-    return run_lua(body, args)
+    """ + _PALETTE_STATE_LUA
+    return _with_palette_readings(run_lua(body, args))
 
 
 @mcp.tool()
@@ -69,8 +110,8 @@ def set_palette_color(filename: str, index: int, color: str) -> dict:
     pal:setColor(ARG.index, mkcolor(ARG.color))
     save_sprite(spr)
     RESULT = { ok = true, index = ARG.index, size = #pal }
-    """
-    return run_lua(body, args)
+    """ + _PALETTE_STATE_LUA
+    return _with_palette_readings(run_lua(body, args))
 
 
 @mcp.tool()
@@ -85,8 +126,8 @@ def add_palette_color(filename: str, color: str) -> dict:
     pal:setColor(n, mkcolor(ARG.color))
     save_sprite(spr)
     RESULT = { ok = true, index = n, size = #pal }
-    """
-    return run_lua(body, args)
+    """ + _PALETTE_STATE_LUA
+    return _with_palette_readings(run_lua(body, args))
 
 
 @mcp.tool()
@@ -103,8 +144,8 @@ def resize_palette(filename: str, size: int) -> dict:
     spr.palettes[1]:resize(ARG.size)
     save_sprite(spr)
     RESULT = { ok = true, size = #spr.palettes[1] }
-    """
-    return run_lua(body, args)
+    """ + _PALETTE_STATE_LUA
+    return _with_palette_readings(run_lua(body, args))
 
 
 @mcp.tool()
@@ -121,8 +162,8 @@ def load_palette(filename: str, palette_file: str) -> dict:
     spr:setPalette(pal)
     save_sprite(spr)
     RESULT = { ok = true, size = #pal }
-    """
-    return run_lua(body, args)
+    """ + _PALETTE_STATE_LUA
+    return _with_palette_readings(run_lua(body, args))
 
 
 @mcp.tool()
@@ -241,25 +282,42 @@ def sort_palette(filename: str, by: str = "luminance", reverse: bool = False) ->
     end
     spr:setPalette(newpal)
     if spr.colorMode == ColorMode.INDEXED then
+      -- One representative cel per *distinct image*, collected before anything is
+      -- written. Linked cels share a single CelData, so assigning `cel.image` writes
+      -- through to every frame in the group; iterating cels therefore remapped a shared
+      -- image once per linked frame, and the result was silent corruption that scaled
+      -- with the group size. A four frame hold came back remapped four times: index 1
+      -- became 2, then 0, then 3, then 1 again, so art drawn in the darkest colour of a
+      -- four colour palette came back mid grey while the tool reported success and
+      -- promised the image would look identical.
+      local targets, seen = {}, {}
       for _, cel in ipairs(spr.cels) do
         -- Skip tilemap cels: their pixels are tile indices, not palette indices.
-        if not cel.layer.isTilemap then
-          local im = Image(cel.image)
-          for y = 0, im.height - 1 do
-            for x = 0, im.width - 1 do
-              local v = im:getPixel(x, y)
-              if remap[v] ~= nil then im:drawPixel(x, y, remap[v]) end
-            end
-          end
-          cel.image = im
+        if not cel.layer.isTilemap and not seen[cel.image.id] then
+          seen[cel.image.id] = true
+          targets[#targets + 1] = cel
         end
+      end
+      for _, cel in ipairs(targets) do
+        local im = Image(cel.image)
+        for y = 0, im.height - 1 do
+          for x = 0, im.width - 1 do
+            local v = im:getPixel(x, y)
+            if remap[v] ~= nil then im:drawPixel(x, y, remap[v]) end
+          end
+        end
+        -- Deliberately assigned through the shared record rather than broken out with
+        -- newCel: every frame in the group shows the same drawing and all of them need
+        -- the same remap, so this is the one case where writing through a link is the
+        -- correct thing to do. The links are preserved.
+        cel.image = im
       end
       if remap[spr.transparentColor] ~= nil then spr.transparentColor = remap[spr.transparentColor] end
     end
     save_sprite(spr)
     RESULT = { ok = true, size = n, by = ARG.by }
-    """
-    return run_lua(body, args)
+    """ + _PALETTE_STATE_LUA
+    return _with_palette_readings(run_lua(body, args))
 
 
 def _unit_rgb(color: str) -> tuple[float, float, float]:

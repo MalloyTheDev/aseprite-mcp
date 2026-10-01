@@ -6,6 +6,54 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Sorting a palette corrupted an indexed sprite that had linked cels.** `sort_palette`
+  remaps every pixel through the same table it reorders the palette with, so the image
+  looks identical afterwards. It did that by looping over `spr.cels` and assigning
+  `cel.image`, and linked cels share one `CelData`: the shared image was therefore
+  remapped once per linked frame. A four frame hold came back remapped four times, so
+  index 1 became 2, then 0, then 3, then 1 again, and art drawn in the darkest colour of
+  a four colour palette read back mid grey while the tool reported success and promised
+  the picture was unchanged. The corruption scaled with the size of the link group, which
+  is why a two frame hold looked almost right. Each distinct image is now collected
+  before anything is written and remapped exactly once; the links are preserved, because
+  every frame in a group shows the same drawing and all of them want the same remap.
+  Found while looking into the linked-cel reporting below.
+- **An edit to a linked cel said nothing about the frames it also changed.** Linked cels
+  share one image, so `draw_pixels(..., frame=2)` on four linked frames changes all four.
+  That is correct and is the point of linking: `link_cels` says "editing any of them
+  edits all of them", and Aseprite itself paints every frame sharing a cel. What was
+  wrong is that the result said `frame: 2, pixels_written: 1` and stopped there, so the
+  only way to know four frames had moved was to have called `get_cel` first and thought
+  about it. The frames an edit also reached are now reported as
+  `linked_frames_also_changed`, attached by the same harness that reports the pixel
+  counts, so all thirteen tools that commit an image say it without each one having to
+  remember to.
+
+  The first attempt at this broke the frame out of the group instead, on the reasoning
+  that a call naming a frame means that frame. Two existing tests caught it, and they
+  were right: one of them exists precisely to notice if linking ever quietly becomes
+  copying. Propagation is the feature, silence was the defect, and only the silence is
+  fixed.
+- **A palette could hold a colour that can never be drawn, and said nothing.** An
+  indexed pixel is an offset, and one offset means "no pixel here", so an opaque colour
+  sitting at the sprite's transparent index is in the palette, is returned by
+  `get_palette`, and resolves to its nearest *drawable* neighbour when anything asks for
+  it. A ramp written darkest-first, which is the natural order, puts its darkest colour
+  at index 0 and loses it: the shading comes out banded and every tool reports success.
+  The six tools that write a palette (`set_palette`, `set_palette_color`,
+  `add_palette_color`, `resize_palette`, `load_palette`, `sort_palette`) now report it,
+  naming the entry, the index and `set_transparent_color`.
+
+  A warning rather than a refusal, because an opaque entry at index 0 is perfectly
+  reasonable for a sprite that never draws that colour. Nothing is said about RGB or
+  grayscale sprites, where a pixel carries its own alpha and the transparent index means
+  nothing, so the reading cannot be noise on the common case. And the transparent index
+  is deliberately **not** moved to a transparent entry: that would reinterpret every
+  existing index-0 pixel in the sprite as opaque, which is a worse and quieter kind of
+  damage than the one being reported.
+
+
 ## [0.9.0] - 2026-10-01
 
 The release that gave the server a way to check its own work. `diff_sprites` answers the

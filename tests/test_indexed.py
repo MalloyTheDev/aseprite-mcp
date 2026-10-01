@@ -157,3 +157,61 @@ def test_an_index_background_adds_nothing():
 
     assert colors == list(indexed.DEFAULT_INDEXED_PALETTE)
     assert len(colors) > 5
+
+
+# ------------------------------------ entries a palette holds and cannot draw (#143)
+def _state(size, transparent_index, at_transparent_index, drawable):
+    return {"size": size, "transparent_index": transparent_index,
+            "at_transparent_index": at_transparent_index, "drawable": drawable}
+
+
+def test_an_opaque_colour_at_the_transparent_index_is_reported():
+    """It is in the palette, get_palette returns it, and it can never be drawn: a
+    request for it resolves to the nearest entry that can be."""
+    notes = indexed.palette_readings(
+        _state(2, 0, "#000000ff", 1), "indexed")
+
+    assert notes, "an unreachable entry said nothing"
+    assert "entry 0 is #000000ff" in notes[0]
+    assert "set_transparent_color" in notes[0], "the remedy is not named"
+
+
+def test_a_transparent_entry_at_the_transparent_index_is_the_normal_case():
+    """The usual arrangement, and it must not produce a warning anyone has to read."""
+    assert indexed.palette_readings(_state(3, 0, "#00000000", 2), "indexed") == []
+
+
+@pytest.mark.parametrize("mode", ["rgb", "gray"])
+def test_nothing_is_said_about_a_mode_that_has_no_transparent_index(mode):
+    """An RGB or grayscale pixel carries its own alpha, so `transparentColor` means
+    nothing there and an opaque entry at index 0 is unremarkable. Warning about it
+    would be noise a caller cannot act on."""
+    assert indexed.palette_readings(_state(2, 0, "#000000ff", 1), mode) == []
+
+
+def test_a_palette_with_nothing_drawable_says_so_separately():
+    """The #138 condition. Worth its own sentence because the remedy is different: the
+    palette needs a colour added, not reordered."""
+    notes = indexed.palette_readings(_state(4, 0, "#00000000", 0), "indexed")
+
+    assert any("None of this palette" in n for n in notes)
+    assert any("add_palette_color" in n for n in notes)
+
+
+def test_a_transparent_index_past_the_end_of_the_palette_shadows_nothing():
+    """`at_transparent_index` is None when the index is out of range, and nothing is
+    hidden, so there is nothing to report about it."""
+    assert indexed.palette_readings(_state(2, 9, None, 2), "indexed") == []
+
+
+def test_several_undrawable_entries_are_counted_rather_than_listed():
+    notes = indexed.palette_readings(_state(8, 0, "#00000000", 3), "indexed")
+
+    assert any("5 of 8" in n for n in notes)
+
+
+def test_a_state_the_lua_never_measured_does_not_raise():
+    """`palette_readings` is handed whatever the measurement produced, so a missing
+    field has to be survivable rather than an exception in a reporting path."""
+    assert indexed.palette_readings({}, "indexed") == []
+    assert indexed.palette_readings({}, "") == []

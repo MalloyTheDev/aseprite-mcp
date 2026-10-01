@@ -116,6 +116,12 @@ PRELUDE = r"""
 -- writes nothing does not grow a misleading "0".
 local _px_written, _px_clipped, _px_skipped, _px_masked = 0, 0, 0, 0
 
+-- Set by commit_image when the cel it wrote is shared with other frames, so the write
+-- landed on all of them. Reported by the harness: the propagation is correct and is what
+-- linking means, but a result saying `frame: 2, pixels_written: 1` while four frames
+-- changed is not telling the caller what happened.
+local _linked_hit_frame, _linked_hit_others = nil, nil
+
 -- The active selection, or nil. Set by open_sprite when a sidecar mask is loaded.
 --
 -- It has to be consulted by hand: a selection clips app.useTool and the filter commands,
@@ -694,15 +700,49 @@ local function get_draw_image(spr, layer, framenum)
   return img
 end
 
+-- Which other frames share this frame's cel image, by image identity, which is the
+-- same test `get_cel` reports `linked_with` from.
+local function linked_frames(spr, layer, framenum)
+  local cel = layer:cel(framenum)
+  if cel == nil or cel.image == nil then return {} end
+  local id, out, n = cel.image.id, {}, 0
+  for f = 1, #spr.frames do
+    if f ~= framenum then
+      local other = layer:cel(f)
+      if other ~= nil and other.image ~= nil and other.image.id == id then
+        n = n + 1
+        out[n] = f
+      end
+    end
+  end
+  return out
+end
+
 -- Write an edited full-canvas image back to a layer/frame cel.
+--
+-- Linked cels share one CelData, which holds the image, so assigning `cel.image` on one
+-- of them writes it to every frame in the group. That is not a bug: it is what linking
+-- means here and in Aseprite itself, where painting a linked cel paints every frame
+-- sharing it. `link_cels` says so ("editing any of them edits all of them"), and
+-- `test_an_edit_to_one_linked_frame_reaches_the_others_and_no_one_else` is the test that
+-- would notice if linking ever quietly became copying.
+--
+-- What was wrong is that nothing said so. `draw_pixels(..., frame=2)` on four linked
+-- frames changed all four and returned `frame: 2, pixels_written: 1`, so the only way to
+-- know was to have called `get_cel` beforehand and thought about it. The write still
+-- propagates; the frames it reached are now reported (#148).
 local function commit_image(spr, layer, framenum, img)
   local cel = layer:cel(framenum)
-  if cel ~= nil then
-    cel.image = img
-    cel.position = Point(0, 0)
-  else
+  if cel == nil then
     spr:newCel(layer, framenum, img, Point(0, 0))
+    return
   end
+  local shared = linked_frames(spr, layer, framenum)
+  if #shared > 0 then
+    _linked_hit_frame, _linked_hit_others = framenum, shared
+  end
+  cel.image = img
+  cel.position = Point(0, 0)
 end
 
 -- ===== info serializers ===========================================
@@ -820,6 +860,13 @@ def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
         # failure mode this project keeps finding.
         "  if type(RESULT) == 'table' and _sel ~= nil then\n"
         "    RESULT.selection_applied = true\n"
+        "  end\n"
+        # An edit to a linked cel reaches every frame sharing it, which is the point of
+        # linking and is not visible in the frame number the caller passed. Attached here
+        # for the same reason the pixel counters are: so every tool that commits an image
+        # says what it touched without each one having to remember to.
+        "  if type(RESULT) == 'table' and _linked_hit_frame ~= nil then\n"
+        "    RESULT.linked_frames_also_changed = _linked_hit_others\n"
         "  end\n"
         f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"
