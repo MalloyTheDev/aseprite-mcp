@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-01
+
+The release that gave the server a way to check its own work. `diff_sprites` answers the
+question the measuring tools could not, which is not "is this any good" but "did my last
+call do what I meant": it compares two frames and splits the difference into pixels that
+entered or left the silhouette, pixels repainted inside it, and pixels that changed only
+their alpha, because those are three different bugs. Indexed colour mode became usable at
+all, having previously accepted every draw and silently discarded it. The shading layer
+reached the top of the ramp with `specular_highlight`, `cast_shadow` and `glow`, all built
+from ramp steps rather than from alpha. And the animation layer learned to make the frames
+between two poses, with `tween_cels` and `smear_frame`.
+
+Tool count goes from 134 to 147.
+
+**Three behaviour changes to know about**, which is why this is 0.9.0 and not 0.8.2.
+`set_color_mode(..., "indexed")` now builds the palette from the art by default rather
+than mapping onto whatever palette the file was carrying, and **refuses** a conversion
+that would make drawn pixels disappear; the old mapping is still available as
+`palette_source="keep"`. `create_sprite(color_mode="indexed")` now produces a usable
+33-colour palette instead of 256 identical blacks. And `color_mode="rgba"`, an
+undocumented alias that used to be accepted as RGB, is now refused, which matches what
+`set_color_mode` already did.
+
 ### Fixed
 - **Indexed colour mode was unusable from either end.** An indexed pixel is an offset into
   a palette, and one offset, `transparentColor`, means "no pixel here" rather than a
@@ -111,6 +134,14 @@ All notable changes to this project are documented here. The format is based on
   definition of transparent and would otherwise have disagreed with `assess_sprite`.
 
 ### Added
+- **Python 3.14 is supported and tested.** `requires-python = ">=3.10"` has no upper
+  bound, so it already admitted 3.14 while CI stopped at 3.13: the package told pip it
+  worked on an interpreter the suite had never run on. 3.14 is now in the CI matrix,
+  having been run against locally first, and the per-minor classifiers PyPI's sidebar and
+  search filters read are present for the first time (they were absent entirely, leaving
+  only `Programming Language :: Python :: 3`). A test ties the classifiers, the
+  `requires-python` floor and the CI matrix together, because the defect was the two
+  drifting apart rather than either value being wrong.
 - **`tween_cels`: the three things an inbetween does that nothing here could do.**
   `offset_cels` moves a cel along a path, and that is one of four. The other three, a
   scale, a turn and a fade, had no tool: a ten-frame fade was ten `set_cel_opacity` calls,
@@ -398,6 +429,16 @@ All notable changes to this project are documented here. The format is based on
   of steps and is not told off for being round. (135 tools.)
 
 ### Changed
+- **`assess_sprite`, `diff_sprites` and `get_selection` now advertise `readOnlyHint`.**
+  All three write nothing, and none of them said so, which cost an approval prompt on
+  exactly the tools an agent calls after every pass; approval fatigue is how a user ends
+  up approving everything. `get_selection` was the sharper case: it matches the `get_*`
+  prefix a client keyed on names rather than on annotations would auto-approve, so the
+  gap is what made prefix matching look reasonable. A test now pins the direction that
+  would actually hurt, a tool on that list which saves the caller's sprite, and it found
+  `health_check` on its first run: that one does call `saveAs`, to a private temporary
+  file it deletes again, so the exemption is written down with its reason and the test
+  holds it to that reason.
 - **The showcase art is cleaned and the creature redrawn.** `assess_sprite` was pointed at
   every showcase image as its first real job and found stray pixels in all of them, so the
   generators now clear them: the item sheet went from 60 to 39, the creature from 13 to 6
@@ -644,6 +685,64 @@ are now serialized rather than racing.
   floating-tag chore.
 - **CodeQL** (`security-extended`) now scans `main`, every PR, and weekly on a schedule.
 
+*The seven entries below were backfilled on 2026-10-01. They shipped in this release, in
+PR #67, and were missing from the changelog entirely, which left `SECURITY.md` as their
+only record: four of them sat labelled "(unreleased)" there through two releases and
+others were dated to a `v0.7.1` that was never published. The changelog is where a
+version claim is supposed to be settled, so the omission is the root cause rather than a
+cosmetic gap.*
+
+- **A junction could disclose names from outside the workspace.** `list_sprites` walked
+  the workspace with `rglob`, and an NTFS junction is not a symlink as far as Python is
+  concerned: `is_symlink()` is False for one, so the walk went straight through it and
+  reported filenames and byte sizes from wherever it pointed. Every directory is now
+  re-checked with `realpath` before the walk descends into it, which also stops a
+  junction aimed at `C:\` from enumerating the whole drive, and every file is re-checked
+  too, because `is_file()` and `stat()` follow a file symlink pointing outside.
+- **A failing read built directory trees.** `resolve()` created the parent directory of
+  whatever it was handed, so reading `a/b/c/d/e/absent.png` left five directories behind
+  whether or not the call then succeeded. A caller could build an arbitrary tree inside
+  the workspace out of nothing but calls that failed. Creating the parent is now opt-in
+  (`create_parent=True`), which the output helpers in `core.paths` pass and a read does
+  not.
+- **Windows path components that are not files.** Three spellings pass a containment
+  check and then do not behave like the file the caller named, so each is now refused
+  with a message saying why. A component ending in a space or a dot has it stripped by
+  Windows, so the path reported back would not be the path on disk. A component
+  containing `:` names an NTFS alternate data stream, which is invisible to every
+  listing and export tool here. A reserved device name (`CON`, `PRN`, `AUX`, `NUL`,
+  `CONIN$`, `CONOUT$`, `COM0`-`COM9`, `LPT0`-`LPT9`) talks to the device instead of
+  creating a file: a write to `NUL` is discarded and reported as a success, which is
+  silent data loss with a positive result. The check is on the component's *stem*,
+  because whether `NUL.png` is device-mapped varies by Windows build. All three are
+  gated on Windows, since each is a legal POSIX filename and refusing it there would
+  decline work for no reason.
+- **The default workspace could land inside the Python installation.** The default was
+  `<repo>/workspace`, derived from `parents[3]` of `core/config.py`, which is the repo
+  root only in a `src/` checkout. `pyproject.toml` ships an `aseprite-mcp` console
+  script, so `uvx aseprite-mcp` is the normal setup for anyone who has not cloned the
+  repository, and there the same arithmetic pointed at `<venv>/Lib/workspace` on Windows
+  or `/usr/lib/python3.12/workspace` on POSIX. Sprites written there are invisible to
+  the user at best and a bare `PermissionError` at worst. The sibling default is now used
+  only when the layout is genuinely a checkout, and otherwise a per-user data directory
+  is used (`%LOCALAPPDATA%`, `~/Library/Application Support`, or `$XDG_DATA_HOME`).
+- **A null byte in a filename was rejected only by accident.** Through Python 3.12 an
+  embedded NUL made `Path.resolve()` raise `ValueError`, so the sandbox failed closed as
+  a side effect of the standard library. Python 3.13 resolves such a path without
+  complaint, and the sandbox then returned it as accepted. A guard that holds only
+  because of an implementation detail is not a guard, and this one had already stopped
+  holding on the newest interpreter the project supports, so the byte is now rejected
+  explicitly.
+- **`ASEPRITE_MCP_ALLOW_ABSOLUTE` skipped canonicalisation.** The permissive branch
+  returned the path without `.resolve()`, so a path still containing `..` segments was
+  handed back and landed verbatim in manifests and in the directory creation below it.
+  Opting out of the containment check is not the same as opting out of knowing where the
+  file is; both branches canonicalise now.
+- **An unusable workspace is a typed error.** A workspace directory that cannot be
+  created raised a bare `PermissionError` with no remedy in it, which is how sprites
+  ended up aimed at `site-packages` in the first place. It is a `WorkspaceError` naming
+  the directory and `ASEPRITE_MCP_WORKSPACE`.
+
 ### Changed
 - **Requires `mcp[cli]>=2.0.0`.** The 2.x SDK removed `mcp.server.fastmcp`: `FastMCP` is
   now `MCPServer`, `Image` moved to `mcp.server.mcpserver`, `Tool.inputSchema` became
@@ -826,6 +925,7 @@ and the Aseprite CLI.
 - **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[0.9.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.9.0
 [0.8.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.1
 [0.8.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.0
 [0.7.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.7.0
