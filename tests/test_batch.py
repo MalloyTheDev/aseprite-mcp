@@ -367,6 +367,7 @@ def test_a_cel_operation_on_a_missing_cel_says_which(request):
         ])
 
 
+@pytest.mark.pure
 def test_the_generated_reference_lists_the_new_operations():
     """The docstring is generated from OP_SPECS, so it cannot drift from the registry."""
     from aseprite_mcp.core import oplib

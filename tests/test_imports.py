@@ -259,3 +259,73 @@ def test_declared_python_support_matches_what_ci_tests():
             f"requires-python excludes {upper.group(1)} and above, but the matrix tests "
             f"up to {highest}: the cap would refuse an interpreter that is known to work"
         )
+
+
+# ------------------------------------- the two-tier test mechanism has to keep working
+def test_the_pure_marker_is_registered():
+    """An unregistered marker is a warning, not an error, so a typo would be silent.
+
+    `@pytest.mark.puer` on a test would stop exempting it, the test would go back to
+    being skipped on CI, and the only trace would be an `PytestUnknownMarkWarning` in
+    output nobody reads. Registering the marker in `pyproject.toml` turns that into a
+    visible problem.
+    """
+    from pathlib import Path
+
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
+        encoding="utf-8")
+    assert '"pure:' in pyproject, (
+        "the `pure` marker is not declared in [tool.pytest.ini_options] markers, so a "
+        "misspelled marker would silently stop exempting its test"
+    )
+
+
+def test_no_allowlisted_module_marks_a_test_pure():
+    """The two mechanisms answer the same question and should not overlap.
+
+    A module on `PURE_PYTHON_TESTS` already runs in full, so a `pure` marker inside it
+    does nothing. It is worth failing on, because somebody writing one has misunderstood
+    which mechanism applies, and the next person may copy it into a file where the
+    distinction matters.
+    """
+    import re
+    from pathlib import Path
+
+    from conftest import PURE_PYTHON_TESTS
+
+    offenders = []
+    for name in PURE_PYTHON_TESTS:
+        path = Path(__file__).resolve().parent / f"{name}.py"
+        if not path.is_file():
+            continue
+        if re.search(r"^\s*@pytest\.mark\.pure\b", path.read_text(encoding="utf-8"),
+                     re.M):
+            offenders.append(name)
+    assert not offenders, (
+        f"these modules are already on the always-run allowlist, so the `pure` marker "
+        f"in them has no effect: {sorted(offenders)}"
+    )
+
+
+def test_pure_marked_tests_exist_and_are_outside_the_allowlist():
+    """Pins the mechanism's reason for existing.
+
+    If this reaches zero, either the markers were lost in a refactor or every marked
+    test's module joined the allowlist, and in the second case the vacuous-pass problem
+    the marker exists to avoid has been reintroduced. Either way it is worth noticing.
+    """
+    import re
+    from pathlib import Path
+
+    from conftest import PURE_PYTHON_TESTS
+
+    marked = {}
+    for path in sorted((Path(__file__).resolve().parent).glob("test_*.py")):
+        hits = len(re.findall(r"^\s*@pytest\.mark\.pure\b",
+                              path.read_text(encoding="utf-8"), re.M))
+        if hits:
+            marked[path.stem] = hits
+
+    assert marked, "no test carries the `pure` marker; the mechanism is unused"
+    overlap = set(marked) & set(PURE_PYTHON_TESTS)
+    assert not overlap, f"marked inside an allowlisted module: {sorted(overlap)}"

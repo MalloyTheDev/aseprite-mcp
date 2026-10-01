@@ -141,21 +141,25 @@ def test_the_tags_over_the_affected_frames_are_named(request):
 
 
 # --------------------------------------------------- refused before Aseprite is launched
+@pytest.mark.pure
 def test_a_gapped_frame_list_is_refused(request):
     with pytest.raises(ValidationFailed, match="unbroken run"):
         frames.reverse_frames("unused.aseprite", frames=[1, 2, 4])
 
 
+@pytest.mark.pure
 def test_reversing_one_frame_is_refused():
     with pytest.raises(ValidationFailed, match="at least two frames"):
         frames.reverse_frames("unused.aseprite", frames=[3])
 
 
+@pytest.mark.pure
 def test_giving_both_a_tag_and_frames_is_refused():
     with pytest.raises(ValidationFailed, match="not both"):
         frames.reverse_frames("unused.aseprite", tag="walk", frames=[1, 2])
 
 
+@pytest.mark.pure
 def test_moving_a_frame_onto_itself_is_refused():
     with pytest.raises(ValidationFailed, match="already there"):
         frames.move_frame("unused.aseprite", 3, 3)
@@ -210,12 +214,14 @@ def test_a_range_edit_does_not_turn_a_one_shot_into_a_loop(request):
     assert (tag["from"], tag["to"], tag["repeats"]) == (3, 6, 1)
 
 
+@pytest.mark.pure
 def test_a_negative_repeat_count_is_refused_rather_than_inverted():
     """Aseprite stores -1 as 0, which means forever: the opposite of what was asked."""
     with pytest.raises(ValidationFailed, match="opposite of a one-shot"):
         tags.add_tag("unused.aseprite", "attack", 1, 2, repeats=-1)
 
 
+@pytest.mark.pure
 def test_a_repeat_count_past_the_format_is_refused():
     with pytest.raises(ValidationFailed, match="at most 65535"):
         tags.add_tag("unused.aseprite", "attack", 1, 2, repeats=70000)

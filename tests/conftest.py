@@ -77,6 +77,23 @@ def pytest_collection_modifyitems(config, items):
         # there is no Aseprite to launch.
         if pathlib.Path(str(item.fspath)).stem in PURE_PYTHON_TESTS:
             continue
+        # ...and so does an individual test marked `pure` inside a module that is not.
+        #
+        # The allowlist can only speak about whole files, and most of the integration
+        # files hold a handful of tests that need no editor: the pre-flight refusals,
+        # which assert that a bad argument is rejected in Python *before* Aseprite is
+        # launched. Fifty-five of those were being skipped on CI, where a skip is
+        # indistinguishable from a pass in a summary line. Listing their files instead
+        # would be worse than the gap it closed: the Aseprite-backed tests in the same
+        # file would then run with no editor and pass vacuously, which looks like
+        # coverage.
+        #
+        # Marking is safe in the direction that matters. A test marked `pure` that
+        # actually needs Aseprite fails on CI immediately and visibly, because CI is
+        # exactly the environment with no Aseprite in it. The allowlist has no such
+        # property, which is how this drifted in the first place.
+        if item.get_closest_marker("pure"):
+            continue
         if not run_aseprite:
             item.add_marker(pytest.mark.skip(reason="needs --run-aseprite (Aseprite integration test)"))
         elif missing_reason:

@@ -102,16 +102,19 @@ def test_unlinking_keeps_what_the_frame_was_showing(request):
 
 
 # ---------------------------------------------------------------------------- refusals
+@pytest.mark.pure
 def test_linking_a_single_frame_is_refused():
     with pytest.raises(ValidationFailed, match="at least 2"):
         cels.link_cels("unused.aseprite", "Layer 1", [1])
 
 
+@pytest.mark.pure
 def test_a_repeated_frame_is_refused():
     with pytest.raises(ValidationFailed, match="more than once"):
         cels.link_cels("unused.aseprite", "Layer 1", [1, 2, 2])
 
 
+@pytest.mark.pure
 def test_frame_zero_is_refused():
     with pytest.raises(ValidationFailed, match="1-based"):
         cels.link_cels("unused.aseprite", "Layer 1", [0, 1])

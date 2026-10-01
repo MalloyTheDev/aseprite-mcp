@@ -45,6 +45,12 @@ dev = ["pytest>=8.0", "hypothesis>=6", "ruff>=0.14"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    # Declared so an unknown-marker warning cannot hide a typo: `@pytest.mark.puer`
+    # would silently stop exempting the test and nobody would notice it had gone back
+    # to being skipped on CI.
+    "pure: needs no Aseprite, so it runs even when its module is not on the always-run allowlist (see tests/conftest.py)",
+]
 
 [tool.ruff]
 # 110 matches the codebase's existing style; only a handful of lines ever exceeded it.

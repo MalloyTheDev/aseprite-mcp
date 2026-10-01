@@ -321,26 +321,31 @@ def test_a_frame_that_does_not_exist_is_named(request):
 
 
 # --------------------------------------------------- refused before Aseprite is launched
+@pytest.mark.pure
 def test_one_frame_cannot_carry_a_movement():
     with pytest.raises(ValidationFailed, match="at least two frames"):
         animation.offset_cels("unused.aseprite", "Layer 1", [1], dx=10)
 
 
+@pytest.mark.pure
 def test_a_repeated_frame_is_refused():
     with pytest.raises(ValidationFailed, match="more than once"):
         animation.offset_cels("unused.aseprite", "Layer 1", [1, 2, 2, 3], dx=10)
 
 
+@pytest.mark.pure
 def test_frame_zero_is_refused_as_a_1_based_mistake():
     with pytest.raises(ValidationFailed, match="1-based"):
         animation.offset_cels("unused.aseprite", "Layer 1", [0, 1], dx=10)
 
 
+@pytest.mark.pure
 def test_an_unknown_easing_lists_the_ones_that_exist():
     with pytest.raises(ValidationFailed, match="ease_in_out"):
         animation.offset_cels("unused.aseprite", "Layer 1", [1, 2], ease="bouncy")
 
 
+@pytest.mark.pure
 def test_too_many_frames_is_refused_with_the_cap():
     from aseprite_mcp.core.limits import MAX_MOTION_FRAMES
 
@@ -472,16 +477,19 @@ def test_even_spacing_draws_no_warning(request):
 
 
 # --------------------------------------------------- refused before Aseprite is launched
+@pytest.mark.pure
 def test_an_unknown_curve_lists_the_ones_that_exist():
     with pytest.raises(ValidationFailed, match="hold_extremes"):
         animation.apply_timing_curve("unused.aseprite", curve="bouncy")
 
 
+@pytest.mark.pure
 def test_frames_and_tag_together_are_refused():
     with pytest.raises(ValidationFailed, match="not both"):
         animation.apply_timing_curve("unused.aseprite", frames=[1, 2], tag="walk")
 
 
+@pytest.mark.pure
 def test_frame_zero_in_a_timing_call_is_refused():
     with pytest.raises(ValidationFailed, match="1-based"):
         animation.apply_timing_curve("unused.aseprite", frames=[0, 1])
@@ -785,21 +793,25 @@ def test_a_tween_too_big_to_run_is_refused_with_the_sample_count(request):
 
 
 # --------------------------------------------------- refused before Aseprite is launched
+@pytest.mark.pure
 def test_one_frame_cannot_carry_a_tween():
     with pytest.raises(ValidationFailed, match="at least two frames"):
         animation.tween_cels("unused.aseprite", "Layer 1", [1], scale_to=2.0)
 
 
+@pytest.mark.pure
 def test_a_repeated_frame_in_a_tween_is_refused():
     with pytest.raises(ValidationFailed, match="more than once"):
         animation.tween_cels("unused.aseprite", "Layer 1", [1, 2, 2], scale_to=2.0)
 
 
+@pytest.mark.pure
 def test_frame_zero_in_a_tween_is_refused_as_a_1_based_mistake():
     with pytest.raises(ValidationFailed, match="1-based"):
         animation.tween_cels("unused.aseprite", "Layer 1", [0, 1], scale_to=2.0)
 
 
+@pytest.mark.pure
 def test_too_many_frames_in_a_tween_is_refused_with_the_cap():
     from aseprite_mcp.core.limits import MAX_MOTION_FRAMES
 
@@ -808,23 +820,27 @@ def test_too_many_frames_in_a_tween_is_refused_with_the_cap():
                              list(range(1, MAX_MOTION_FRAMES + 3)), scale_to=2.0)
 
 
+@pytest.mark.pure
 def test_an_unknown_anchor_lists_the_ones_that_exist():
     with pytest.raises(ValidationFailed, match="bottom"):
         animation.tween_cels("unused.aseprite", "Layer 1", [1, 2],
                              scale_to=2.0, anchor="feet")
 
 
+@pytest.mark.pure
 def test_an_unknown_easing_in_a_tween_lists_the_ones_that_exist():
     with pytest.raises(ValidationFailed, match="ease_in_out"):
         animation.tween_cels("unused.aseprite", "Layer 1", [1, 2],
                              scale_to=2.0, ease="bouncy")
 
 
+@pytest.mark.pure
 def test_a_scale_of_zero_is_refused_and_names_the_fade_instead():
     with pytest.raises(ValidationFailed, match="opacity_to=0"):
         animation.tween_cels("unused.aseprite", "Layer 1", [1, 2], scale_to=0.0)
 
 
+@pytest.mark.pure
 def test_a_scale_past_the_cap_is_refused_with_the_number():
     from aseprite_mcp.core.limits import MAX_TWEEN_SCALE
 
@@ -833,6 +849,7 @@ def test_a_scale_past_the_cap_is_refused_with_the_number():
                              scale_to=MAX_TWEEN_SCALE + 1)
 
 
+@pytest.mark.pure
 def test_a_rotation_past_the_cap_is_refused():
     from aseprite_mcp.core.limits import MAX_TWEEN_ROTATION_DEG
 
@@ -841,6 +858,7 @@ def test_a_rotation_past_the_cap_is_refused():
                              rotate_to=MAX_TWEEN_ROTATION_DEG + 1)
 
 
+@pytest.mark.pure
 def test_an_opacity_outside_the_range_a_cel_holds_is_refused():
     with pytest.raises(ValidationFailed, match="maximum is 255"):
         animation.tween_cels("unused.aseprite", "Layer 1", [1, 2], opacity_to=300)
@@ -848,6 +866,7 @@ def test_an_opacity_outside_the_range_a_cel_holds_is_refused():
         animation.tween_cels("unused.aseprite", "Layer 1", [1, 2], opacity_to=-1)
 
 
+@pytest.mark.pure
 def test_a_tween_with_nothing_to_tween_is_refused():
     """Otherwise every listed frame is rewritten with the drawing the source already
     holds, and the call reports success for having done nothing."""
@@ -1116,27 +1135,32 @@ def test_a_group_layer_cannot_be_smeared(request):
 
 
 # --------------------------------------------------- refused before Aseprite is launched
+@pytest.mark.pure
 def test_frame_one_has_nothing_to_have_moved_from():
     with pytest.raises(ValidationFailed, match="no earlier frame"):
         animation.smear_frame("unused.aseprite", "Layer 1", 1)
 
 
+@pytest.mark.pure
 def test_smearing_a_frame_from_itself_is_refused():
     with pytest.raises(ValidationFailed, match="zero by construction"):
         animation.smear_frame("unused.aseprite", "Layer 1", 3, from_frame=3)
 
 
+@pytest.mark.pure
 def test_an_unknown_smear_mode_lists_the_ones_that_exist():
     with pytest.raises(ValidationFailed, match="stretch, echo"):
         animation.smear_frame("unused.aseprite", "Layer 1", 2, mode="blur")
 
 
+@pytest.mark.pure
 def test_steps_with_a_stretch_is_refused_rather_than_ignored():
     """An argument that is silently dropped is the bug class this server keeps finding."""
     with pytest.raises(ValidationFailed, match="only applies to mode='echo'"):
         animation.smear_frame("unused.aseprite", "Layer 1", 2, mode="stretch", steps=4)
 
 
+@pytest.mark.pure
 def test_a_strength_of_zero_or_past_the_cap_is_refused():
     from aseprite_mcp.core.limits import MAX_SMEAR_STRENGTH
 
@@ -1147,6 +1171,7 @@ def test_a_strength_of_zero_or_past_the_cap_is_refused():
                               strength=MAX_SMEAR_STRENGTH + 1)
 
 
+@pytest.mark.pure
 def test_too_many_echo_steps_is_refused_with_the_cap():
     from aseprite_mcp.core.limits import MAX_SMEAR_STEPS
 
@@ -1155,11 +1180,13 @@ def test_too_many_echo_steps_is_refused_with_the_cap():
                               steps=MAX_SMEAR_STEPS + 1)
 
 
+@pytest.mark.pure
 def test_a_one_colour_ramp_cannot_be_stepped_down():
     with pytest.raises(ValidationFailed, match="at least 2"):
         animation.smear_frame("unused.aseprite", "Layer 1", 2, ramp=["#b04a5a"])
 
 
+@pytest.mark.pure
 def test_a_ramp_of_palette_indices_is_refused_with_the_reason():
     with pytest.raises(ValidationFailed, match="palette index"):
         animation.smear_frame("unused.aseprite", "Layer 1", 2,

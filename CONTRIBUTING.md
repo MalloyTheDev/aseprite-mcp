@@ -56,6 +56,28 @@ uv run pytest --run-aseprite  # full: unit + Aseprite integration + golden-outpu
 > been got wrong in both directions before (see the comments in that file), and a test
 > that never runs is worse than no test, because it reads as coverage.
 
+> **A pure test inside an integration file? Mark it `@pytest.mark.pure`.** The allowlist
+> can only speak about whole files, and most integration files hold a few tests that need
+> no editor, typically the pre-flight refusals that assert a bad argument is rejected in
+> Python *before* Aseprite is launched. Fifty-five of those were being skipped on CI.
+>
+> **Do not add a mixed file to `PURE_PYTHON_TESTS` to fix that.** It would be worse than
+> the gap: the Aseprite-backed tests in the same file would then run with no editor and
+> pass vacuously, which looks like coverage and is not. Mark the individual test instead.
+>
+> Marking is safe in the direction that matters: a test marked `pure` that actually needs
+> Aseprite fails on CI immediately, because CI is precisely the environment with no
+> Aseprite in it. Check your own marking the same way before you push, by pointing
+> `ASEPRITE_PATH` at a path that does not exist and running the pure tier:
+>
+> ```bash
+> ASEPRITE_PATH=/no/such/aseprite uv run --no-sync pytest
+> ```
+>
+> Point it at a path that does not **exist**, not at some other file: `find_aseprite()`
+> only checks `is_file()`, so any real file makes detection *succeed* and a test asserting
+> `aseprite_found is True` then passes for a reason that will not hold on a runner.
+
 > On Windows, pytest may print a harmless `PermissionError` from an `atexit` temp-dir
 > cleanup handler *after* the run finishes. It does not affect results.
 

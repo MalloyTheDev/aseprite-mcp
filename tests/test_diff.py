@@ -424,11 +424,13 @@ def test_different_canvas_sizes_are_refused_with_both_content_boxes(request):
     assert "trim_sprite" in message
 
 
+@pytest.mark.pure
 def test_comparing_a_frame_with_itself_is_refused(request):
     with pytest.raises(ValidationFailed, match="compare a frame with itself"):
         inspect.diff_sprites("unused.aseprite")
 
 
+@pytest.mark.pure
 def test_an_unknown_expectation_is_refused_before_aseprite_is_launched():
     with pytest.raises(ValidationFailed, match="expect must be one of"):
         inspect.diff_sprites("unused.aseprite", 1, other_frame=2, expect="moved")
