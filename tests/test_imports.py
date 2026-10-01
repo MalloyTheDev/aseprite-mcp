@@ -329,3 +329,40 @@ def test_pure_marked_tests_exist_and_are_outside_the_allowlist():
     assert marked, "no test carries the `pure` marker; the mechanism is unused"
     overlap = set(marked) & set(PURE_PYTHON_TESTS)
     assert not overlap, f"marked inside an allowlisted module: {sorted(overlap)}"
+
+
+def test_the_visible_pixel_count_is_defined_once():
+    """One number, one implementation.
+
+    `set_color_mode` compares drawn pixels across a conversion to refuse one that would
+    make art disappear, and `diff_sprites` reports the same count per side. Each used to
+    carry its own loop for it, and the two loops disagreed about what indexed
+    transparency is: the sprite's transparent index is one kind, a palette entry that is
+    itself transparent is another, and a count that tests only the first reports a blank
+    canvas as drawn. That mistake has already shipped here once (#138), which is why the
+    helper is shared and why a second copy is worth failing a test over.
+
+    Source text rather than behaviour, because a duplicate would agree with the original
+    on every sprite a runtime test is likely to build. Agreement is exactly what makes a
+    duplicate hard to notice.
+    """
+    import pathlib
+
+    import aseprite_mcp
+    from aseprite_mcp.core import luagen
+
+    assert "local function visible_count(spr, img)" in luagen.PRELUDE, (
+        "the shared helper is no longer in the prelude; the two callers have nowhere to "
+        "share it from"
+    )
+
+    root = pathlib.Path(aseprite_mcp.__file__).resolve().parent
+    offenders = [
+        path.relative_to(root).as_posix()
+        for path in sorted((root / "tools").glob("*.py"))
+        if "local function visible_count" in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, (
+        f"{offenders} define their own visible_count; call the prelude's instead so "
+        "both callers of this number cannot drift apart"
+    )

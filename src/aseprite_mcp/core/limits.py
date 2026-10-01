@@ -63,6 +63,24 @@ MAX_CURVE_STEPS = 4_096
 # imported at full size is the case that would otherwise stall for a minute.
 MAX_ASSESS_PIXELS = 1_048_576
 
+# Pixels (canvas area times frame count) `set_color_mode` will scan to verify that a
+# conversion to indexed did not make drawn pixels disappear. Past this the conversion
+# still happens and reports that it was not verified; it is never refused, because
+# declining to convert a large sheet because we cannot afford to check it would trade a
+# rare slow call for a permanent gap in a capability.
+#
+# Thirty-two times MAX_ASSESS_PIXELS, and the gap is the point: that cap bounds a
+# Python-side grid read, while this bounds the Lua byte-stride count, measured at 0.088us
+# per pixel. The scan runs twice (before and after), so this ceiling is about six seconds
+# of scanning in the worst case, against the two minutes it would cost to set the cap at
+# MAX_SPRITE_TOTAL_PIXELS. Reusing MAX_ASSESS_PIXELS here would have been the tidier
+# line and the wrong number: it would give up on verifying a conversion that costs under
+# two tenths of a second to verify.
+#
+# Two full maximum canvases, so a single max-size frame is always verified and only a
+# genuine multi-frame sheet at that size goes unchecked.
+MAX_VERIFY_PIXELS = 33_554_432  # 2 * MAX_CANVAS_PIXELS
+
 # Distinct colours `diff_sprites` lists per side. A diff names the colours involved in
 # the change so the odd one out is visible; past a couple of dozen that list is a photo
 # histogram rather than a finding, and the count still says how many there were.

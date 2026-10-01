@@ -333,6 +333,84 @@ local function img_solid(spr, img, x, y)
   return a > 0
 end
 
+-- How many pixels of `img` would show, read straight out of the byte buffer.
+--
+-- Every pixel's alpha sits at a fixed stride in Image.bytes, so counting what is drawn
+-- needs no getPixel and no px_to_rgba per pixel. Measured on this machine: 0.088us per
+-- pixel against 0.58us for the getPixel loop, so about 6.6x, which is the difference
+-- between a 33Mpx verification scan costing 3 seconds and costing 20. Reading a block at
+-- a time is the trick the frame hash uses: string.byte one index at a time is the slow
+-- part, not the loop.
+--
+-- Shared rather than copied because two tools already need exactly this number and get
+-- it wrong in different ways if they each write it: `diff_sprites` reports it per side,
+-- and `set_color_mode` compares it across a conversion to refuse one that would make
+-- drawn pixels disappear. Note what it does *not* give you: a bounding box (shrinkBounds
+-- answers that, and disagrees with this about indexed transparency, see below) or
+-- per-pixel colour. `trim_sprite` and `extract_palette` need those, so they still scan.
+local function visible_count(spr, img)
+  local cm = spr.colorMode
+  local stride, first, clear = 4, 4, { [0] = true }
+  if cm == ColorMode.GRAY then
+    stride, first = 2, 2
+  elseif cm == ColorMode.INDEXED then
+    stride, first = 1, 1
+    -- Indexed transparency is two separate things and both have to count: the sprite's
+    -- transparent index, and any palette entry that is itself fully transparent. Testing
+    -- only the first is the bug this server has already been bitten by once. It is also
+    -- where Image:shrinkBounds parts company with us: it honours the transparent index
+    -- only, so a pixel held in a transparent palette entry counts as content to it and
+    -- as nothing here.
+    clear = { [spr.transparentColor] = true }
+    local pal = spr.palettes[1]
+    for ix = 0, #pal - 1 do
+      if pal:getColor(ix).alpha == 0 then clear[ix] = true end
+    end
+  end
+
+  local s = img.bytes
+  if #s ~= img.width * img.height * stride then
+    -- Not the layout assumed above. Count the slow, certain way rather than a wrong way.
+    local n = 0
+    for y = 0, img.height - 1 do
+      for x = 0, img.width - 1 do
+        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y))
+        if alpha > 0 then n = n + 1 end
+      end
+    end
+    return n
+  end
+
+  -- 512 is a multiple of every stride above, so `first` stays aligned block to block.
+  -- It is a byte count rather than a pixel count on purpose: string.byte returns one
+  -- value per byte, and asking it for a few thousand at once is how you find Lua's
+  -- result limit.
+  local n, len, i = 0, #s, 1
+  local block = 512
+  while i <= len do
+    local j = math.min(i + block - 1, len)
+    local t = table.pack(string.byte(s, i, j))
+    for k = first, t.n, stride do
+      if not clear[t[k]] then n = n + 1 end
+    end
+    i = j + 1
+  end
+  return n
+end
+
+-- Drawn pixels across every frame of a sprite, flattened. The composite is what the
+-- caller sees, so this is the number a conversion must not change.
+local function visible_count_all_frames(spr)
+  local n = 0
+  for f = 1, #spr.frames do
+    local flat = Image(spr.spec)
+    flat:clear()
+    flat:drawSprite(spr, f)
+    n = n + visible_count(spr, flat)
+  end
+  return n
+end
+
 -- Alpha-composite colour (r,g,b) with coverage `cov` (0..1) over the pixel at
 -- (x,y). On RGB sprites this anti-aliases; on indexed/gray it thresholds at 0.5.
 local function blend_over(spr, img, x, y, r, g, b, cov)
