@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **142 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **145 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -15,9 +15,9 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Cels](#cels) (7)
 - [Drawing](#drawing) (10)
 - [Brushes & symmetry](#brushes--symmetry) (4)
-- [Shading & light](#shading--light) (6)
+- [Shading & light](#shading--light) (7)
 - [Selections](#selections) (6)
-- [Effects & colour adjustments](#effects--colour-adjustments) (10)
+- [Effects & colour adjustments](#effects--colour-adjustments) (12)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (2)
@@ -1478,10 +1478,28 @@ Args:
         bounce; a lot reads as backlight.
     bias: Shift the whole result along the ramp, in steps. Use this when the result
         is uniformly a shade too dark or light, rather than re-tuning the lighting.
+    fill_angle: Degrees, a second light. Omitted by default, which leaves the result
+        exactly as it was before this argument existed. Set it opposite `light_angle`
+        for the fill or bounce light that keeps a shadow side readable instead of
+        letting it go flat dark: the shadow side is where a sprite stops describing
+        its form, and one light can only ever leave it at `ambient`.
+    fill_strength: How strong the fill is next to the key, 0 to 1 and capped below 1.
+        A fill that matches the key cancels the form entirely, because the two
+        terminators land on opposite sides of the same shape and sum to a flat fill,
+        so the cap refuses the value that destroys what the tool is for. A third to a
+        half is the conventional choice.
     tolerance: How close a pixel must be to `base_color` to count as part of the
         region, as a weighted RGB distance. Ignored when `base_color` is omitted.
     layer: Target layer (default: top layer).
     frame: Target frame, 1-based.
+
+The two lights are summed and clamped, not averaged: averaging would dim the key side
+as the fill came up, so adding a fill light would make the whole sprite darker and
+quietly cost the ramp's top step. Clamping leaves the key side as it was and lightens
+only what the key did not reach, which is what a fill light is.
+
+`per_step` in the result counts pixels per ramp entry, which is how to check a fill
+actually lightened the shadow side rather than trusting that it did.
 
 Refuses a region with no interior to shade: below roughly 6px across, the distance
 field never exceeds a pixel and there is no form to describe. The honest answer
@@ -1498,6 +1516,8 @@ there is two hand-placed pixels, which `draw_pixels` already does.
 | `ambient` | number | no | 0.35 |
 | `rim` | number | no | 0.0 |
 | `bias` | number | no | 0.0 |
+| `fill_angle` | number | no | _none_ |
+| `fill_strength` | number | no | 0.35 |
 | `tolerance` | number | no | 24.0 |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
@@ -1544,6 +1564,95 @@ ramp does not match the artwork, not that the sprite was already correct.
 | `width` | integer | no | _none_ |
 | `height` | integer | no | _none_ |
 | `tolerance` | number | no | 48.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `specular_highlight`
+
+Place a small specular highlight where the light actually reflects at the viewer.
+
+`shade_region_by_light` spreads the ramp's top step over the whole lit side, which is
+what a matte surface does and why its output reads as plastic. A specular is the other
+thing at the top of the ramp: a two or three pixel glint on the one part of the form
+whose normal sends the light straight back at you. It is the difference between a
+stone and a gem, and it is small by definition.
+
+Run this **after** `shade_region_by_light`, on the same region and the same light: it
+reuses that tool's region mask, distance field and surface normals, so the glint lands
+inside the highlight rather than beside it.
+
+**Reserve the top step for it.** Shade the form with the ramp *minus its last entry*
+and then call this with the whole ramp:
+
+    shade_region_by_light(f, ramp[:-1], light_angle=135)
+    specular_highlight(f, ramp, light_angle=135, size=2)
+
+Shading with the full ramp spreads its top step over the entire lit side, which leaves
+nothing above it for a glint to be: the specular then paints pixels the colour they
+already are, and that call is refused rather than reported as a success that changed
+nothing. The refusal says this and names the way out, so it is a reminder rather than
+a puzzle.
+
+Where it goes: on the normal closest to the half-vector between the light and the
+viewer, not on the normal closest to the light. That offset toward the viewer is what
+makes a specular sit inside the lit side instead of out on its shoulder, and it is the
+whole reason this is a separate tool rather than a brighter `bias`.
+
+What it will not do: touch an edge pixel. A specular on the silhouette's border reads
+as a hole punched in the form rather than as a shine, so only pixels with all eight
+neighbours inside the region are candidates. On a region with no such pixel there is
+nothing to put a glint on, and the call is refused with the same message
+`shade_region_by_light` gives for a region too thin to shade.
+
+Args:
+    ramp: Colours darkest first, the same ramp the form was shaded with.
+    light_angle: Degrees, and it must match the shading pass or the glint contradicts
+        the form. 0 is from the right, 90 from above, 135 from the upper left.
+    light_z: How much the light comes from the viewer, 0 to 1. Match the shading pass.
+    size: How many pixels the glint covers. A count, not a radius: a specular is two
+        or three pixels on most sprites, and the point of this tool is that it stays
+        that small. The pixels are grown outward from the brightest one and stay
+        touching, so the result is one glint rather than scattered dots.
+    tightness: How narrowly the surface has to face the reflection to count, 0 to 1,
+        as a threshold on the normal against the half-vector. High is a tiny hard
+        glint on a polished surface; low lets a broader shoulder qualify, from which
+        `size` still takes only the best pixels. If nothing clears it the call is
+        refused and the message names the best alignment the form actually offers, so
+        the number to lower it to is in the error rather than a guess.
+    bulge: How rounded the form reads. Match the shading pass, or the normals this
+        works from are not the normals the shading used.
+    highlight_color: The glint's colour, defaulting to the ramp's top step so
+        `palette_conformance` stays at 1.0. This is the flag for metal, which is the
+        one material whose specular is genuinely brighter than its own ramp: name a
+        near-white there. A colour that is not on `ramp` will drop conformance against
+        that ramp, which is the honest trade rather than a bug, and the result says
+        whether it happened.
+    base_color: Only consider pixels near this colour, as for `shade_region_by_light`.
+        Scope it the same way you scoped the shading.
+    tolerance: How close a pixel must be to `base_color` to count as part of the
+        region. Ignored when `base_color` is omitted.
+    layer: Target layer (default: top layer).
+    frame: Target frame, 1-based.
+
+Returns `specular_pixels` (how many were placed, which is below `size` when the
+eligible area is smaller than the budget), `pixels` (where they went, so a later
+`remove_stray_pixels` can be told to protect them), `pixels_changed` (how many were
+not already that colour) and `peak_alignment`, the best normal against the
+half-vector found anywhere in the region.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `light_angle` | number | no | 135.0 |
+| `light_z` | number | no | 0.45 |
+| `size` | integer | no | 2 |
+| `tightness` | number | no | 0.7 |
+| `bulge` | number | no | 1.0 |
+| `highlight_color` | string | no | _none_ |
+| `base_color` | string | no | _none_ |
+| `tolerance` | number | no | 24.0 |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
@@ -1736,6 +1845,83 @@ Shift hue (degrees) and scale saturation/lightness (percent, -100..100).
 | `frame` | integer | no | 1 |
 
 
+### `cast_shadow`
+
+Lay a subject's shadow on the ground, away from the light and made of ramp steps.
+
+`add_drop_shadow` offsets a copy of the artwork and tints it, which is a sticker of
+the subject floating beside it. A cast shadow is a different thing: it falls on a
+*surface*, away from the light, and flattens as it goes, so on the ground it is a
+foreshortened ellipse under the subject rather than a second copy of its silhouette.
+
+Built entirely of ramp steps, which is the point. A shadow made by multiplying alpha
+lands every pixel of it between palette entries, and then `palette_conformance` drops
+and nothing downstream holds together: indexed export, tileset reuse, a consistent
+look between two sprites. The core is `ramp[0]` and each pixel of `softness` around it
+is one step lighter, so the whole effect is ramp entries arranged in space.
+
+Where it falls: the direction is away from `light_angle`, and the length comes from
+`light_height` as the actual cotangent of the light's elevation. An overhead light
+casts an ellipse straight underneath; a low light throws it far to one side.
+
+Onto what: `ground_layer`. Name the layer holding the floor and the shadow is clipped
+to it, so it cannot run off the edge of a platform and hang in the air, and if that
+layer has nothing where the shadow would land the call is refused rather than drawing
+a shadow onto nothing.
+
+Args:
+    layer: The layer casting the shadow. Its cel is never modified.
+    ramp: Colours darkest first, normally the *ground's* ramp rather than the
+        subject's, since the shadow is a darkening of the surface it lies on.
+        Required, and deliberately so: a shadow built out of alpha instead is
+        `add_drop_shadow`, which already exists.
+    light_angle: Degrees. 0 is from the right, 90 from above, 135 from the upper left.
+        The shadow falls the opposite way.
+    light_height: The light's elevation, above 0 and up to 1. 1.0 is directly
+        overhead and casts no length at all; small values are a low sun and throw a
+        long shadow. This is the control that changes the shadow's length.
+    ground_y: The row the shadow lies on. Defaults to the subject's own contact row,
+        the lowest row it has a pixel on, which is the same measurement
+        `validate_loop` reports as `contact_rows`. Refused if it sits above that row,
+        because a floor running through the subject is not a floor.
+    ground_layer: The layer holding the surface. When given, the shadow is clipped to
+        that layer's pixels and the call is refused if there is nothing there to
+        catch it.
+    softness: Pixels of penumbra around the core, each one ramp step lighter. 0 is a
+        hard-edged shadow, 1 or 2 is the usual soft contact.
+    opacity: The shadow *layer's* opacity, 0 to 255. Left at 255 the shadow's pixels
+        are exactly ramp entries, which is what keeps conformance at 1.0; lowering it
+        blends them with whatever is underneath and takes the composite off the ramp,
+        so prefer a lighter ramp step over a lower opacity.
+    new_layer: Name for the shadow's own layer, created directly below `layer`.
+        Refused if a layer of that name already exists.
+    frame: Frame to build the shadow for, 1-based.
+
+Returns the ellipse it used as `shadow_ellipse` (`[cx, cy, rx, ry]`), the
+`contact_row` it measured, and `shadow_pixels`. A shadow that landed entirely off the
+canvas is refused rather than reported as a success that drew nothing.
+
+`clipped_pixels` is routinely large next to `shadow_pixels` when `ground_layer` is a
+thin floor, and that is arithmetic rather than a fault: the ellipse is centred on the
+contact row and so half of it lies above the floor's top edge, where there is no
+surface. Pass `ground_y` at the floor's own top row to push it down, or leave
+`ground_layer` out and let the subject hide the upper half.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `light_angle` | number | no | 135.0 |
+| `light_height` | number | no | 0.6 |
+| `ground_y` | integer | no | _none_ |
+| `ground_layer` | string | no | _none_ |
+| `softness` | integer | no | 1 |
+| `opacity` | integer | no | 255 |
+| `new_layer` | string | no | shadow |
+| `frame` | integer | no | 1 |
+
+
 ### `desaturate`
 
 Desaturate toward grayscale by `amount` percent (0-100).
@@ -1799,6 +1985,64 @@ the region was actually covered.
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 | `respect_alpha` | boolean | no | True |
+
+
+### `glow`
+
+Halo a shape in rings of ramp steps, so it glows without leaving the palette.
+
+`add_outline` gives one flat ring, which reads as a sticker. A glow is several rings,
+each a step further down a ramp: hottest against the artwork, fading outward, with the
+outer ring optionally dithered so it ends in something softer than a hard edge.
+
+The ramp is what makes this different from a glow in an image editor. A halo made of
+alpha, or of colours interpolated between two others, takes the art off its palette,
+and then `palette_conformance` drops and the sprite no longer exports to an indexed
+format, reuses a tileset, or matches the sprite beside it. Every pixel this writes is
+exactly one of the colours you passed in.
+
+The glow goes on its own layer below the artwork, so the subject's cel is untouched
+and deleting one layer removes the effect.
+
+Args:
+    ramp: Colours darkest first. Ring 1, touching the artwork, takes the top step and
+        the outermost ring takes `ramp[0]`, so a longer ramp fades more finely. For a
+        glow that reads as light rather than as a coloured border this usually wants
+        its own bright ramp (a gem's or a flame's), not the subject's body ramp.
+    radius: How many rings, in pixels. 2 or 3 reads as a glow; much more reads as fog.
+    falloff: "linear" spaces the steps evenly. "quadratic" drops away faster, keeping
+        a hotter core and a dimmer skirt, which is the one that reads as a light
+        source rather than as an outline.
+    dither_edge: Dither the outermost ring, so the glow ends in a half-density
+        scatter instead of a hard line. This is binary coverage, a pixel either drawn
+        or not, rather than a partial alpha, so every drawn pixel is still exactly a
+        ramp step and conformance stays at 1.0.
+    base_color: Glow only around pixels near this colour, which is how a gem glows
+        while the hand holding it does not. Distance is measured out from those
+        pixels, but the glow is never painted over any part of the subject layer, so
+        a body blocks the halo of a gem inside it.
+    tolerance: How close a pixel must be to `base_color` to be treated as a source,
+        as a weighted RGB distance. Ignored when `base_color` is omitted.
+    new_layer: Name for the glow's own layer, created directly below `layer`. Refused
+        if a layer of that name already exists.
+    layer: The layer to glow around (default: top layer). Its cel is never modified.
+    frame: Target frame, 1-based.
+
+Refuses rather than drawing nothing: no pixel matching `base_color` is an error, and
+so is a subject that leaves the glow nowhere to go.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `radius` | integer | no | 3 |
+| `falloff` | string | no | linear |
+| `dither_edge` | boolean | no | True |
+| `base_color` | string | no | _none_ |
+| `tolerance` | number | no | 24.0 |
+| `new_layer` | string | no | glow |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
 
 
 ### `invert_colors`

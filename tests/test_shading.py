@@ -14,6 +14,7 @@ from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.tools import (
     drawing,
     effects,
+    frames,
     inspect,
     palette,
     selection,
@@ -497,3 +498,301 @@ def test_dither_band_refuses_non_adjacent_steps(two_bands):
         shading.dither_band(two_bands, RAMP, from_step=0, to_step=1)
     with pytest.raises(ValidationFailed, match="pattern"):
         shading.dither_band(two_bands, RAMP, 3, 4, pattern="noise")
+
+
+# ------------------------------------------------- specular highlight and a fill light
+
+
+def _opaque_cells(name: str, size: int) -> dict[tuple[int, int], str]:
+    rows = inspect.get_pixels(name, 0, 0, size, size)["pixels"]
+    return {
+        (x, y): p.lower()
+        for y, row in enumerate(rows)
+        for x, p in enumerate(row)
+        if not p.lower().endswith("00")
+    }
+
+
+@pytest.fixture()
+def shaded_ball(request):
+    """A disc shaded with the ramp MINUS its top step, which is reserved for the glint.
+
+    This is the documented workflow, and it is the only one in which a specular is
+    visible: shading with the whole ramp spreads the top step over the lit side and
+    leaves nothing above it, which the tool refuses rather than painting invisibly.
+    """
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[2], filled=True)
+    shading.shade_region_by_light(name, RAMP[:-1], light_angle=135, light_z=0.45)
+    return name
+
+
+def test_a_specular_is_a_ramp_step_and_not_a_new_colour(shaded_ball):
+    """The acceptance criterion: a highlight is a ramp step, never an invented colour."""
+    result = shading.specular_highlight(shaded_ball, RAMP, light_angle=135, size=3)
+
+    assert result["specular_pixels"] == 3
+    assert result["pixels_changed"] == 3
+    assert result["highlight_on_ramp"] is True
+    rows = inspect.get_pixels(shaded_ball, 0, 0, 24, 24)["pixels"]
+    assert quality.palette_conformance(rows, RAMP) == 1.0
+
+
+def test_a_glint_that_would_be_invisible_is_refused_rather_than_reported_as_done(request):
+    """Shading with the whole ramp leaves nothing above its top step for a glint to be.
+
+    A tool that writes three pixels the colour they already are and reports success is
+    the failure this codebase keeps finding, so this is an error that names the fix.
+    """
+    from aseprite_mcp.core.errors import AsepriteError
+
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[3], filled=True)
+    shading.shade_region_by_light(name, RAMP, light_angle=135)
+
+    with pytest.raises(AsepriteError, match="glint would be invisible") as exc:
+        shading.specular_highlight(name, RAMP, light_angle=135, size=3)
+    assert "minus its last entry" in str(exc.value)
+
+
+def test_a_specular_never_lands_on_an_edge_pixel(shaded_ball):
+    """Asserted from the rendered grid, not from the parameters.
+
+    A glint on the silhouette's border reads as a hole punched in the form. The check is
+    that every pixel the tool wrote has all eight neighbours opaque, which is the property
+    the tool claims rather than the mechanism it used to get there.
+    """
+    result = shading.specular_highlight(shaded_ball, RAMP, light_angle=135, size=4)
+    after = _opaque_cells(shaded_ball, 24)
+
+    assert result["pixels"], "the specular has to have written something"
+    assert len(result["pixels"]) == result["specular_pixels"]
+    for x, y in result["pixels"]:
+        missing = [
+            (x + dx, y + dy)
+            for dy in (-1, 0, 1)
+            for dx in (-1, 0, 1)
+            if not (dx == 0 and dy == 0) and (x + dx, y + dy) not in after
+        ]
+        assert not missing, f"specular pixel {(x, y)} touches the edge at {missing}"
+
+
+def test_a_specular_lands_on_the_lit_side(shaded_ball, request):
+    """And moves when the light does, which is what makes it a specular and not a dot."""
+    other = f"sh/{request.node.name}_other.aseprite"
+    sprite.create_sprite(other, 24, 24)
+    drawing.draw_ellipse(other, 12, 12, 9, 9, RAMP[2], filled=True)
+    shading.shade_region_by_light(other, RAMP[:-1], light_angle=315, light_z=0.45)
+
+    upper_left = shading.specular_highlight(shaded_ball, RAMP, light_angle=135)
+    lower_right = shading.specular_highlight(other, RAMP, light_angle=315)
+
+    assert upper_left["seat"][0] < 12 and upper_left["seat"][1] < 12, upper_left["seat"]
+    assert lower_right["seat"][0] > 12 and lower_right["seat"][1] > 12, lower_right["seat"]
+
+
+def test_a_specular_is_one_connected_blob_rather_than_scattered_dots(shaded_ball):
+    """Taking the globally best pixels would spread the glint over the whole lit side."""
+    shading.specular_highlight(shaded_ball, RAMP, light_angle=135, size=5)
+    rows = inspect.get_pixels(shaded_ball, 0, 0, 24, 24)["pixels"]
+    top = RAMP[-1].lower() + "ff"
+    glint = {
+        (x, y)
+        for y, row in enumerate(rows)
+        for x, p in enumerate(row)
+        if p.lower() == top
+    }
+    assert glint
+
+    # Flood fill over 8-connectivity: one component means one glint.
+    seen, stack = set(), [next(iter(glint))]
+    while stack:
+        x, y = stack.pop()
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if (x + dx, y + dy) in glint:
+                    stack.append((x + dx, y + dy))
+    assert seen == glint, f"the glint is in several pieces: {sorted(glint - seen)}"
+
+
+def test_a_specular_does_not_move_the_silhouette(request):
+    """The classic bug in this area, measured with diff_sprites rather than by eye."""
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    frames.add_frame(name)
+    for f in (1, 2):
+        drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[2], filled=True, frame=f)
+        shading.shade_region_by_light(name, RAMP[:-1], light_angle=135, frame=f)
+
+    shading.specular_highlight(name, RAMP, light_angle=135, size=3, frame=2)
+
+    verdict = inspect.diff_sprites(name, 1, other_frame=2, expect="interior")["verdict"]
+    assert verdict["passed"] is True, verdict
+
+
+def test_a_metal_glint_may_leave_the_ramp_and_says_so(shaded_ball):
+    """Metal is the one material whose specular is brighter than its own ramp.
+
+    The tool does not pretend this is still on the palette: it reports that it is not,
+    which is the honest trade rather than a silent conformance drop.
+    """
+    result = shading.specular_highlight(
+        shaded_ball, RAMP, light_angle=135, size=2, highlight_color="#fff6f6"
+    )
+
+    assert result["highlight_on_ramp"] is False
+    rows = inspect.get_pixels(shaded_ball, 0, 0, 24, 24)["pixels"]
+    assert quality.palette_conformance(rows, RAMP) < 1.0
+    assert quality.palette_conformance(rows, [*RAMP, "#fff6f6"]) == 1.0
+
+
+def test_a_specular_takes_the_ramp_top_by_default(shaded_ball):
+    result = shading.specular_highlight(shaded_ball, RAMP, light_angle=135, size=1)
+    x, y = result["seat"]
+    rows = inspect.get_pixels(shaded_ball, 0, 0, 24, 24)["pixels"]
+    assert rows[y][x].lower()[:7] == RAMP[-1].lower()
+
+
+def test_a_region_too_thin_for_a_specular_gives_the_shading_refusal(request):
+    """The same message shade_region_by_light gives, not a silently different result."""
+    from aseprite_mcp.core.errors import AsepriteError
+
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_rectangle(name, 2, 10, 20, 2, RAMP[3], filled=True)
+
+    with pytest.raises(AsepriteError, match="too thin to shade"):
+        shading.specular_highlight(name, RAMP)
+
+
+def test_a_light_that_reflects_nowhere_is_refused_with_the_number_to_use(shaded_ball):
+    """A parameter the caller cannot guess has to come back in the error."""
+    from aseprite_mcp.core.errors import AsepriteError
+
+    with pytest.raises(AsepriteError, match="faces the reflection closely enough") as exc:
+        shading.specular_highlight(shaded_ball, RAMP, light_angle=135, tightness=1.0)
+    assert "best alignment anywhere in the region is" in str(exc.value)
+
+
+def test_specular_rejects_arguments_that_cannot_mean_anything(shaded_ball):
+    with pytest.raises(ValidationFailed, match="at least 2"):
+        shading.specular_highlight(shaded_ball, ["#000000"])
+    with pytest.raises(ValidationFailed, match="tightness"):
+        shading.specular_highlight(shaded_ball, RAMP, tightness=1.5)
+    with pytest.raises(ValidationFailed, match="light_z"):
+        shading.specular_highlight(shaded_ball, RAMP, light_z=-1)
+    with pytest.raises(ValidationFailed, match="size"):
+        shading.specular_highlight(shaded_ball, RAMP, size=0)
+    with pytest.raises(ValidationFailed, match="size"):
+        shading.specular_highlight(shaded_ball, RAMP, size=10_000)
+    with pytest.raises(ValidationFailed, match="bulge"):
+        shading.specular_highlight(shaded_ball, RAMP, bulge=0)
+
+
+def test_nothing_matching_base_color_is_refused_for_a_specular_too(shaded_ball):
+    from aseprite_mcp.core.errors import AsepriteError
+
+    with pytest.raises(AsepriteError, match="Nothing to highlight"):
+        shading.specular_highlight(shaded_ball, RAMP, base_color="#00ff00", tolerance=1)
+
+
+def test_a_fill_light_lightens_the_shadow_side(request):
+    """The acceptance criterion, as a count of pixels per ramp step rather than by eye."""
+    plain = f"sh/{request.node.name}_plain.aseprite"
+    filled = f"sh/{request.node.name}_fill.aseprite"
+    for name in (plain, filled):
+        sprite.create_sprite(name, 24, 24)
+        drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[3], filled=True)
+
+    one = shading.shade_region_by_light(plain, RAMP, light_angle=135, ambient=0.2)
+    two = shading.shade_region_by_light(
+        filled, RAMP, light_angle=135, ambient=0.2, fill_angle=315, fill_strength=0.5
+    )
+
+    assert one["fill_light"] is False and two["fill_light"] is True
+    assert one["region_pixels"] == two["region_pixels"]
+
+    # The shadow side is the dark end of the ramp, so a fill light has to move pixels up
+    # out of it. Measured over the dark half rather than over step 0 alone: with ambient
+    # at 0.2 nothing reaches the very bottom step even unfilled, so step 0 is 0 either way
+    # and would make this assertion pass for the wrong reason.
+    dark = len(RAMP) // 2
+    assert sum(two["per_step"][:dark]) < sum(one["per_step"][:dark]), (
+        one["per_step"], two["per_step"]
+    )
+
+    # And the form as a whole is lighter: the mean ramp step rises.
+    def mean_step(per_step):
+        total = sum(per_step)
+        return sum(i * n for i, n in enumerate(per_step)) / total
+
+    assert mean_step(two["per_step"]) > mean_step(one["per_step"])
+
+    rows = inspect.get_pixels(filled, 0, 0, 24, 24)["pixels"]
+    assert quality.palette_conformance(rows, RAMP) == 1.0
+
+
+def test_a_fill_light_does_not_move_the_silhouette(request):
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    frames.add_frame(name)
+    for f in (1, 2):
+        drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[3], filled=True, frame=f)
+    shading.shade_region_by_light(name, RAMP, light_angle=135, frame=1)
+    shading.shade_region_by_light(
+        name, RAMP, light_angle=135, fill_angle=315, fill_strength=0.5, frame=2
+    )
+
+    verdict = inspect.diff_sprites(name, 1, other_frame=2, expect="interior")["verdict"]
+    assert verdict["passed"] is True, verdict
+
+
+def test_a_fill_light_does_not_darken_the_lit_side(request):
+    """Summed and clamped, not averaged: averaging would cost the ramp's top step.
+
+    This is the regression guard for the trade-off the tool chose. If the two lights are
+    ever combined by normalising instead, the brightest step loses pixels and this fails.
+    """
+    plain = f"sh/{request.node.name}_plain.aseprite"
+    filled = f"sh/{request.node.name}_fill.aseprite"
+    for name in (plain, filled):
+        sprite.create_sprite(name, 24, 24)
+        drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[3], filled=True)
+
+    one = shading.shade_region_by_light(plain, RAMP, light_angle=135)
+    two = shading.shade_region_by_light(
+        filled, RAMP, light_angle=135, fill_angle=315, fill_strength=0.5
+    )
+
+    assert two["per_step"][-1] == one["per_step"][-1], (one["per_step"], two["per_step"])
+
+
+def test_a_fill_light_as_strong_as_the_key_is_refused(request):
+    """It cancels the form, which is the thing the tool exists to produce."""
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[3], filled=True)
+
+    with pytest.raises(ValidationFailed, match="fill_strength"):
+        shading.shade_region_by_light(
+            name, RAMP, light_angle=135, fill_angle=315, fill_strength=1.0
+        )
+    with pytest.raises(ValidationFailed, match="fill_strength"):
+        shading.shade_region_by_light(
+            name, RAMP, light_angle=135, fill_angle=315, fill_strength=-0.1
+        )
+
+
+def test_fill_strength_is_ignored_without_a_fill_angle(request):
+    """No second light means nothing to validate, so an unused value must not refuse."""
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_ellipse(name, 12, 12, 9, 9, RAMP[3], filled=True)
+
+    result = shading.shade_region_by_light(name, RAMP, fill_strength=5.0)
+    assert result["fill_light"] is False
