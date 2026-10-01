@@ -122,6 +122,46 @@ MAX_TAG_REPEATS = 65_535
 # than the longest hand-drawn cycle (well under 100) is a mistake worth naming early.
 MAX_MOTION_FRAMES = 512
 
+# --- Inbetweens ------------------------------------------------------------ #
+# Destination pixels one `tween_cels` call may resample across every frame it writes.
+# A tween walks the destination and asks each pixel where it came from, so the work is
+# the sum of the transformed cel boxes clipped to the canvas, not the frame count: a
+# 64x64 cel at 4x over 16 frames is a million samples. Checked inside Aseprite rather
+# than here, because the source cel's size is the multiplier and is only known once the
+# file is open; the acceptance criterion for the tool is one launch, so there is no read
+# pass to learn it in. 8 Mpx is roughly ten seconds of sampling.
+MAX_TWEEN_SAMPLES = 8_388_608
+# How far a tween may scale a cel on one axis. The sampled area grows with the product of
+# the two axes, so this is a work multiplier rather than a size, and 16x is already past
+# any squash, stretch or zoom: a 32px ball at 16x is wider than the largest canvas here.
+MAX_TWEEN_SCALE = 16.0
+# Degrees one tween may rotate through. Rotation is periodic, so a larger figure says the
+# same thing as a smaller one; ten turns is past any spin a hand-drawn cycle contains.
+MAX_TWEEN_ROTATION_DEG = 3_600
+
+# Pixels one `smear_frame` call may plot: the subject's opaque pixels times the number of
+# copies drawn (the trail length for `stretch`, the step count for `echo`). Both factors
+# are known before the writing launch, because the subject is measured in a read pass, so
+# that check happens in Python.
+#
+# The same number bounds the read pass itself, against the area of the subject's content
+# box. That pass is one scan per pixel of the box and runs before any of the above is
+# known, so without a bound of its own a full-frame subject on a 4096x4096 canvas is 16
+# million reads before anything has been planned. The box is never smaller than the opaque
+# pixels inside it, so one constant covers both and the looser of the two cases wins.
+MAX_SMEAR_PIXELS = 4_194_304
+# How far past the movement a smear may reach, as a multiple of the vector between the
+# two cels. Above 1 the smear overshoots the movement, which is a real choice an animator
+# makes; past 4 the trail is longer than the motion it is meant to describe.
+MAX_SMEAR_STRENGTH = 4.0
+# Copies one `echo` smear may draw. Past a handful the copies overlap into a solid bar
+# and the ramp has nowhere left to go, which is a warning the planner issues on its own.
+MAX_SMEAR_STEPS = 16
+# Distinct colours the subject of a smear may use. Each one becomes a row of the lookup
+# table the generated script is handed, so this bounds that table; it is also the honest
+# limit of the idea, since art with hundreds of colours has no "one step darker".
+MAX_SMEAR_SUBJECT_COLORS = 256
+
 # --- Workflow scaffolding -------------------------------------------------- #
 # These bound the most expensive calls in the server: one integer asks for frames, and
 # each frame used to cost two Aseprite launches.

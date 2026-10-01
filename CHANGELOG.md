@@ -110,6 +110,78 @@ All notable changes to this project are documented here. The format is based on
   definition of transparent and would otherwise have disagreed with `assess_sprite`.
 
 ### Added
+- **`tween_cels`: the three things an inbetween does that nothing here could do.**
+  `offset_cels` moves a cel along a path, and that is one of four. The other three, a
+  scale, a turn and a fade, had no tool: a ten-frame fade was ten `set_cel_opacity` calls,
+  and a spinning coin was one `rotate_sprite` per frame on a scratch file, four Aseprite
+  launches a frame. This writes every listed frame in one launch.
+
+  It interpolates a **transform, not pixels**. Blending two drawings gives a double
+  exposure, two silhouettes at half strength, which reads as a mistake rather than as
+  motion, so there is one source drawing and every frame is that drawing resampled by its
+  share of the change. Each frame samples the pristine original rather than the frame
+  before it, so the rounding never compounds: reaching 40 degrees in eight frames and in
+  two gives the same final cel, which is a test.
+
+  Three decisions worth stating. The **anchor** is the point the transform holds still and
+  it is read from the cel's own drawn bounds, so `anchor="bottom"` squashes onto the
+  ground instead of near it, and `validate_loop`'s contact-edge check confirms the contact
+  row did not move (it measures 0 drift). The vertical scale can be given separately, so a
+  squash is wider as it is shorter, which is what makes a bouncing ball read as weight
+  rather than as a zoom. And the fade sets the cel's own **opacity** rather than baking
+  alpha, because a baked fade invents colours that are not on the palette, so a pure
+  opacity tween leaves every frame's pixels byte-identical.
+
+  Sampling is nearest-neighbour and copies the source pixel whole, so no colour appears
+  that the drawing did not already contain and `palette_conformance` is unchanged across a
+  quarter turn. The quarter turns are exact on purpose: `cos(radians(90))` is 6.1e-17, and
+  sampling through that loses a row for no reason the caller could see. Rotation lands on
+  whole degrees, and a frame sitting within 15 degrees of a quarter turn is reported in
+  `warnings`, because nearest-neighbour sampling that shallow shuffles the edge pixels
+  rather than turning the shape.
+
+  What it refuses, rather than approximating: a from and to identical on every channel
+  (each frame would be rewritten with the drawing the source already holds), a scale of
+  zero, a group or tilemap layer, a source frame with no cel or nothing drawn on it, a
+  frame whose transform lands entirely off the canvas, and **any frame that shares its
+  image with another frame**. That last one is the sharp edge and it was measured rather
+  than assumed: linked cels share one `CelData`, so the image, the position *and* the
+  opacity are shared, and assigning to one of four linked cels changed all four. The
+  refusal names the frames and points at `unlink_cels`. The generated cels are written
+  through `newCel` and trimmed to their own content, so a cel's position stays a fact that
+  `offset_cels` and `smear_frame` can read.
+
+- **`smear_frame`: the piece of animation craft this server could not do at all.** Between
+  two frames of a fast movement the eye expects a smear: one frame where the subject is
+  drawn along its path, so the motion reads as speed rather than as teleportation.
+  `stretch` elongates the subject back along the movement and thins it to a single pixel
+  at the tip; `echo` draws it several times, each copy a step further down the ramp.
+
+  **A smear made with alpha is a smear made of colours that are not in the palette.** Pass
+  `ramp=` and every trail pixel is the nearest ramp entry to the subject's own colour
+  there, stepped toward the dark end and clamped rather than wrapped, so
+  `palette_conformance` stays at 1.0, which is the property every shading tool here holds
+  to. Opacity remains the fallback when no ramp is given, and the result says in
+  `warnings` that the fallback leaves the palette rather than letting that be discovered.
+
+  The movement vector is **taken from the sprite** rather than restated by the caller: it
+  is the shift between the centres of the drawn content on the two frames. The content
+  box, not `cel.position`, because every tool here that writes a whole canvas back leaves
+  the position at (0, 0) on every frame, and a position diff would read zero while the
+  drawing plainly moved.
+
+  A frame with no movement to smear is refused with both content boxes, rather than
+  producing a blur of nothing, and so is a movement too short to smear at the given
+  strength (it names the pixels and the length that would result). The subject is drawn
+  last and comes back untouched, so the change is pixels entering the silhouette and
+  nothing repainted inside it; only the named frame is written, which is why a linked cel
+  is refused here too. `steps` is refused with `mode="stretch"` rather than silently
+  ignored.
+
+  The ramp matching lives in pure Python: the read pass returns the subject's distinct
+  colours, Python matches them and builds a lookup table, and the generated Lua looks
+  colours up without making a colour judgement. So there is one matcher with tests rather
+  than a second one in Lua that nearly agrees with `shading.py`'s.
 - **The top end of the ramp: `specular_highlight`, and a second light for
   `shade_region_by_light`.** `shade_region_by_light` describes a form under one light and
   spreads the ramp's top step over the whole lit side, which is what a matte surface does

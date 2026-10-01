@@ -194,6 +194,9 @@ DESTRUCTIVE_TOOLS = frozenset({
     "clear_layer",
     # Keeps the first listed frame's image and drops what the others were showing.
     "link_cels",
+    # Same shape: every frame it is given is overwritten with the source cel transformed,
+    # not blended with whatever was drawn there.
+    "tween_cels",
     "delete_cel",
     "remove_frame",
     "remove_layer",

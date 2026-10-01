@@ -1,6 +1,6 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **145 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **147 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -10,7 +10,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Inspection & preview](#inspection--preview) (6)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (7)
-- [Animation (motion, timing, checks)](#animation-motion-timing-checks) (3)
+- [Animation (motion, timing, checks)](#animation-motion-timing-checks) (5)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (7)
 - [Drawing](#drawing) (10)
@@ -684,6 +684,153 @@ below one pixel.
 | `dy` | integer | no | 0 |
 | `ease` | string | no | linear |
 | `arc_height` | number | no | 0.0 |
+
+
+### `smear_frame`
+
+Draw one frame's subject along its own path, so fast movement reads as speed.
+
+Between two frames of a fast movement the eye expects a **smear**: one frame where the
+subject is stretched along where it came from, or drawn several times faintly, so the
+movement reads as speed rather than as teleportation. `offset_cels` produces the
+movement; this describes one frame of it.
+
+The movement vector is taken from the sprite rather than restated by the caller: it is
+the shift between the centre of the drawn content on `from_frame` and on `frame`. The
+*content* box, not `cel.position`, because any tool here that writes a whole canvas
+back leaves the position at (0, 0) on every frame, and a position diff would then read
+zero while the drawing plainly moved.
+
+Args:
+    frame: The frame to smear. Its own cel is the subject and stays on top, unchanged;
+        the trail is drawn behind it. Only this frame is written.
+    from_frame: The frame the movement came from. Defaults to the one before `frame`.
+    mode: `stretch` draws the subject once, elongated back along the vector and
+        thinning to a single pixel at the tip, which is the classic one-frame smear.
+        `echo` draws it `steps` times along the vector, each copy a step further down
+        the ramp, which is the multiple-exposure smear.
+    strength: How far back the smear reaches, as a fraction of the movement. 0.6 is a
+        trail that clearly trails; 1.0 reaches all the way to the previous position;
+        above 1 it overshoots, which is a real choice an animator makes.
+    steps: How many copies `echo` draws. Defaults to 3, and is refused with
+        `mode="stretch"` rather than silently ignored.
+    ramp: The colours, darkest first, the trail is allowed to use, as `generate_ramp`
+        returns them. **Pass this.** Each pixel of the trail is the nearest ramp entry
+        to the subject's own colour there, stepped toward the dark end and clamped
+        (never wrapped), so `palette_conformance` stays at 1.0, which is the property
+        every shading tool here holds to and what a pixel artist actually draws.
+        Without it the fallback is opacity, and the fallback **leaves the palette**:
+        the trail is then made of colours that are not in the sprite, which is motion
+        blur rather than a smear. On an *indexed* sprite the ramp is required rather
+        than preferred, and the call is refused without one: an indexed pixel is an
+        offset into a palette and carries no alpha, so the fallback would snap every
+        copy back to the subject's own colour and draw a solid blob.
+
+Refuses rather than producing a blur of nothing: a frame with no movement to smear
+(the two content boxes sit at the same place, and the message says where they are), a
+movement too short to smear at this strength (it names the pixels and the length that
+would result), `frame` 1 with no earlier frame, `from_frame` equal to `frame`, either
+frame undrawn, a group or tilemap layer, a ramp of fewer than two colours or one given
+as palette indices, `steps` with `stretch`, and a frame that shares its image with
+another frame, since a linked cel would put the smear on every frame in the group and
+the whole point is that the unsmeared frames are untouched.
+
+Returns the vector it measured and where it came from, the plots it drew, and the
+cel's bounds before and after, so the claim that the smear lies along the movement can
+be checked. `validate_loop` will now report this frame as breaking the spacing series,
+which is correct: a smear frame is one that legitimately does.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | yes |  |
+| `frame` | integer | yes |  |
+| `from_frame` | integer | no | _none_ |
+| `mode` | string | no | stretch |
+| `strength` | number | no | 0.6 |
+| `steps` | integer | no | _none_ |
+| `ramp` | array<string> | no | _none_ |
+
+
+### `tween_cels`
+
+Scale, turn and fade one drawn cel across frames, in one Aseprite launch.
+
+`offset_cels` moves a cel along a path, which is one of the four things an inbetween
+does. This is the other three. The cel on the **first listed frame is the source**,
+and every listed frame becomes that one drawing resampled by its share of the change:
+frame nine is sampled from the original and not from frame eight, so the rounding
+never compounds.
+
+**It interpolates a transform, not pixels.** Blending two different drawings gives a
+double exposure, two silhouettes at half strength, which reads as a mistake rather
+than as motion. So this takes one drawing, and when two cels genuinely differ in shape
+there is no honest automatic inbetween: draw the second pose and tween each one out
+from its own extreme, or express the difference as a scale and a turn, which most of
+them are.
+
+Args:
+    frames: The frames to write, in the order the change passes through them. The
+        first is the source, and it is rewritten too when `scale_from`, `rotate_from`
+        or `opacity_from` is not the identity.
+    scale_from, scale_to: The scale at the first and last frame, on both axes.
+    scale_y_from, scale_y_to: Override the vertical scale, for squash and stretch,
+        where the two axes go opposite ways (0.7 tall against 1.25 wide is a squash
+        that keeps its volume). Unset means the same as the horizontal, which is a
+        zoom and not a squash.
+    rotate_from, rotate_to: Clockwise degrees at the first and last frame, snapped to
+        whole degrees. Quarter turns are exact and lose nothing; sampling within about
+        15 degrees of one shuffles the edge pixels rather than turning the shape, and
+        the result says so in `warnings` instead of pretending otherwise.
+    opacity_from, opacity_to: Cel opacity, 0 to 255. This sets the cel's own opacity
+        and never bakes alpha into the pixels: a baked fade invents colours that are
+        not on the palette. It is the per-frame `set_cel_opacity` done in one call.
+    ease: How the change is *spaced*: `linear`, `ease_in` (starts slow), `ease_out`
+        (arrives slow), `ease_in_out`, or `gravity` (accelerating, as a falling object
+        does). Easing belongs in one place at a time, and `apply_timing_curve` carries
+        the durations.
+    anchor: The point the transform holds still, taken from the cel's own drawn
+        bounds: `center`, `top`, `bottom`, `left` or `right`. This matters more than it
+        looks. A scale about the centre makes a ball grow in every direction; a scale
+        about `bottom` makes it squash *onto the ground*, which is the one that reads
+        as weight, and `validate_loop`'s contact-edge check then confirms that the
+        contact row did not move.
+
+Refuses rather than doing something approximate: fewer than two frames, a frame listed
+twice, a from and to that are identical on every channel (each frame would be
+rewritten with the drawing the source already holds), a scale of zero or below, a
+group or tilemap layer, a source frame with no cel or nothing drawn on it, a frame
+whose transform lands entirely off the canvas, and any frame that shares its image
+with another frame. That last one is the sharp edge: linked cels share one image, one
+position and one opacity, so a tween written into a link group would change every
+frame in it. The refusal names the frames and points at `unlink_cels`.
+
+Every listed frame after the first is **overwritten** with the transformed source
+rather than blended with what was there. `steps[].bounds` is the written cel's own
+content box, so a scale series can be checked instead of trusted: `rendered_monotone`
+is that check, and it is omitted while the cel is also rotating, because a turning
+shape's bounding box oscillates by design. `steps[].drawn_pixels` is how many opaque
+samples that frame took; `pixels_written` is what landed, and the two differ only when
+an active selection masked part of it, which `pixels_outside_selection` then reports.
+
+Sampling is nearest-neighbour and copies the source pixel whole, so no colour appears
+that the drawing did not already contain and `palette_conformance` is unchanged.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | yes |  |
+| `frames` | array<integer> | yes |  |
+| `scale_from` | number | no | 1.0 |
+| `scale_to` | number | no | 1.0 |
+| `scale_y_from` | number | no | _none_ |
+| `scale_y_to` | number | no | _none_ |
+| `rotate_from` | number | no | 0.0 |
+| `rotate_to` | number | no | 0.0 |
+| `opacity_from` | integer | no | 255 |
+| `opacity_to` | integer | no | 255 |
+| `ease` | string | no | linear |
+| `anchor` | string | no | center |
 
 
 ### `validate_loop`
