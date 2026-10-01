@@ -20,6 +20,44 @@ All notable changes to this project are documented here. The format is based on
   definition of transparent and would otherwise have disagreed with `assess_sprite`.
 
 ### Added
+- **`diff_sprites`: compare two frames and say what changed.** An agent cannot look at
+  its own sprite, and the gap that leaves is not "is this good" (`assess_sprite` answers
+  that) but "did my last call do what I meant". Nothing here could answer it: the only way
+  to tell an edit that landed from one that quietly went nowhere was to read both frames
+  back as pixels and compare them by hand, 4096 at a time.
+
+  The report is four counts that add up to the total, because "changed" on its own means
+  several different things and they are different bugs. Pixels that *entered or left the
+  silhouette* move the shape itself, and with it the collision box, the outline and the
+  trimmed export box; pixels *repainted inside* it changed colour; pixels that changed
+  *alpha alone* are an opacity or anti-aliasing change rather than a repaint. The issue
+  asking for this proposed a single changed-pixel count, which would have reported a
+  shading pass that ate the outline and a shading pass that worked as the same number.
+
+  Nothing changed is the loudest result rather than the quietest, because an edit that
+  went to the wrong layer, or was scoped by a selection nobody cleared, or was clipped off
+  the canvas, looks exactly like an edit that was not needed. That case names the three
+  usual causes in the order they are worth checking.
+
+  A difference is never reported as a fault, since different is not wrong: pass `expect=`
+  ("identical", "silhouette", "interior", "coverage", "mixed") and the measurement becomes
+  a check with a pass or a fail, the way `ramp=` turns `assess_sprite` into a palette check.
+  `layer=` compares one layer instead of the composite, which is the distinction that makes
+  the tool useful at all, since every drawing tool writes to one layer and a composite can
+  look unchanged while the layer under it was repainted. `other=` defaults to the sprite
+  itself, so a frame-to-frame diff of one animation is the same call.
+
+  It reads both frames in one Aseprite launch and never writes: the frames are rendered
+  into scratch images, and a selection sidecar is deliberately not loaded, because a diff
+  is a question about the whole frame. Different colour modes compare fine, so an indexed
+  sprite can be checked against its RGB export. Finding the differences takes three
+  narrowing passes rather than one scan, since almost no pixel in a frame changes: a native
+  whole-frame comparison first, then one string comparison per row of the raw buffer, and
+  only then per-pixel work on the rows that actually hold a difference. The per-pixel pass
+  is the authority on what counts as changed, which matters because the cheaper tests
+  disagree about pixels that are transparent in both frames, and a tool that trusted them
+  would report "identical" and "47 pixels differ" in the same breath.
+
 - **A tag can say how many times it plays, and frames can be reordered.** Three gaps in
   the frame and tag layer, each of which forced a workaround that damaged the sprite.
   `add_tag` and `set_tag` now take `repeats`, which Aseprite has always stored and nothing

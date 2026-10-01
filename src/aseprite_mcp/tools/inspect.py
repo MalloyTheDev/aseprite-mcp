@@ -10,9 +10,9 @@ from pathlib import Path
 from mcp.server.mcpserver import Image
 
 from ..app import mcp
-from ..core import config, quality
+from ..core import config, quality, spritediff
 from ..core.errors import ValidationFailed
-from ..core.limits import MAX_ASSESS_PIXELS
+from ..core.limits import MAX_ASSESS_PIXELS, MAX_DIFF_COLORS
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import AsepriteError, run_cli, run_lua
 from .common import lua_path, resolve_path
@@ -369,3 +369,378 @@ def assess_sprite(
         "metrics": metrics,
         "readings": notes,
     }
+
+
+# How a diff finds its differences, and why it is not one pass over both images.
+#
+# The expensive part of reading a frame is the per-pixel work in Lua: a getPixel, a
+# px_to_rgba and a string.format at the size cap take seconds. Almost none of it is
+# needed, because almost no pixel changes. So the scan narrows three times:
+#
+#   1. `Image:isEqual` over the whole frame. It is native, and it settles the common
+#      "did anything happen at all" case outright.
+#   2. One row of `Image.bytes` against the same row of the other buffer, as a single
+#      string comparison per row. That reduces the pixels worth looking at to the rows
+#      that actually hold a difference.
+#   3. px_to_rgba on the pixels of those rows, which is where a pixel is classified and
+#      the only place a colour mode is interpreted.
+#
+# Step 3 is the authority on what counts as changed; steps 1 and 2 may only ever skip
+# work. That ordering is the point: isEqual treats two fully transparent pixels as equal
+# whatever bytes sit under them and a byte comparison does not, so a tool that trusted
+# the bytes would report "identical" and "47 pixels differ" in the same breath.
+_DIFF_LUA = FRAME_GUARD_LUA + """
+-- app.open rather than the prelude's open_sprite, deliberately. open_sprite loads a
+-- .msk sidecar into the shared _sel global, so opening a second sprite here would leave
+-- one sprite's selection in place for a tool that writes no pixels at all, and the
+-- harness would go on to report selection_applied on a read-only result. A diff is also
+-- a question about the whole frame: scoping it to whatever happened to be selected
+-- would quietly answer a different one.
+local function load_sprite(path, what)
+  local spr = app.open(path)
+  if spr == nil then error("Could not open the " .. what .. ": " .. tostring(path), 0) end
+  if spr.width * spr.height > ARG.max_pixels then
+    error("The " .. what .. " is " .. spr.width .. "x" .. spr.height .. " (" ..
+          (spr.width * spr.height) .. " px); diff_sprites compares at most " ..
+          ARG.max_pixels .. " pixels per frame.", 0)
+  end
+  return spr
+end
+
+local function box_of(img)
+  local r = img:shrinkBounds()
+  if r == nil or r.width == 0 or r.height == 0 then return nil end
+  return { x = r.x, y = r.y, width = r.width, height = r.height }
+end
+
+local function box_text(box)
+  if box == nil then return "empty" end
+  return box.width .. "x" .. box.height .. " at " .. box.x .. "," .. box.y
+end
+
+local function frame_image(spr, framenum, layer_ref)
+  if layer_ref ~= nil then
+    -- One layer, the same surface the drawing tools write to. The composite is not it:
+    -- an edit that landed on the wrong layer is invisible in the composite of a sprite
+    -- whose other layer happens to cover it.
+    return get_draw_image(spr, find_layer(spr, layer_ref), framenum)
+  end
+  local img = Image(spr.spec)
+  img:clear()
+  img:drawSprite(spr, framenum)
+  return img
+end
+
+-- Visible pixels straight out of the byte buffer. Every pixel's alpha sits at a fixed
+-- stride in Image.bytes, so counting what is drawn needs no getPixel and no px_to_rgba
+-- per pixel, which at the size cap is the difference between milliseconds and seconds.
+-- Reading a block at a time is the trick the frame hash uses: string.byte one index at a
+-- time is the slow part, not the loop.
+local function visible_count(spr, img)
+  local cm = spr.colorMode
+  local stride, first, clear = 4, 4, { [0] = true }
+  if cm == ColorMode.GRAY then
+    stride, first = 2, 2
+  elseif cm == ColorMode.INDEXED then
+    stride, first = 1, 1
+    -- Indexed transparency is two separate things and both have to count: the sprite's
+    -- transparent index, and any palette entry that is itself fully transparent. Testing
+    -- only the first is the bug this server has already been bitten by once.
+    clear = { [spr.transparentColor] = true }
+    local pal = spr.palettes[1]
+    for ix = 0, #pal - 1 do
+      if pal:getColor(ix).alpha == 0 then clear[ix] = true end
+    end
+  end
+
+  local s = img.bytes
+  if #s ~= img.width * img.height * stride then
+    -- Not the layout assumed above. Count the slow, certain way rather than a wrong way.
+    local n = 0
+    for y = 0, img.height - 1 do
+      for x = 0, img.width - 1 do
+        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y))
+        if alpha > 0 then n = n + 1 end
+      end
+    end
+    return n
+  end
+
+  -- 512 is a multiple of every stride above, so `first` stays aligned block to block.
+  -- It is a byte count rather than a pixel count on purpose: string.byte returns one
+  -- value per byte, and asking it for a few thousand at once is how you find Lua's
+  -- result limit.
+  local n, len, i = 0, #s, 1
+  local block = 512
+  while i <= len do
+    local j = math.min(i + block - 1, len)
+    local t = table.pack(string.byte(s, i, j))
+    for k = first, t.n, stride do
+      if not clear[t[k]] then n = n + 1 end
+    end
+    i = j + 1
+  end
+  return n
+end
+
+local a = load_sprite(ARG.a, "sprite")
+-- Opening the same path twice gives two independent documents, which is what lets a
+-- frame-to-frame diff inside one sprite be this same code rather than a second tool.
+local b = load_sprite(ARG.b, "sprite to compare against")
+local fa = require_frame(a, ARG.frame_a, "frame")
+local fb = require_frame(b, ARG.frame_b, "other_frame")
+
+local ia = frame_image(a, fa, ARG.layer_a)
+local ib = frame_image(b, fb, ARG.layer_b)
+
+if a.width ~= b.width or a.height ~= b.height then
+  error("These frames cannot be compared pixel for pixel: " .. ARG.a_name .. " is " ..
+        a.width .. "x" .. a.height .. " and " .. ARG.b_name .. " is " .. b.width .. "x" ..
+        b.height .. ". The art inside them is " .. box_text(box_of(ia)) .. " and " ..
+        box_text(box_of(ib)) .. ", so if the canvases differ only in padding, " ..
+        "trim_sprite or resize_canvas on a copy will line them up.", 0)
+end
+
+-- Which rows are worth looking at.
+local rows = {}
+if not (a.colorMode == b.colorMode and ia:isEqual(ib)) then
+  local sa, sb = ia.bytes, ib.bytes
+  local per = a.width * a.height
+  local narrowed = false
+  if a.colorMode == b.colorMode and #sa == #sb and per > 0 and #sa % per == 0 then
+    local stride = math.floor(#sa / per) * a.width
+    for y = 0, a.height - 1 do
+      local off = y * stride
+      if string.sub(sa, off + 1, off + stride) ~= string.sub(sb, off + 1, off + stride) then
+        rows[#rows + 1] = y
+      end
+    end
+    narrowed = true
+  end
+  if not narrowed then
+    -- Different colour modes, or a buffer that is not the shape assumed above. Every
+    -- row, and px_to_rgba decides, because it is the one thing that reads both modes.
+    for y = 0, a.height - 1 do rows[#rows + 1] = y end
+  end
+end
+
+local changed, added, removed, interior, coverage = 0, 0, 0, 0, 0
+local minx, miny, maxx, maxy = nil, nil, nil, nil
+local was, now = {}, {}
+
+for _, y in ipairs(rows) do
+  for x = 0, a.width - 1 do
+    local r1, g1, b1, a1 = px_to_rgba(a, ia:getPixel(x, y))
+    local r2, g2, b2, a2 = px_to_rgba(b, ib:getPixel(x, y))
+    local same
+    if a1 == 0 and a2 == 0 then
+      -- Both absent. Whatever colour an invisible pixel carries underneath is not art,
+      -- and counting it would mean a diff that disagrees with every preview of the two
+      -- frames it just compared.
+      same = true
+    else
+      same = (a1 == a2 and r1 == r2 and g1 == g2 and b1 == b2)
+    end
+    if not same then
+      changed = changed + 1
+      if a1 == 0 then
+        added = added + 1
+      elseif a2 == 0 then
+        removed = removed + 1
+      elseif r1 == r2 and g1 == g2 and b1 == b2 then
+        coverage = coverage + 1
+      else
+        interior = interior + 1
+      end
+      if minx == nil or x < minx then minx = x end
+      if maxx == nil or x > maxx then maxx = x end
+      if miny == nil or y < miny then miny = y end
+      if maxy == nil or y > maxy then maxy = y end
+      if a1 > 0 then
+        local k = string.format("#%02x%02x%02x%02x", r1, g1, b1, a1)
+        was[k] = (was[k] or 0) + 1
+      end
+      if a2 > 0 then
+        local k = string.format("#%02x%02x%02x%02x", r2, g2, b2, a2)
+        now[k] = (now[k] or 0) + 1
+      end
+    end
+  end
+end
+
+-- pairs() has no defined order, so the colour is the tiebreak: the same two frames have
+-- to produce the same list every time or nothing downstream can be tested.
+local function tally(t)
+  local out = {}
+  for color, count in pairs(t) do out[#out + 1] = { color = color, pixels = count } end
+  table.sort(out, function(p, q)
+    if p.pixels ~= q.pixels then return p.pixels > q.pixels end
+    return p.color < q.color
+  end)
+  return out
+end
+
+local box = nil
+if minx ~= nil then
+  box = { x = minx, y = miny, width = maxx - minx + 1, height = maxy - miny + 1 }
+end
+
+RESULT = {
+  width = a.width, height = a.height,
+  a = { frame = fa, color_mode = colormode_name(a.colorMode), frames = #a.frames,
+        drawn_pixels = visible_count(a, ia), content = box_of(ia) },
+  b = { frame = fb, color_mode = colormode_name(b.colorMode), frames = #b.frames,
+        drawn_pixels = visible_count(b, ib), content = box_of(ib) },
+  changed_pixels = changed,
+  silhouette_added = added,
+  silhouette_removed = removed,
+  interior_changed = interior,
+  coverage_changed = coverage,
+  change_box = box,
+  colors_before = tally(was),
+  colors_after = tally(now),
+}
+"""
+
+
+def _tally(colors) -> list[dict]:
+    """A colour tally as a list, whatever shape Lua handed it back in.
+
+    An empty Lua table carries no evidence of whether it was meant as a list or a map, so
+    one arrives here as `{}` rather than `[]`. Coercing is cheaper than teaching the
+    encoder to guess, and a diff that found nothing changed is the common case.
+    """
+    return colors if isinstance(colors, list) else []
+
+
+@mcp.tool()
+def diff_sprites(
+    filename: str,
+    frame: int = 1,
+    layer: str | None = None,
+    other: str | None = None,
+    other_frame: int = 1,
+    other_layer: str | None = None,
+    expect: str | None = None,
+) -> dict:
+    """Compare two frames pixel for pixel and say what changed.
+
+    This is the tool for the question an editing agent cannot otherwise answer: *did my
+    last call do what I meant?* `assess_sprite` judges one frame on its own and
+    `render_preview` returns a picture a text-only model cannot read. This reports the
+    difference between two frames as counts, which is the only form in which "the shading
+    pass moved the outline" is visible without eyes.
+
+    **Nothing changed is the loudest result, not the quiet one.** An edit that silently
+    went nowhere, to the wrong layer, inside a stale selection, off the canvas, looks
+    exactly like an edit that was not needed. When the two frames are identical this says
+    so first and names the usual causes.
+
+    A difference is never reported as a fault, because different is not wrong. Pass
+    `expect` to turn the measurement into a check.
+
+    Args:
+        filename: The sprite to compare, and the "before" side of the report.
+        frame: Which frame of it (1-based).
+        layer: Compare this layer alone instead of the composite, on both sides unless
+            `other_layer` says otherwise. Worth reaching for: drawing tools write to ONE
+            layer, so a composite diff can show nothing while the layer underneath
+            changed completely, and the reverse.
+        other: The sprite to compare against. Defaults to `filename`, which is what makes
+            a frame-to-frame diff inside one animation this same call.
+        other_frame: Which frame of `other` (1-based).
+        other_layer: The layer to read on the `other` side, when it is named differently.
+        expect: What the change should be: "identical", "silhouette", "interior",
+            "coverage" or "mixed". Adds a verdict block with a pass or a fail, and is
+            omitted rather than guessed at.
+
+    Returns counts in four buckets that add up to `changed_pixels`, so a change is never
+    reported as a single number that could mean two different things:
+
+    * `silhouette_added` / `silhouette_removed`: pixels that entered or left the shape.
+      These are the ones that move a collision box, an outline and a trimmed export box.
+    * `interior_changed`: pixels that were visible before and after and changed colour.
+    * `coverage_changed`: pixels that kept their colour and changed only their alpha,
+      which is an opacity or anti-aliasing change rather than a repaint.
+
+    Both frames must be the same size; a mismatch is refused with both canvas sizes and
+    both content boxes, because a diff of differently sized frames is an offset question
+    in disguise. Different colour modes compare fine: both sides are read as RGBA, so an
+    indexed sprite and its RGB export can be checked against each other.
+    """
+    if expect is not None and expect not in spritediff.CLASSIFICATIONS:
+        raise ValidationFailed(
+            f"expect must be one of {', '.join(spritediff.CLASSIFICATIONS)}; "
+            f"got {expect!r}."
+        )
+    src = resolve_path(filename)
+    dst = resolve_path(other) if other is not None else src
+    layer_b = other_layer if other_layer is not None else layer
+    if src == dst and int(frame) == int(other_frame) and layer_b == layer:
+        raise ValidationFailed(
+            "This would compare a frame with itself, which always reports identical. "
+            "Pass other= for a second sprite, or other_frame= for another frame of this "
+            "one. To check whether an edit landed, diff against a copy taken before it "
+            "(save_sprite_as) rather than against the same frame."
+        )
+
+    measured = run_lua(_DIFF_LUA, {
+        "a": lua_path(src), "b": lua_path(dst),
+        "a_name": filename, "b_name": other if other is not None else filename,
+        "frame_a": int(frame), "frame_b": int(other_frame),
+        "layer_a": layer, "layer_b": layer_b,
+        "max_pixels": MAX_ASSESS_PIXELS,
+    })
+
+    # Pixels drawn in either frame, which is the denominator that makes `changed_share`
+    # mean something. It is exact rather than estimated: a pixel visible in the second
+    # frame and not the first is precisely one that was counted into silhouette_added.
+    counts = {k: v for k, v in measured.items() if k not in ("a", "b", "width", "height")}
+    counts["drawn_union"] = measured["a"]["drawn_pixels"] + measured["silhouette_added"]
+
+    # The full tallies are what the readings reason over; the capped ones are what goes
+    # back to the caller. A diff that says "introduced 40 colours" while listing 24 is
+    # honest about both, and `colors_total` below says so explicitly.
+    counts["colors_before"] = _tally(measured.get("colors_before"))
+    counts["colors_after"] = _tally(measured.get("colors_after"))
+    new = spritediff.introduced(counts)
+    before, after = counts["colors_before"], counts["colors_after"]
+
+    metrics = {
+        "changed_pixels": measured["changed_pixels"],
+        "silhouette_added": measured["silhouette_added"],
+        "silhouette_removed": measured["silhouette_removed"],
+        "interior_changed": measured["interior_changed"],
+        "coverage_changed": measured["coverage_changed"],
+        **spritediff.shares(counts),
+        "change_box": measured.get("change_box"),
+        "drawn_union": counts["drawn_union"],
+        "colors_before": before[:MAX_DIFF_COLORS],
+        "colors_after": after[:MAX_DIFF_COLORS],
+        "colors_introduced": new[:MAX_DIFF_COLORS],
+    }
+    if max(len(before), len(after), len(new)) > MAX_DIFF_COLORS:
+        # The lists are capped but the counts are not, so a diff of a photo import says
+        # how many colours were involved without returning the histogram.
+        metrics["colors_total"] = {
+            "before": len(before), "after": len(after), "introduced": len(new),
+        }
+
+    names = {
+        "before": f"{filename} frame {measured['a']['frame']}",
+        "after": f"{other or filename} frame {measured['b']['frame']}",
+    }
+    result = {
+        "ok": True,
+        "identical": measured["changed_pixels"] == 0,
+        "change": spritediff.classify(counts),
+        "width": measured["width"],
+        "height": measured["height"],
+        "a": {"path": str(src), "layer": layer, **measured["a"]},
+        "b": {"path": str(dst), "layer": layer_b, **measured["b"]},
+        "metrics": metrics,
+        "readings": spritediff.readings(counts, names=names),
+    }
+    if expect is not None:
+        result["verdict"] = spritediff.verdict(counts, expect)
+    return result

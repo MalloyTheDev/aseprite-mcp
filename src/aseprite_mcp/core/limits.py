@@ -63,6 +63,11 @@ MAX_CURVE_STEPS = 4_096
 # imported at full size is the case that would otherwise stall for a minute.
 MAX_ASSESS_PIXELS = 1_048_576
 
+# Distinct colours `diff_sprites` lists per side. A diff names the colours involved in
+# the change so the odd one out is visible; past a couple of dozen that list is a photo
+# histogram rather than a finding, and the count still says how many there were.
+MAX_DIFF_COLORS = 24
+
 # --- Animation ------------------------------------------------------------- #
 # How many times a tag may say it plays. Aseprite stores the count in 16 bits and treats
 # 0 as "forever", which is how a cycle is marked; the cap is the format's, not ours.
