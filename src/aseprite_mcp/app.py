@@ -168,10 +168,22 @@ def portable_schema(schema: Any) -> Any:
 # again, outside the workspace, and neither ever saves the sprite it opened. They are
 # read-only with respect to everything the caller owns, and they are also the two tools
 # an agent calls most often, so prompting on them is pure friction.
+#
+# `assess_sprite`, `diff_sprites` and `get_selection` were missing from this set until
+# they were measured for it, and each one was absent for the same reason: the set was
+# written before the tool was. The cost of the omission runs both ways. An agent is meant
+# to call the first two after every pass, so prompting on them is the friction that
+# teaches a user to approve everything; and `get_selection` matches the `get_*` prefix
+# that a client keyed on names rather than on annotations would auto-approve, so a gap
+# here is what makes prefix matching look reasonable. `test_no_read_only_tool_writes`
+# pins the direction that would actually be dangerous: a tool on this list that writes.
 READ_ONLY_TOOLS = frozenset({
+    "assess_sprite",
+    "diff_sprites",
     "get_cel",
     "get_palette",
     "get_pixels",
+    "get_selection",
     "get_sprite_info",
     "get_tilemap",
     "gui_available",
