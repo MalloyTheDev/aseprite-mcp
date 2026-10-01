@@ -69,6 +69,15 @@ Args:
         Omit for a transparent canvas.
     overwrite: Replace `filename` if it already exists (default False = no-clobber).
 
+An **indexed** sprite is created with a usable 33-colour palette: a transparent
+entry at index 0 (the index that means "no pixel here"), then the 32 colours
+Aseprite ships as its default. Aseprite's own new indexed sprite has 256 entries of
+identical black instead, which made every colour equidistant from every entry, so
+every draw resolved to index 0 and was invisible while reporting success. A
+`background` colour that the default palette does not contain is appended to it, so
+the background is the exact colour asked for rather than the nearest one available.
+Replace the whole palette with `set_palette` when you have one in mind.
+
 Returns the new sprite's structured info.
 
 | Parameter | Type | Required | Default |
@@ -163,14 +172,39 @@ inside Aseprite and reports the size it would have produced.
 
 Convert a sprite between colour modes ("rgb", "indexed", "gray").
 
-When converting to "indexed", dithering can be "none", "ordered", or
-"old" to control how RGB colours are mapped to the palette.
+Converting **to indexed** builds the palette from the sprite's own colours first,
+which is what the editor does and what makes the art survive. Mapping art against
+whatever palette the sprite happened to carry is how this tool used to empty a
+sprite: a saved RGB sprite carries a single transparent entry, so every pixel
+resolved to it and the whole image became transparent while the call reported ok.
+
+Args:
+    color_mode: "rgb", "indexed", or "gray".
+    dithering: "none" (default), "ordered", or "old". How a colour between two
+        palette entries is resolved. Indexed conversions only.
+    palette_source: "from_art" (default) quantizes the sprite's colours into a new
+        palette and maps onto that, so flat colours convert exactly. "keep" maps
+        against the palette the sprite already has, for when you loaded or built one
+        deliberately; snapping the art to that palette is the point, so expect
+        colours to shift, and expect two art colours to merge where the palette has
+        only one entry near them. Indexed conversions only; the other modes have no
+        palette to choose.
+
+**Refuses** a conversion to indexed that would make drawn pixels disappear, naming
+how many, and leaves the file untouched when it does. Losing colour accuracy is what
+indexed mode is for and is allowed; losing pixels is not recoverable and is the one
+thing a mode change must never do quietly. `set_palette` or `add_palette_color` fix a
+palette that has nothing to draw with.
+
+Returns the sprite's structured info, plus `drawn_pixels` (verified unchanged by the
+conversion) and the `palette_source` used, for indexed targets.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `color_mode` | string | yes |  |
 | `dithering` | string | no | none |
+| `palette_source` | string | no | from_art |
 
 
 ### `trim_sprite`
@@ -687,7 +721,10 @@ Args:
         every shading tool here holds to and what a pixel artist actually draws.
         Without it the fallback is opacity, and the fallback **leaves the palette**:
         the trail is then made of colours that are not in the sprite, which is motion
-        blur rather than a smear.
+        blur rather than a smear. On an *indexed* sprite the ramp is required rather
+        than preferred, and the call is refused without one: an indexed pixel is an
+        offset into a palette and carries no alpha, so the fallback would snap every
+        copy back to the subject's own colour and draw a solid blob.
 
 Refuses rather than producing a blur of nothing: a frame with no movement to smear
 (the two content boxes sit at the same place, and the message says where they are), a

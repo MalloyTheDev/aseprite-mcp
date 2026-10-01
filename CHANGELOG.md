@@ -7,6 +7,49 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- **Indexed colour mode was unusable from either end.** An indexed pixel is an offset into
+  a palette, and one offset, `transparentColor`, means "no pixel here" rather than a
+  colour. Both the tool that created a palette and the tool that converted onto one were
+  willing to answer a colour question with that offset, and neither said so.
+
+  A sprite from `create_sprite(color_mode="indexed")` had a palette of 256 entries that
+  were all opaque black. Every entry was therefore equidistant from every request, the
+  first index won by being first, and index 0 is the transparent one: red, white and
+  everything else resolved to "nothing is here", so every draw landed invisibly and
+  reported the pixels it had written. A new indexed sprite now gets a 33-colour palette,
+  a transparent entry at index 0 followed by the 32 colours Aseprite ships as its
+  default, and a `background` colour the palette does not already hold is added to it so
+  the background is the colour that was asked for rather than the nearest one available
+  (#138).
+
+  `set_color_mode(..., "indexed")` mapped the art against whatever palette the sprite was
+  carrying, and a saved RGB sprite carries a single transparent entry. The art did not
+  survive: every pixel pointed at that entry, the sprite read back empty, and the call
+  returned ok. The conversion now quantizes the sprite's own colours into a palette first,
+  across every frame, which is what the editor does; `palette_source="keep"` asks for the
+  old behaviour, for a palette that was loaded or built on purpose (#137).
+
+  `nearest_index` in the shared Lua prelude, which every drawing tool resolves colours
+  through, no longer considers the transparent index or an entry whose own alpha is zero:
+  neither can hold a visible pixel, so neither is an answer to "which colour is nearest",
+  however near it is. It refuses outright, naming `add_palette_color` and `set_palette`,
+  when the palette has nothing drawable at all. Tools that mean to write transparency are
+  unaffected, since a request with zero alpha is answered with the transparent index
+  before any nearest-match runs.
+
+  `set_color_mode` now also **refuses** a conversion to indexed that would make drawn
+  pixels disappear, names how many were at stake, and leaves the file on disk untouched.
+  Losing colour accuracy is what indexed mode is for and still proceeds; losing pixels
+  cannot be undone and was the whole of #137.
+
+- **`set_color_mode` accepted any `dithering` string.** Aseprite takes
+  `dithering = "no-such-dither"` without a word and converts with its default, so a
+  misspelled algorithm reported success having done something other than what was asked.
+  `dithering`, `palette_source` and `create_sprite`'s `color_mode` are now checked in
+  Python, before a process is launched. `color_mode="rgba"` is refused rather than read as
+  `"rgb"`: an RGB sprite here always has an alpha channel, so "rgba" is a guess about
+  which of the three modes was meant, and `set_color_mode` already refused it.
+
 - **A slice's user-data could be written but not read back.** `add_slice` and `set_slice`
   store `Slice.data`, and the whole point of sending it as `{"type": "hitbox", "id":
   "body"}` is that an engine reads a slice's type and id from it. Nothing reported it:

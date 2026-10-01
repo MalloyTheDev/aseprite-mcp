@@ -20,6 +20,7 @@ from aseprite_mcp.tools import (
     frames,
     inspect,
     layers,
+    palette,
     sprite,
     tags,
 )
@@ -1064,6 +1065,47 @@ def test_an_undrawn_source_frame_says_what_it_was_needed_for(request):
     cels.delete_cel(name, "Layer 1", 2)
     with pytest.raises(AsepriteError, match="measure the movement from"):
         animation.smear_frame(name, "Layer 1", 3, ramp=RAMP)
+
+
+def test_an_indexed_sprite_needs_a_ramp_rather_than_the_opacity_fallback(request):
+    """An indexed pixel is an offset into a palette and carries no alpha, so the fallback
+    has nothing to fade with: every copy would snap back to the subject's own colour and
+    draw a solid blob while reporting success. With a ramp the same sprite smears fine."""
+    name = f"a/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 64, 40, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", *RAMP])
+    drawing.draw_ellipse(name, 10, 20, 5, 5, "#b04a5a", filled=True)
+    for _ in range(3):
+        frames.add_frame(name)
+    for f in (2, 3, 4):
+        cels.copy_cel(name, "Layer 1", 1, f)
+    animation.offset_cels(name, "Layer 1", [1, 2, 3, 4], dx=36)
+
+    with pytest.raises(ValidationFailed, match="indexed"):
+        animation.smear_frame(name, "Layer 1", 3)
+
+    result = animation.smear_frame(name, "Layer 1", 3, ramp=RAMP, strength=1.0)
+    assert result["on_palette"] is True
+    assert inspect.assess_sprite(
+        name, frame=3, layer="Layer 1", ramp=RAMP
+    )["metrics"]["palette_conformance"] == 1.0
+
+
+def test_a_tween_on_an_indexed_sprite_copies_indices_rather_than_resolving_colours(request):
+    """The sampler copies the raw pixel, which on an indexed sprite is the index itself,
+    so a scale cannot route a colour back through the palette and land on a near miss."""
+    name = f"a/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 48, 48, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", *RAMP])
+    drawing.draw_rectangle(name, 14, 20, 12, 8, "#b04a5a", filled=True)
+    frames.add_frame(name)
+    cels.copy_cel(name, "Layer 1", 1, 2)
+
+    animation.tween_cels(name, "Layer 1", [1, 2], scale_to=1.5, anchor="center")
+
+    measured = inspect.assess_sprite(name, frame=2, layer="Layer 1", ramp=RAMP)["metrics"]
+    assert measured["palette_conformance"] == 1.0
+    assert measured["colors"] == 1, "one colour in, one colour out"
 
 
 def test_a_group_layer_cannot_be_smeared(request):

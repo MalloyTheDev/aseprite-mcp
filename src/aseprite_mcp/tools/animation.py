@@ -1017,6 +1017,9 @@ end
 
 RESULT = {
   layer = layer.name, frame = here, from_frame = there,
+  -- Reported because it decides whether the no-ramp fallback can work at all: an
+  -- indexed pixel is an offset into a palette and carries no alpha of its own.
+  color_mode = colormode_name(spr.colorMode),
   canvas = { width = spr.width, height = spr.height },
   bounds = { x = here_b.x, y = here_b.y, width = here_b.width, height = here_b.height },
   from_bounds = { x = there_b.x, y = there_b.y,
@@ -1206,7 +1209,10 @@ def smear_frame(
             every shading tool here holds to and what a pixel artist actually draws.
             Without it the fallback is opacity, and the fallback **leaves the palette**:
             the trail is then made of colours that are not in the sprite, which is motion
-            blur rather than a smear.
+            blur rather than a smear. On an *indexed* sprite the ramp is required rather
+            than preferred, and the call is refused without one: an indexed pixel is an
+            offset into a palette and carries no alpha, so the fallback would snap every
+            copy back to the subject's own colour and draw a solid blob.
 
     Refuses rather than producing a blur of nothing: a frame with no movement to smear
     (the two content boxes sit at the same place, and the message says where they are), a
@@ -1282,6 +1288,14 @@ def smear_frame(
             f"{measured['linked_with']} (a linked cel), so a smear written here would "
             "appear on all of them and the unsmeared frames would not be untouched. Call "
             f"unlink_cels('{measured['layer']}', [{here}]) first."
+        )
+    if ramp_rgb is None and measured.get("color_mode") == "indexed":
+        raise ValidationFailed(
+            "this sprite is indexed, and an indexed pixel is an offset into a palette "
+            "with no alpha of its own, so the opacity fallback has nothing to fade: every "
+            "trail copy would snap back to the subject's own colour and draw a solid blob "
+            "behind it rather than a smear. Pass ramp= so the trail steps down the "
+            "palette, which is what indexed art does anyway."
         )
     if measured["color_count"] > MAX_SMEAR_SUBJECT_COLORS:
         raise ValidationFailed(
