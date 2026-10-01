@@ -216,14 +216,56 @@ local function mkcolor(c)
   return Color{ r = clamp255(r), g = clamp255(g), b = clamp255(b), a = clamp255(a) }
 end
 
+-- Which palette entry best matches an opaque colour. Entries that cannot draw a
+-- visible pixel are not candidates, however near they are.
+--
+-- Two kinds of entry are excluded. `spr.transparentColor` is an offset that means "no
+-- pixel here" rather than a colour, so answering a colour question with it writes
+-- nothing; and an entry whose own alpha is 0 draws nothing either, which is the same
+-- outcome by a different route. Both used to win: a freshly created indexed sprite had
+-- 256 entries of identical black, every one was equidistant from every request, the
+-- first index won by being first, and index 0 is the transparent one. Red, white and
+-- everything else resolved to "no pixel", so every draw landed invisibly and reported
+-- the pixels it had written (#138).
+--
+-- Only ever reached with an opaque request: `to_pixel` and `rgba_to_px` both return
+-- `spr.transparentColor` directly when alpha is 0, so a tool that means to erase still
+-- gets the transparent index and never arrives here. That is what makes the exclusion
+-- safe rather than a refusal to draw transparency.
+--
+-- Nearness is still only nearness: a palette with no red in it answers a request for
+-- red with whatever it does have, which is what indexed mode means. The refusal below
+-- is for the case where it has nothing at all to answer with, because then the only
+-- available answer is the invisible one, and silence is how #138 stayed hidden.
 local function nearest_index(spr, r, g, b)
   local pal = spr.palettes[1]
-  local best, bestd = 0, nil
+  -- Hoisted: a fill resolves a colour per pixel, so a property read inside this loop is
+  -- paid palette-size times per pixel. It cannot change while the loop runs.
+  local clear_at = spr.transparentColor
+  local best, bestd = nil, nil
   for i = 0, #pal - 1 do
-    local col = pal:getColor(i)
-    local dr, dg, db = col.red - r, col.green - g, col.blue - b
-    local d = dr * dr + dg * dg + db * db
-    if bestd == nil or d < bestd then bestd = d; best = i end
+    if i ~= clear_at then
+      local col = pal:getColor(i)
+      if col.alpha > 0 then
+        local dr, dg, db = col.red - r, col.green - g, col.blue - b
+        local d = dr * dr + dg * dg + db * db
+        if bestd == nil or d < bestd then bestd = d; best = i end
+      end
+    end
+  end
+  if best == nil then
+    local what = (#pal == 1)
+      and "its only entry is"
+      or string.format("all %d of its entries are", #pal)
+    error(string.format(
+      "This indexed sprite's palette cannot draw a visible pixel: %s either transparent " ..
+      "or the transparent index (%d), so #%02x%02x%02x could only be written as " ..
+      "\"no pixel here\". Add a colour with add_palette_color, or set the whole palette " ..
+      "with set_palette, then draw again.",
+      -- Floored because "%x" on a float with a fractional part is itself an error in
+      -- Lua 5.4, and an error path that errors reports nothing useful. Callers pass
+      -- whole channels today; this keeps that from being load-bearing.
+      what, clear_at, math.floor(r), math.floor(g), math.floor(b)), 0)
   end
   return best
 end

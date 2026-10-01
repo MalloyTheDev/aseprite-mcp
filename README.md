@@ -385,9 +385,9 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 ### Sprite lifecycle
 | Tool | Description |
 | --- | --- |
-| `create_sprite` | Create & save a new sprite (`rgb`/`indexed`/`gray`, optional background). |
+| `create_sprite` | Create & save a new sprite (`rgb`/`indexed`/`gray`, optional background; `indexed` starts with a usable palette). |
 | `save_sprite_as` | Save a copy under a new path (optionally flattened). |
-| `set_color_mode` | Convert between `rgb` / `indexed` / `gray` (with dithering). |
+| `set_color_mode` | Convert between `rgb` / `indexed` / `gray` (with dithering); builds the palette from the art and refuses to drop pixels. |
 | `resize_canvas` | Change canvas size without scaling art (`top_left` / `center`). |
 | `crop_sprite` | Crop the canvas to a rectangle. |
 | `scale_sprite` | Scale the whole sprite (by factor or to dimensions; `nearest`/`bilinear`). |
