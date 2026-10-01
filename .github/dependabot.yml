@@ -1,7 +1,7 @@
 version: 2
 updates:
   # GitHub Actions used by CI. The workflow pins actions to commit SHAs; Dependabot
-  # proposes SHA bumps (with version annotations) as reviewed PRs — no floating-tag risk.
+  # proposes SHA bumps (with version annotations) as reviewed PRs; no floating-tag risk.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
