@@ -244,7 +244,11 @@ Args:
     ramp: Declare the ramp the art should be on and the report adds palette
         conformance: the fraction of drawn pixels sitting exactly on it. This is the
         measurement that separates shading from filtering, and it is omitted rather
-        than reported as a meaningless 1.0 when no ramp is given.
+        than reported as a meaningless 1.0 when no ramp is given. On an **indexed**
+        sprite the readings also say how much of the ramp the palette can actually
+        hold, because conformance cannot see a ramp step that collapsed onto its
+        neighbour: the colour it collapsed to is still on the ramp, so banded
+        shading still scores 1.0.
     check_tiling: For a tile, also measure how much worse the wrapping edge looks
         than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
     layer: Measure one layer instead of the flattened frame.

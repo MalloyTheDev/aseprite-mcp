@@ -10,12 +10,12 @@ from pathlib import Path
 from mcp.server.mcpserver import Image
 
 from ..app import mcp
-from ..core import config, quality, spritediff
+from ..core import config, indexed, quality, spritediff
 from ..core.errors import ValidationFailed
 from ..core.limits import MAX_ASSESS_PIXELS, MAX_DIFF_COLORS
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import AsepriteError, run_cli, run_lua
-from .common import lua_path, resolve_path
+from .common import lua_path, parse_color, resolve_path
 
 
 @mcp.tool()
@@ -331,7 +331,11 @@ def assess_sprite(
         ramp: Declare the ramp the art should be on and the report adds palette
             conformance: the fraction of drawn pixels sitting exactly on it. This is the
             measurement that separates shading from filtering, and it is omitted rather
-            than reported as a meaningless 1.0 when no ramp is given.
+            than reported as a meaningless 1.0 when no ramp is given. On an **indexed**
+            sprite the readings also say how much of the ramp the palette can actually
+            hold, because conformance cannot see a ramp step that collapsed onto its
+            neighbour: the colour it collapsed to is still on the ramp, so banded
+            shading still scores 1.0.
         check_tiling: For a tile, also measure how much worse the wrapping edge looks
             than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
         layer: Measure one layer instead of the flattened frame.
@@ -343,6 +347,12 @@ def assess_sprite(
     measured = run_lua(_ASSESS_LUA, {
         "src": lua_path(src), "frame": int(frame), "layer": layer,
         "max_pixels": MAX_ASSESS_PIXELS,
+        # Passed through so the harness can report what the ramp becomes on an indexed
+        # palette. Conformance against a ramp the palette cannot hold is not a
+        # meaningful number, and it is the misleading direction: a pixel that snapped to
+        # a neighbouring ramp step is still on the ramp, so conformance reads 1.0 for
+        # shading that banded. The Lua does nothing else with it.
+        "ramp": [parse_color(c) for c in ramp] if ramp else None,
     })
     grid = _expand(measured)
     metrics = quality.score(grid, ramp)
@@ -352,6 +362,10 @@ def assess_sprite(
                                 "vertical": round(vertical, 3)}
 
     notes = quality.readings(metrics, width=measured["width"], height=measured["height"])
+    # Before the tiling note, because it changes how palette_conformance above should be
+    # read: on an indexed sprite whose palette does not hold the declared ramp, the
+    # conformance number is measuring the palette rather than the shading.
+    notes.extend(indexed.ramp_readings(measured.get("ramp_on_palette") or {}))
     if check_tiling and "tile_seam" in metrics:
         seam = metrics["tile_seam"]
         for axis in ("horizontal", "vertical"):

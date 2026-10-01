@@ -366,3 +366,120 @@ def test_the_visible_pixel_count_is_defined_once():
         f"{offenders} define their own visible_count; call the prelude's instead so "
         "both callers of this number cannot drift apart"
     )
+
+
+def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
+    """A `ramp` argument on an indexed sprite is a request the palette may not be able to
+    honour, and the tool has to say so.
+
+    On an indexed sprite a pixel is an offset, so `rgba_to_px` sends a ramp colour the
+    palette does not hold through `nearest_index` and it lands on the nearest entry that
+    can draw. Two ramp steps can therefore resolve to one entry, which makes a shade
+    between them a no-op that reports the pixels it wrote, and `palette_conformance`
+    cannot see it because the colour landed on is still on the declared ramp (#145).
+
+    The measurement is attached by the Lua harness to any tool whose ARG carries a
+    `ramp`, and `run_ramp_lua` turns it into a warning. This test is why that convention
+    is safe to rely on: a new shading tool that reaches for `run_lua` instead fails here
+    rather than shipping shading that silently bands on indexed art.
+    """
+    import asyncio
+    import importlib
+    import inspect as inspect_mod
+    import pkgutil
+
+    from aseprite_mcp import tools as tools_pkg
+    from aseprite_mcp.server import mcp
+
+    # The registered tools, not every callable with a `ramp` parameter: `_smear_ramp` is
+    # a private helper that parses one and `run_ramp_lua` is the wrapper itself, and
+    # neither is something a caller can reach.
+    registered = {t.name for t in asyncio.run(mcp.list_tools())}
+
+    # smear_frame takes a ramp and does not go through here, on purpose. It resolves the
+    # ramp in Python into a colour-to-colour lookup table (`inbetween.shift_table`) and
+    # never passes a ramp to Lua at all, so the harness has nothing to measure and the
+    # question for it is a different one: what the *table's* target colours resolve to.
+    # It already refuses an indexed sprite with no ramp, and the remaining gap is filed
+    # rather than papered over here.
+    resolves_its_ramp_in_python = {"smear_frame"}
+    # assess_sprite measures instead of writing, so its reading belongs in `readings`
+    # beside the conformance number it qualifies, not in `warnings`. It passes the ramp
+    # to Lua for the measurement and consumes it itself.
+    reports_it_as_a_reading = {"assess_sprite"}
+
+    checked = []
+    for info in pkgutil.iter_modules(tools_pkg.__path__):
+        module = importlib.import_module(f"aseprite_mcp.tools.{info.name}")
+        for name, obj in vars(module).items():
+            fn = getattr(obj, "fn", None) if hasattr(obj, "fn") else None
+            target = fn or obj
+            if not callable(target) or getattr(target, "__module__", "") != module.__name__:
+                continue
+            try:
+                signature = inspect_mod.signature(target)
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                continue
+            if name not in registered or "ramp" not in signature.parameters:
+                continue
+            if name in resolves_its_ramp_in_python:
+                continue
+            source = inspect_mod.getsource(target)
+            if name in reports_it_as_a_reading:
+                assert "ramp_readings" in source, (
+                    f"{name} takes a ramp and surfaces the reading itself, but no longer "
+                    "calls indexed.ramp_readings"
+                )
+                checked.append(name)
+                continue
+            assert "run_ramp_lua(" in source, (
+                f"{name} takes a ramp but runs through plain run_lua, so on an indexed "
+                "sprite it will resolve the ramp against the palette and report nothing. "
+                "Use run_ramp_lua, or add it to an exemption here with the reason."
+            )
+            checked.append(name)
+
+    # The list is asserted rather than just iterated: a lookup that quietly found nothing
+    # would pass every assertion above and prove nothing at all.
+    assert sorted(checked) == [
+        "assess_sprite", "cast_shadow", "contact_shadow", "dither_band", "glow",
+        "gradient_map", "outline_smart", "shade_region_by_light", "shift_along_ramp",
+        "specular_highlight",
+    ], f"the set of ramp tools changed: {sorted(checked)}"
+
+
+def test_the_ramp_measurement_is_keyed_on_the_name_every_tool_uses():
+    """The harness finds the ramp by looking for `ARG.ramp`, so a tool that passes its
+    parsed ramp under any other key gets no measurement and no warning, silently.
+
+    Pinned here because the failure is invisible: the tool works, the shading lands, and
+    the one thing that would have told the caller their palette cannot hold the ramp is
+    missing. Checking the arg key is the only way to catch it without an indexed sprite
+    per tool.
+    """
+    import asyncio
+    import importlib
+    import inspect as inspect_mod
+    import pkgutil
+
+    from aseprite_mcp import tools as tools_pkg
+    from aseprite_mcp.server import mcp
+
+    registered = {t.name for t in asyncio.run(mcp.list_tools())}
+
+    for info in pkgutil.iter_modules(tools_pkg.__path__):
+        module = importlib.import_module(f"aseprite_mcp.tools.{info.name}")
+        for name, obj in vars(module).items():
+            target = getattr(obj, "fn", obj)
+            if name not in registered or not callable(target):
+                continue
+            try:
+                body = inspect_mod.getsource(target)
+            except (OSError, TypeError):  # pragma: no cover - defensive
+                continue
+            if "run_ramp_lua(" not in body:
+                continue
+            assert '"ramp":' in body, (
+                f"{name} calls run_ramp_lua but passes no \"ramp\" key to Lua, so the "
+                "harness has nothing to measure and the wrapper will always be silent"
+            )

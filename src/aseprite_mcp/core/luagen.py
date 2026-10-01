@@ -130,6 +130,9 @@ local _linked_hit_frame, _linked_hit_others = nil, nil
 -- drawing, which is worse than not supporting selections at all.
 local _sel = nil
 
+-- The sprite the body opened, for the harness. See open_sprite.
+local _sprite = nil
+
 -- For tools that decline a write on purpose (a gradient leaving transparent pixels
 -- alone, say). Deliberate and out-of-bounds are different facts and are reported so.
 local function note_skipped(n)
@@ -274,6 +277,41 @@ local function nearest_index(spr, r, g, b)
       what, clear_at, math.floor(r), math.floor(g), math.floor(b)), 0)
   end
   return best
+end
+
+-- What a declared ramp actually becomes on this sprite's palette.
+--
+-- On an indexed sprite a pixel is an offset, so a shading tool cannot write a colour the
+-- palette does not hold: rgba_to_px sends it through nearest_index and it lands on the
+-- nearest entry that can draw. That is what indexed mode means and refusing it would
+-- make these tools unusable on exactly the sprites that most need a fixed palette. What
+-- was wrong is that nothing said so, and two consequences are invisible in the result:
+-- two ramp steps can resolve to one entry, so a shade between them changes nothing while
+-- reporting the pixels it wrote, and palette_conformance stays at 1.0 throughout because
+-- the colour it lands on is still a colour on the declared ramp (#145).
+--
+-- One nearest_index call per ramp entry, not per pixel, so this is free at any sprite
+-- size. Measured against the sprite's own palette through the sprite's own resolver, so
+-- it cannot drift from where the pixels actually go.
+local function ramp_palette_state(spr, ramp)
+  local pal = spr.palettes[1]
+  local steps, distinct, exact = {}, {}, 0
+  local resolved = 0
+  for i, c in ipairs(ramp) do
+    local col = mkcolor(c)
+    local index = nearest_index(spr, col.red, col.green, col.blue)
+    local got = pal:getColor(index)
+    local is_exact = (got.red == col.red and got.green == col.green
+                      and got.blue == col.blue)
+    if is_exact then exact = exact + 1 end
+    if distinct[index] == nil then
+      distinct[index] = true
+      resolved = resolved + 1
+    end
+    steps[i] = { step = i, want = color_hex(col), index = index, got = color_hex(got),
+                 exact = is_exact }
+  end
+  return { steps = steps, declared = #ramp, resolved = resolved, exact = exact }
 end
 
 -- Convert a colour spec table (with r,g,b,a and/or index) to a raw pixel value
@@ -494,6 +532,11 @@ local function open_sprite(path)
   local spr = app.open(path)
   if spr == nil then error("Could not open sprite: " .. tostring(path)) end
   app.sprite = spr
+  -- Recorded for the harness, which reports a declared ramp against an indexed palette
+  -- after the body has run and has no other way to reach the sprite. The last one wins;
+  -- the two tools that open a second sprite (stamp_file, extract_palette with
+  -- from_image) take no ramp, so there is nothing to be ambiguous about yet.
+  _sprite = spr
 
   -- A selection is NOT stored in the .aseprite file: reopen a sprite and it is empty
   -- again. Every tool call here is its own Aseprite run, so a selection is kept in a
@@ -945,6 +988,21 @@ def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
         # says what it touched without each one having to remember to.
         "  if type(RESULT) == 'table' and _linked_hit_frame ~= nil then\n"
         "    RESULT.linked_frames_also_changed = _linked_hit_others\n"
+        "  end\n"
+        # A ramp declared against an indexed palette is resolved, not written: every
+        # entry lands on the nearest palette offset that can draw. Attached here because
+        # ten tools take a `ramp` and the measurement is the same question for all of
+        # them, so putting it in each body would be ten chances to leave it out. The
+        # judgement is Python, in core.indexed; this is only the measurement.
+        #
+        # Keyed on ARG.ramp by convention, which is the convention every ramp tool
+        # already follows (a list of parsed colours under exactly that name). A meta-test
+        # pins it, so a new tool cannot quietly opt out by naming its argument something
+        # else.
+        "  if type(RESULT) == 'table' and _sprite ~= nil and\n"
+        "     _sprite.colorMode == ColorMode.INDEXED and\n"
+        "     type(ARG.ramp) == 'table' and #ARG.ramp > 0 then\n"
+        "    RESULT.ramp_on_palette = ramp_palette_state(_sprite, ARG.ramp)\n"
         "  end\n"
         f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"

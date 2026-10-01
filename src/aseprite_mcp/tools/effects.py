@@ -24,7 +24,7 @@ from ..core.limits import (
 )
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
-from .common import lua_path, parse_color, resolve_path
+from .common import lua_path, parse_color, resolve_path, run_ramp_lua
 from .drawing import _draw
 from .shading import _FIELD_LUA
 
@@ -623,7 +623,7 @@ def cast_shadow(
                ellipse_points = points,
                softness = ARG.softness, opacity = ARG.opacity }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)
 
 
 @mcp.tool()
@@ -827,7 +827,7 @@ def glow(
                glow_pixels = painted, per_ring = per_ring,
                rings = rings, radius = ARG.radius, falloff_dithered = ARG.dither_edge }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)
 
 
 @mcp.tool()
