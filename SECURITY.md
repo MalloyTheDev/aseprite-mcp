@@ -18,6 +18,15 @@ inject code into the Aseprite process, or exhaust the host with a single oversiz
 It explicitly does **not** sandbox the Aseprite binary itself or the contents you place in
 the workspace — see *Out of scope* below.
 
+One consequence is worth stating outright rather than leaving to be assembled from those
+two exclusions: **image parsing happens in Aseprite, not here.** Opening, importing or
+stamping a file hands it to Aseprite's own decoders. The size and dimension guards below
+bound how much work a file can cause, not whether a decoder handles it correctly, and the
+pre-stamp header check reads dimensions with Pillow only for formats Pillow recognizes, so
+for Aseprite's native `.aseprite`/`.ase` it makes no claim at all. A malformed or hostile
+image is therefore parsed by Aseprite with whatever robustness Aseprite has. Treat putting
+a file you do not trust into the workspace as handing it to that parser.
+
 ## Protections in place
 
 - **Workspace sandbox.** Relative paths resolve under `ASEPRITE_MCP_WORKSPACE`, and under
@@ -71,7 +80,7 @@ the workspace — see *Out of scope* below.
   shell string). Every user value is passed into generated Lua through an **escaped `ARG`
   table** — user input is never concatenated into Lua source. The `to_lua` escaping is
   covered by Hypothesis property tests asserting strings can't break out of their literal.
-- **Size limits (DoS guard, v0.6.x+).** Batch op-lists and pixel/tile/colour lists are
+- **Size limits (DoS guard, v0.7.0+).** Batch op-lists and pixel/tile/colour lists are
   capped (`core/limits.py`); exceeding a cap raises `ValidationFailed` before any work
   begins, with a message explaining how to split the request. Since v0.8.0 the same module
   also bounds **canvas geometry** (16384px per axis *and* 16,777,216 pixels of area, so a
