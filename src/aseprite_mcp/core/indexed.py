@@ -164,3 +164,71 @@ def palette_for_new_sprite(background: dict | None) -> list[str]:
     if wanted not in colors:
         colors.append(wanted)
     return colors
+
+
+# --------------------------------------------------------------------------- #
+# Entries a palette holds and cannot draw                                     #
+# --------------------------------------------------------------------------- #
+def palette_readings(state: dict, color_mode: str) -> list[str]:
+    """What is worth saying about a palette that was just written to a sprite.
+
+    `state` is the measurement the Lua side takes: `size`, `transparent_index`,
+    `at_transparent_index` (the colour sitting there, or None when the index is out of
+    range) and `drawable`, the number of entries that could actually produce a visible
+    pixel.
+
+    An indexed pixel is an offset, and one offset means "no pixel here". So an opaque
+    colour sitting at the sprite's transparent index is in the palette, is reported by
+    `get_palette`, and can never be drawn: `nearest_index` excludes that offset, because
+    answering a colour question with it writes nothing. Nobody has done anything wrong
+    when that happens, which is why this warns rather than refuses. `set_palette` with
+    an opaque entry at index 0 is perfectly reasonable for a sprite that never draws
+    that colour.
+
+    It bites in a way that looks like a tool bug rather than a palette one. A ramp
+    written darkest-first, which is the natural order, puts its darkest colour at index
+    0, and that colour then silently resolves to its nearest *drawable* neighbour: the
+    shading comes out banded and every tool reports success.
+
+    `sort_palette` does not create this, which is worth saying because it looks as
+    though it should: it remaps `spr.transparentColor` through the same table it remaps
+    the pixels with, so the transparent index follows its entry and keeps pointing at a
+    transparent colour however the palette is reordered.
+
+    Nothing here applies to RGB or grayscale, where a pixel carries its own alpha and
+    `transparentColor` means nothing, so those return no readings at all rather than a
+    warning a caller cannot act on.
+    """
+    if color_mode != "indexed":
+        return []
+
+    out: list[str] = []
+    index = state.get("transparent_index")
+    shadowed = state.get("at_transparent_index")
+    size = state.get("size") or 0
+    drawable = state.get("drawable")
+
+    if shadowed is not None and not str(shadowed).lower().endswith("00"):
+        out.append(
+            f"Palette entry {index} is {shadowed}, and {index} is this sprite's "
+            "transparent index, so that colour cannot be drawn: a request for it "
+            "resolves to the nearest entry that can be. The palette will still report "
+            f"it. Point the transparent index somewhere else with set_transparent_color, "
+            "or order the palette so the colour you mean to draw is not at index "
+            f"{index}. A transparent entry at {index} is the usual arrangement."
+        )
+
+    if drawable == 0:
+        out.append(
+            f"None of this palette's {size} entries can draw a visible pixel: every one "
+            f"is either transparent or sits at the transparent index ({index}). Drawing "
+            "by colour will be refused until the palette has something to draw with "
+            "(add_palette_color, or set_palette)."
+        )
+    elif drawable is not None and size and drawable < size - 1:
+        out.append(
+            f"{size - drawable} of {size} palette entries cannot draw a visible pixel "
+            "(transparent, or at the transparent index). That is only a problem if you "
+            "expected to draw with one of them."
+        )
+    return out
