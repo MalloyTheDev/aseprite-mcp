@@ -158,6 +158,16 @@ def test_a_subject_that_changes_shape_still_measures_its_box_centre():
     assert inbetween.smear_vector(before, after) == (8, 2)
 
 
+def test_a_half_pixel_centre_rounds_away_from_zero_rather_than_to_even():
+    """Python's round() sends 0.5 down and 1.5 up, and which way a half pixel goes should
+    not depend on the number beside it. The boxes differ by an odd width here, so the two
+    centres are half a pixel apart."""
+    before = {"x": 0, "y": 0, "width": 4, "height": 4}
+    after = {"x": 0, "y": 0, "width": 5, "height": 5}
+    assert inbetween.smear_vector(before, after) == (1, 1)
+    assert inbetween.smear_vector(after, before) == (-1, -1)
+
+
 def test_a_trail_steps_back_one_pixel_at_a_time_without_repeats():
     offsets = inbetween.trail_offsets((10, 0), 0.6)
     assert offsets == [(-1, 0), (-2, 0), (-3, 0), (-4, 0), (-5, 0), (-6, 0)]

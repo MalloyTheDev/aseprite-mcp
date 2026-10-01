@@ -254,10 +254,15 @@ def smear_vector(before: dict, after: dict) -> tuple[int, int]:
     position diff reads zero while the drawing plainly moved. The box centre is also the
     measure least disturbed by the drawing changing between the two frames, which it does
     in any cycle worth smearing.
+
+    Rounded away from zero rather than to even, like every other rounding here: the two
+    centres land on a half pixel whenever the boxes differ by an odd number of pixels on
+    an axis, and which way that half goes should not depend on whether the number beside
+    it happens to be even.
     """
     bx, by = box_centre(before)
     ax, ay = box_centre(after)
-    return (round(ax - bx), round(ay - by))
+    return (_round_half_up(ax - bx), _round_half_up(ay - by))
 
 
 def _unit(vector: tuple[int, int]) -> tuple[float, float]:
