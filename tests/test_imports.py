@@ -71,9 +71,9 @@ def test_geometry_tools_document_their_coordinate_conventions():
     """The conventions must reach the model, not just the module docstring.
 
     Only a function's own docstring becomes its tool description, so an explanation
-    living in the module header is invisible to every caller. Of 117 tools, three
-    mentioned the origin, and most geometry tools documented no argument at all, while
-    two primitives centre half a pixel apart.
+    living in the module header is invisible to every caller. Of the 117 tools the server
+    had when this was written, three mentioned the origin, and most geometry tools
+    documented no argument at all, while two primitives centred half a pixel apart.
     """
     import asyncio
 

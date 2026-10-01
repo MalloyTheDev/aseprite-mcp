@@ -74,8 +74,9 @@ class UnknownArgumentError(AsepriteMCPError):
 
     Worth its own type because the failure is silent otherwise: the schema layer drops
     unrecognised keys, so a renamed or misspelled argument does not raise -- the tool just
-    runs with its defaults and reports success. With 117 tools and 125 parameter names used
-    by exactly one tool each, that is a large surface to guess at with no feedback.
+    runs with its defaults and reports success. With well over a hundred tools, and most
+    parameter names used by exactly one tool each, that is a large surface to guess at
+    with no feedback at all.
     """
 
 
