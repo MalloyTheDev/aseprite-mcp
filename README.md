@@ -51,6 +51,12 @@ Aseprite GUI.
   the palette; these move pixels *along the ramp*, so the art still uses exactly the
   colours it was given. A glow of blended alpha or a shadow of multiplied alpha would
   break that, which is why both are built of ramp steps arranged in space instead.
+- **Indexed mode that draws** - `create_sprite` gives an indexed sprite a real 33-entry
+  palette (a transparent entry at index 0, then Aseprite's 32 defaults) rather than the
+  256 identical blacks that made every colour equidistant, so every draw resolved to
+  index 0 and vanished while reporting success. `set_color_mode` quantizes the palette
+  from the art instead of mapping onto whatever the file happened to carry, and refuses a
+  conversion that would make drawn pixels disappear.
 - **Work you can check** - `assess_sprite` measures the drawing itself: pixels with no
   neighbour of their own colour, jagged diagonals, how much of the canvas the art fills,
   whether it is centred, and what fraction of it sits exactly on a declared ramp. An agent
@@ -76,7 +82,7 @@ Aseprite GUI.
   (relative paths only; absolute/`..` paths rejected unless you opt in).
 - **No-clobber by default**: output-writing tools refuse to overwrite an existing file;
   pass `overwrite=True` to replace it intentionally.
-- **Structured results**: every tool returns JSON describing the updated sprite.
+- **Structured results**: every editing tool returns JSON describing the updated sprite.
 - **`render_preview`** returns a PNG so the agent can *see* its work and self-correct.
 - **Deterministic, stateless, robust**: each call is an isolated, headless Aseprite run.
 
@@ -112,6 +118,7 @@ them is real output from the same run.
 </p>
 
 ```python
+create_sprite("orb.aseprite", 32, 32)
 ramp = generate_ramp("#5a7fd4", steps=5, hue_shift=-40, saturation_shift=-18)["colors"]
 draw_ellipse_in_box("orb.aseprite", 4, 4, 24, 24, ramp[2], filled=True)
 shade_region_by_light("orb.aseprite", ramp, light_angle=125, light_z=0.55, rim=0.25)
@@ -212,11 +219,13 @@ uv sync
 ```
 
 That creates a virtual environment and installs the `aseprite-mcp` package and its
-dependencies. Verify it can find Aseprite and run the test suite (tests auto-skip if
-Aseprite isn't found):
+dependencies. The test suite comes in two tiers: the pure-Python tests always run, and
+the ones that drive a real Aseprite are opt-in behind `--run-aseprite` (and skip, saying
+so, when the flag is given and Aseprite cannot be found):
 
 ```bash
-uv run pytest
+uv run pytest                  # pure-Python tests; no Aseprite needed
+uv run pytest --run-aseprite   # plus the integration and golden-output tests
 ```
 
 ## Configuration
@@ -226,7 +235,7 @@ Everything is configurable via environment variables (all optional):
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `ASEPRITE_PATH` | Full path to `Aseprite.exe` / `aseprite`. | Auto-detected (Steam, standalone, PATH). |
-| `ASEPRITE_MCP_WORKSPACE` | Folder where **relative** sprite paths are resolved. | `<repo>/workspace` |
+| `ASEPRITE_MCP_WORKSPACE` | Folder where **relative** sprite paths are resolved. | `<repo>/workspace` from a source checkout, otherwise a per-user data directory. |
 | `ASEPRITE_MCP_TIMEOUT` | Per-operation timeout in seconds (clamped to 1-3600). | `90` |
 | `ASEPRITE_MCP_ALLOW_ABSOLUTE` | Allow absolute / workspace-escaping paths (`1`/`true` to enable). | off (sandboxed) |
 | `ASEPRITE_MCP_TRANSPORT` | `stdio`, `streamable-http`, or `sse`. See the warning below before using an HTTP transport. | `stdio` |
@@ -372,8 +381,10 @@ apply_operations("hero.aseprite", [
 ```
 
 If any op fails, the whole batch rolls back and the error names the failing op index.
-v1 ops: layer add/rename/visible/opacity/remove · frame add/duplicate/duration ·
-tag add/remove · draw set_pixel/line/rectangle/fill_rectangle/ellipse/fill_ellipse/fill_layer/clear_layer ·
+v1 ops: layer add/rename/visible/opacity/remove ·
+frame add/duplicate/remove/duration/all-durations ·
+cel position/opacity/copy/delete · tag add/remove ·
+draw set_pixel/pixels/line/rectangle/fill_rectangle/ellipse/fill_ellipse/fill_layer/clear_layer ·
 slice add/remove · replace_color.
 
 ---
@@ -404,7 +415,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | --- | --- |
 | `get_sprite_info` | Full structured state: size, mode, frames, layer tree, tags, palette. |
 | `render_preview` | Render a frame to a PNG image you can view (scaled). |
-| `get_pixels` | Read composited pixel colours of a region (≤ 64×64 per call). |
+| `get_pixels` | Read the pixel colours of a region, composited or from one named layer, as rows or as a compact symbol map (≤ 64×64 per call). |
 | `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why. |
 | `diff_sprites` | Compare two frames pixel for pixel: pixels added to or removed from the silhouette, repainted inside it, or changed in alpha alone, plus the colours involved and the box they sit in. Says so loudly when nothing changed, and takes `expect=` to turn the measurement into a pass or a fail. |
 | `list_sprites` | List sprite/image files in the workspace. |
@@ -615,12 +626,14 @@ The agent's own "eyes" remain `render_preview`, which returns a PNG it can inspe
 > "Make me a 32×32 walking-slime animation."
 
 1. `create_sprite("slime.aseprite", 32, 32, "rgb")`
-2. `fill_layer` the background, `add_layer("slime")`, draw the body with
-   `draw_ellipse`/`fill_area`/`draw_pixels`.
-3. `add_frame(copy_from=1)` a couple of times; nudge the body with `set_cel_position`
-   to create a bounce.
-4. `set_all_frame_durations(120)` and `add_tag("walk", 1, 3, "pingpong")`.
-5. `render_preview` to check it, iterate, then `export_gif("slime.gif", scale=8)`.
+2. `fill_layer` the background, `add_layer("slime.aseprite", "slime")`, draw the body
+   with `draw_ellipse`/`fill_area`/`draw_pixels`.
+3. `add_frame("slime.aseprite", copy_from=1)` a couple of times; nudge the body with
+   `set_cel_position` to create a bounce.
+4. `set_all_frame_durations("slime.aseprite", 120)` and
+   `add_tag("slime.aseprite", "walk", 1, 3, "pingpong")`.
+5. `render_preview` to check it, iterate, then
+   `export_gif("slime.aseprite", "slime.gif", scale=8)`.
 
 ---
 
@@ -651,11 +664,14 @@ flags (`--sheet`, `--scale`, `--data`, …).
 src/aseprite_mcp/
   app.py          MCPServer instance, tool classification, portable schemas
   server.py       imports every tool module, picks the transport, main()
-  core/           config (locate Aseprite, workspace, path sandbox), limits,
-                  errors, models, luagen (Python->Lua + the shared PRELUDE),
-                  runner (run_lua / run_cli, sentinel parsing), oplib (the batch
-                  op registry), manifest, validation, asset_spec, minecraft,
-                  quality, loopcheck and motion (animation maths)
+  core/           config (locate Aseprite, workspace, path sandbox), paths (output
+                  paths + the no-clobber check), limits, errors, models, luagen
+                  (Python->Lua + the shared PRELUDE), runner (run_lua / run_cli,
+                  sentinel parsing), oplib (the batch op registry), manifest,
+                  validation, asset_spec, minecraft, engines/ and slice_metadata
+                  (engine export formats), ramps, indexed and lighting (colour
+                  and light arithmetic), quality and spritediff (the measurements),
+                  loopcheck, timing, frameops, motion and inbetween (animation maths)
   tools/          one module per domain: sprite, inspect, layers, frames, tags,
                   cels, animation, drawing, brushes, shading, selection, effects,
                   text, tilemap, image, palette, slices, transform, export,
@@ -664,7 +680,8 @@ src/aseprite_mcp/
 docs/TOOLS.md     full auto-generated tool reference, every registered tool
 docs/CLIENTS.md   per-client setup, transports, and what to do when a client
                   mangles arguments
-scripts/          gen_tool_docs.py (regenerates docs/TOOLS.md), quality_report.py
+scripts/          gen_tool_docs.py (regenerates docs/TOOLS.md), quality_report.py,
+                  release_gate.py, showcase/ (regenerates the images above)
 tests/            pytest suite: the pure tests always run, the rest need
                   --run-aseprite
 ```
@@ -674,9 +691,11 @@ tests/            pytest suite: the pure tests always run, the rest need
 This server hands an AI agent a **file capability**, so access is scoped by default:
 
 - **Workspace-sandboxed paths.** Relative filenames resolve under
-  `ASEPRITE_MCP_WORKSPACE` (default `<repo>/workspace`). Absolute paths and paths that
-  escape the workspace via `..` (or a symlink that points outside it) are **rejected**
-  unless you set `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
+  `ASEPRITE_MCP_WORKSPACE`, which defaults to `<repo>/workspace` from a source checkout
+  and to a per-user data directory from an installed package, never to a path inside the
+  Python installation. Absolute paths and paths that escape the workspace via `..` (or a
+  symlink that points outside it) are **rejected** unless you set
+  `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
 - **No-clobber by default.** Every output-writing tool (`create_sprite`, `save_sprite_as`,
   `import_image`, all `export_*`, `export_game_asset_bundle`) refuses to overwrite an
   existing file; pass `overwrite=True` to replace it on purpose. Multi-file exports
@@ -715,12 +734,14 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 
 - **"Could not locate Aseprite."** Set `ASEPRITE_PATH` to the full executable path.
 - **Nothing happens / permission denied on save.** Ensure the workspace path is writable.
-  Relative filenames go under `ASEPRITE_MCP_WORKSPACE` (default `<repo>/workspace`).
+  Relative filenames go under `ASEPRITE_MCP_WORKSPACE`; `health_check` reports the
+  directory files are actually landing in.
 - **Timeouts** on big operations: raise `ASEPRITE_MCP_TIMEOUT` (seconds).
 - **A tool errors with a Lua message.** The message is surfaced verbatim from Aseprite,
   it usually names the bad argument (e.g. a missing layer/frame).
-- **Tests all skip.** That's expected when Aseprite isn't installed/found; set
-  `ASEPRITE_PATH` to run them for real.
+- **Tests all skip.** The Aseprite-driving tests are opt-in: run
+  `uv run pytest --run-aseprite`. With the flag given and no Aseprite found they still
+  skip, naming that as the reason, so set `ASEPRITE_PATH` as well.
 
 Client-side problems (sprites landing in a venv directory, a text-only model that cannot
 see `render_preview`, the Windows lock on `.venv\Scripts\aseprite-mcp.exe` that blocks
@@ -730,7 +751,8 @@ see `render_preview`, the Windows lock on `.venv\Scripts\aseprite-mcp.exe` that 
 ## Development
 
 ```bash
-uv run pytest                              # integration tests (need Aseprite)
+uv run pytest                              # pure-Python tests (no Aseprite needed)
+uv run pytest --run-aseprite               # plus the integration and golden tests
 uv run aseprite-mcp                        # run the server over stdio (manual debugging)
 uv run python scripts/gen_tool_docs.py     # regenerate docs/TOOLS.md
 ```
