@@ -342,3 +342,20 @@ def test_a_ramp_state_the_lua_never_measured_does_not_raise():
     assert indexed.ramp_readings({}) == []
     assert indexed.ramp_readings({"steps": [], "declared": 0}) == []
     assert indexed.ramp_readings({"declared": 3}) == []
+
+
+def test_a_palette_that_can_draw_nothing_says_so_rather_than_nothing():
+    """The measurement cannot resolve a single step here, because `nearest_index` has no
+    candidate to offer. That is reported rather than left as silence: a shading tool on
+    such a sprite writes nothing and *succeeds*, since there was nothing to write, and
+    the reason it had no effect is a fact about the palette that nothing else in the
+    result mentions.
+    """
+    notes = indexed.ramp_readings(
+        {"steps": [], "declared": 4, "resolved": 0, "exact": 0,
+         "undrawable_palette": True})
+
+    assert len(notes) == 1
+    assert "no entry that can draw a visible pixel" in notes[0]
+    assert "4 declared ramp steps" in notes[0]
+    assert "set_palette" in notes[0], "and what to do about it"

@@ -278,6 +278,19 @@ def ramp_readings(state: dict) -> list[str]:
     declared = state.get("declared") or len(steps)
     resolved = state.get("resolved") or 0
     exact = state.get("exact") or 0
+
+    if state.get("undrawable_palette"):
+        # No step can be resolved, because no entry can draw. Said here rather than left
+        # to the measurement's silence: a tool that wrote nothing on such a sprite
+        # succeeds (there was nothing to write), and the reason it had no effect is a
+        # fact about the palette that nothing else in its result mentions. A tool that
+        # does try to draw gets the refusal from `nearest_index` instead.
+        return [
+            "This sprite's palette has no entry that can draw a visible pixel, so none "
+            f"of the {declared} declared ramp steps could be resolved and shading it "
+            "cannot do anything. add_palette_color or set_palette first."
+        ]
+
     if not steps or not declared:
         return []
 

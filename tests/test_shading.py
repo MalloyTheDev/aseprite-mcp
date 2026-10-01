@@ -916,3 +916,30 @@ def test_effects_that_take_a_ramp_report_it_too(request):
 
     assert result["ramp_on_palette"]["declared"] == 5
     assert any("declared ramp steps" in note for note in result["warnings"])
+
+
+def test_a_palette_that_can_draw_nothing_does_not_fail_the_call(request):
+    """A regression test for the reporting path itself.
+
+    The ramp measurement runs in the harness, after the body has succeeded and outside
+    the pcall that guards it, and `nearest_index` raises when no palette entry can draw.
+    So the first version of this feature turned a completed no-op into a hard failure: a
+    shade that matched nothing on a sprite whose palette held one transparent entry had
+    written nothing, had nothing to fail about, and failed. The script aborted before
+    RESULT was printed, so the call came back with no result at all.
+
+    The measurement now answers that case instead of asking it, and the harness pcalls it
+    besides, so a future error inside a measurement cannot fail the operation it is
+    describing either. This test pins the known cause; the pcall is the backstop for the
+    ones nobody has found.
+    """
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 16, 16, color_mode="indexed")
+    palette.set_palette(name, ["#00000000"])
+
+    result = shading.shift_along_ramp(name, ramp=RAMP, steps=1, tolerance=1.0)
+
+    assert result["ok"] is True, "nothing was written, so nothing failed"
+    assert result["pixels_matched"] == 0
+    assert result["ramp_on_palette"]["undrawable_palette"] is True
+    assert "no entry that can draw a visible pixel" in " ".join(result["warnings"])
