@@ -196,8 +196,15 @@ indexed mode is for and is allowed; losing pixels is not recoverable and is the 
 thing a mode change must never do quietly. `set_palette` or `add_palette_color` fix a
 palette that has nothing to draw with.
 
-Returns the sprite's structured info, plus `drawn_pixels` (verified unchanged by the
-conversion) and the `palette_source` used, for indexed targets.
+That check counts every pixel of every frame, twice. Past `MAX_VERIFY_PIXELS` the
+conversion still runs and reports `verified: false` with the reason, rather than
+being refused: a capability that declines to work on a large sheet because the check
+is unaffordable is worse than one that works and says what it did not check.
+`diff_sprites` against a copy taken beforehand answers the same question by hand.
+
+Returns the sprite's structured info, plus `drawn_pixels` and `verified` (whether
+that count was actually compared across the conversion) and the `palette_source`
+used, for indexed targets.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

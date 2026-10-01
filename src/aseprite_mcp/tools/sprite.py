@@ -9,6 +9,7 @@ from ..core.limits import (
     MAX_CANVAS_DIMENSION,
     MAX_CANVAS_PIXELS,
     MAX_SPRITE_TOTAL_PIXELS,
+    MAX_VERIFY_PIXELS,
     check_canvas_size,
 )
 from ..core.paths import ensure_output_path
@@ -153,8 +154,15 @@ def set_color_mode(
     thing a mode change must never do quietly. `set_palette` or `add_palette_color` fix a
     palette that has nothing to draw with.
 
-    Returns the sprite's structured info, plus `drawn_pixels` (verified unchanged by the
-    conversion) and the `palette_source` used, for indexed targets.
+    That check counts every pixel of every frame, twice. Past `MAX_VERIFY_PIXELS` the
+    conversion still runs and reports `verified: false` with the reason, rather than
+    being refused: a capability that declines to work on a large sheet because the check
+    is unaffordable is worse than one that works and says what it did not check.
+    `diff_sprites` against a copy taken beforehand answers the same question by hand.
+
+    Returns the sprite's structured info, plus `drawn_pixels` and `verified` (whether
+    that count was actually compared across the conversion) and the `palette_source`
+    used, for indexed targets.
     """
     mode = indexed.normalise_color_mode(color_mode)
     # Validated even for the modes that ignore it: an argument that is silently
@@ -163,32 +171,24 @@ def set_color_mode(
     dither = indexed.normalise_dithering(dithering)
     source = indexed.normalise_palette_source(palette_source)
     src = resolve_path(filename)
-    args = {"src": lua_path(src), "mode": mode, "dither": dither, "source": source}
+    args = {
+        "src": lua_path(src), "mode": mode, "dither": dither, "source": source,
+        "max_verify": MAX_VERIFY_PIXELS,
+    }
     body = """
     local spr = open_sprite(ARG.src)
     local to_indexed = (ARG.mode == "indexed")
 
-    -- Visible pixels, counted the same way `trim_sprite` counts them: flatten each
-    -- frame and ask the prelude's decoder, which knows that the transparent index and a
-    -- transparent palette entry both mean "not there".
-    local function drawn(s)
-      local n = 0
-      for f = 1, #s.frames do
-        local flat = Image(s.spec); flat:clear(); flat:drawSprite(s, f)
-        for y = 0, flat.height - 1 do
-          for x = 0, flat.width - 1 do
-            local _, _, _, a = px_to_rgba(s, flat:getPixel(x, y))
-            if a > 0 then n = n + 1 end
-          end
-        end
-      end
-      return n
-    end
-
     -- Only indexed targets are measured. RGB and gray both keep a per-pixel alpha
     -- channel and have no index that means "nothing", so there is no hole for a pixel
     -- to fall through and no reason to pay for the scan.
-    local before = to_indexed and drawn(spr) or 0
+    --
+    -- The work is the canvas times the frames, and it is paid twice. Measured rather
+    -- than capped by the canvas alone: one frame at the maximum canvas is cheap, and
+    -- twenty of them is not the same call at all.
+    local scan_pixels = spr.width * spr.height * #spr.frames
+    local verify = to_indexed and scan_pixels <= ARG.max_verify
+    local before = verify and visible_count_all_frames(spr) or 0
 
     if to_indexed and ARG.source == "from_art" and spr.colorMode ~= ColorMode.INDEXED then
       -- The step this tool was missing. ChangePixelFormat maps the art onto the palette
@@ -202,31 +202,46 @@ def set_color_mode(
     end
     app.command.ChangePixelFormat{ ui = false, format = ARG.mode, dithering = ARG.dither }
 
-    local after = to_indexed and drawn(spr) or 0
-    if to_indexed and after < before then
+    local after = verify and visible_count_all_frames(spr) or 0
+    if verify and after < before then
       -- Raised before save_sprite, which is the whole point: the conversion exists only
       -- in this process, so refusing here leaves the file on disk exactly as it was.
       --
       -- The message states the measurement and the mechanism, not a diagnosis. Losing a
       -- drawn pixel in indexed mode has exactly one mechanism, landing on the transparent
-      -- index or on a transparent entry, so that much is safe to say; which palette is at
-      -- fault depends on the route and is left to the remedy.
-      local remedy = (ARG.source == "keep")
-        and "Give the sprite a palette that covers its colours (set_palette, " ..
-            "add_palette_color), or pass palette_source='from_art' to build one from the art."
-        or "Unexpected with palette_source='from_art', which builds the palette from the " ..
-           "art: read the colours back with extract_palette before converting."
+      -- index or on a transparent entry, so that much is safe to say. It used to go on to
+      -- name the palette at fault, in a branch per palette_source, and the from_art branch
+      -- read "Unexpected with palette_source='from_art'" because no case reaching it was
+      -- ever found: quantizing from the art is what stops pixels being lost. A message
+      -- that has never run cannot be trusted to be right when it finally does, and
+      -- guessing the route is not worth two texts, so both remedies are offered and
+      -- neither is asserted.
       error(string.format(
         "converting to indexed would lose %d of %d drawn pixels: they would land on the " ..
         "transparent index or on a transparent palette entry and come out invisible. The " ..
-        "sprite on disk is unchanged. %s", before - after, before, remedy), 0)
+        "sprite on disk is unchanged. Give the sprite a palette that covers its colours " ..
+        "(set_palette, add_palette_color), or pass palette_source='from_art' to build one " ..
+        "from the art; extract_palette reports the colours that need covering.",
+        before - after, before), 0)
     end
 
     save_sprite(spr)
     RESULT = sprite_info(spr)
     if to_indexed then
-      RESULT.drawn_pixels = after
       RESULT.palette_source = ARG.source
+      RESULT.verified = verify
+      if verify then
+        RESULT.drawn_pixels = after
+      else
+        -- No count, rather than a 0 that would read as "nothing is drawn". A Lua table
+        -- cannot hold an explicit null (a key set to nil simply is not there), so
+        -- `verified` is the field to branch on and the reason says why in words.
+        RESULT.unverified_reason = string.format(
+          "%d pixels across %d frame(s) is past the verification cap of %d, so the " ..
+          "conversion ran without checking that drawn pixels survived it. Nothing is " ..
+          "known to be wrong. diff_sprites against a copy taken before the conversion " ..
+          "answers the same question.", scan_pixels, #spr.frames, ARG.max_verify)
+      end
     end
     """
     return run_lua(body, args)

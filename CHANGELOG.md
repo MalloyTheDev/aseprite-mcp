@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **`set_color_mode` no longer risks turning a large conversion into a timeout.** The
+  tool counts every drawn pixel before and after a conversion to indexed, so it can
+  refuse one that would make art disappear, and nothing bounded that scan but the
+  invocation timeout. On the sprites this server is used on it is free; on a 4096x4096
+  sheet of several frames it is tens of millions of pixels counted twice, and the only
+  backstop was `ASEPRITE_MCP_TIMEOUT` turning a working conversion into a timeout with
+  nothing useful in it.
+
+  Past `MAX_VERIFY_PIXELS` (33,554,432, the canvas area times the frame count) the
+  conversion now runs and reports `verified: false` with a reason naming the measurement
+  and pointing at `diff_sprites`, instead of being refused. Refusing would have traded a
+  rare slow call for a permanent gap in a capability, which is worse than the problem.
+  Indexed targets now always carry `verified`, so the caller branches on a field rather
+  than on whether `drawn_pixels` happens to be present.
+
+  The count itself moved into the Lua prelude, where `diff_sprites` and `set_color_mode`
+  share one implementation instead of carrying a loop each. The shared version reads
+  alpha at a fixed byte stride out of `Image.bytes` rather than calling `getPixel` per
+  pixel, measured at 0.088us per pixel against 0.58us, so the scan is about 6.6 times
+  cheaper as well as bounded. Two implementations of one number were two chances to be
+  wrong about indexed transparency, which has already shipped here once.
+
+- **The pixel-loss refusal no longer guesses which palette was at fault.** It used to
+  pick one of two remedies based on `palette_source`, and the `from_art` branch said
+  "Unexpected with palette_source='from_art'" because no case reaching it was ever
+  found: quantizing from the art is what stops pixels being lost. A message that has
+  never run cannot be relied on to be right when it finally does, so both remedies are
+  now offered and neither route is blamed.
+
 ### Fixed
 - **Sorting a palette corrupted an indexed sprite that had linked cels.** `sort_palette`
   remaps every pixel through the same table it reorders the palette with, so the image
