@@ -714,6 +714,14 @@ local function sprite_info(spr)
                    width = sl.center.width, height = sl.center.height }
     end
     if sl.pivot ~= nil then s.pivot = { x = sl.pivot.x, y = sl.pivot.y } end
+    -- A slice's colour and its user-data are part of the slice. Leaving them out meant
+    -- a caller could write structured data with add_slice and had no way to read it
+    -- back except by writing an export file and parsing that, and list_slices showed
+    -- the same thing for a slice with data and one without. It also meant the export
+    -- path needed a second slice reader of its own, which is how two readers of the
+    -- same thing drift apart.
+    s.color = color_hex(sl.color)
+    if sl.data ~= nil and sl.data ~= "" then s.data = sl.data end
     slices[i] = s
   end
   return {

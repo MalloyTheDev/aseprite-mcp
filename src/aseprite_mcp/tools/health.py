@@ -13,6 +13,7 @@ import tempfile
 from .. import __version__
 from ..app import mcp
 from ..core import config
+from ..core.errors import WorkspaceError
 from ..core.runner import run_cli, run_lua
 from .common import lua_path
 
@@ -21,18 +22,33 @@ from .common import lua_path
 async def health_check() -> dict:
     """Run a self-test of the server and its Aseprite integration.
 
-    Returns whether Aseprite was found, its version, the resolved workspace, the
-    number of registered tools, and whether a real create-sprite + export-PNG
-    round-trip succeeds. `ok` is True only if the full round-trip works.
+    Returns whether Aseprite was found, its version, the workspace, the number of
+    registered tools, and whether a real create-sprite plus export-PNG round-trip
+    succeeds. `ok` is True only if the round-trip works and the workspace is usable.
+
+    `workspace` is the **resolved** path, which is where files land and what every other
+    tool reports, because paths are canonicalised before the containment check that keeps
+    them inside the workspace. When the configured value spells the same directory
+    differently, which is what a junction or a symlink does, it is reported alongside as
+    `workspace_configured` with a note; the two are one place, not two.
     """
     result: dict = {
         "ok": False,
         "version": __version__,
-        "workspace": str(config.workspace()),
         "allow_absolute_paths": config.allow_absolute(),
         "timeout_seconds": config.timeout(),
         "aseprite_found": False,
     }
+
+    # A workspace that cannot be created is the one failure this tool must survive
+    # reporting. Reading it at dict-construction time meant an unwritable directory
+    # raised out of health_check itself, so the tool whose entire job is to say what is
+    # wrong died instead of saying it, and every other check went unreported with it.
+    try:
+        result.update(config.describe_workspace(
+            config.workspace(), config.resolved_workspace()))
+    except WorkspaceError as exc:
+        result["workspace_error"] = str(exc)
 
     try:
         from .. import server  # noqa: F401  ensure every tool module is registered
@@ -73,5 +89,8 @@ async def health_check() -> dict:
         result.get("aseprite_found")
         and result.get("can_create_sprite")
         and result.get("can_export_png")
+        # An unusable workspace fails every tool that takes a filename, so it is not an
+        # ok server even when Aseprite itself answers.
+        and not result.get("workspace_error")
     )
     return result
