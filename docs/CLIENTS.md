@@ -31,12 +31,15 @@ Two environment variables matter for every client:
 | `ASEPRITE_MCP_WORKSPACE` | The folder relative sprite filenames resolve inside. **Always set this explicitly.** |
 
 `ASEPRITE_MCP_WORKSPACE` deserves the emphasis. Relative paths are the normal way to
-address a sprite, absolute paths are refused by default, and the fallback when the
-variable is unset is a `workspace` directory next to the installed package. On a source
-checkout that is a sensible `<repo>/workspace`; on a non-source install it lands inside
-the installed package directory, which is not somewhere you want your art
-(see [issue #54](https://github.com/MalloyTheDev/aseprite-mcp/issues/54)). Point it at a
-real project folder and the question never arises.
+address a sprite, and absolute paths are refused by default, so this variable decides
+where everything you make ends up. Unset, the server picks a default for you: a sibling
+`workspace/` directory when it is running from a source checkout, and a per-user data
+directory under `aseprite-mcp/workspace` otherwise, rooted at `%LOCALAPPDATA%` on Windows,
+`~/Library/Application Support` on macOS, and `$XDG_DATA_HOME` (or `~/.local/share`)
+elsewhere. Either default is writable, and neither is inside the Python installation now
+([issue #54](https://github.com/MalloyTheDev/aseprite-mcp/issues/54), fixed in v0.8.0).
+A default is still somewhere you did not choose, though; point it at a real project folder
+and the question never arises.
 
 The full list of variables, including `ASEPRITE_MCP_TIMEOUT` and
 `ASEPRITE_MCP_ALLOW_ABSOLUTE`, is in the README's
@@ -112,9 +115,15 @@ Where that file lives:
 
 Cline and Roo Code both keep a per-server allowlist of tools they will call without
 asking (`autoApprove` in Cline, `alwaysAllow` in Roo Code). Every tool on this server
-carries annotations, so the read-only ones (`get_*`, `list_*`, `render_preview`,
-`health_check`, `gui_available`, the `validate_*` family, `plan_asset_spec`) are the safe
-candidates to put there, and nothing that writes is marked read-only.
+carries annotations, and the ones marked `readOnlyHint` are the safe candidates to put
+there: nothing that writes a file the caller owns is marked read-only.
+
+Key that list on the annotation rather than on the tool's name. The hint comes from a
+hand-curated `READ_ONLY_TOOLS` set in `src/aseprite_mcp/app.py`, not from a name pattern,
+and it is narrower than the naming suggests: `get_selection`, `assess_sprite` and
+`diff_sprites` only measure, but none of the three carries the hint. A client keyed on
+`get_*` would therefore auto-approve one tool the server does not vouch for, and still
+prompt on the other two.
 
 ### Claude Code (CLI)
 
@@ -192,8 +201,8 @@ Zed calls them context servers:
 
 ### Goose (`~/.config/goose/config.yaml`)
 
-Goose calls them extensions, and uses `cmd` rather than `command` and `envs` rather than
-`env`:
+On Windows the same file is `%APPDATA%\Block\goose\config\config.yaml`. Goose calls them
+extensions, and uses `cmd` rather than `command` and `envs` rather than `env`:
 
 ```yaml
 extensions:
@@ -266,8 +275,16 @@ and the fields to look at are:
 ```
 
 `ok` is true only when a real create-sprite plus export-PNG round trip succeeded, so it is
-the single field worth checking. `workspace` should be the folder you configured, not one
-inside the package.
+the single field worth checking. A workspace that cannot be created does not take the rest
+of the self-test down with it: it is reported as `workspace_error`, with `ok` false.
+
+`workspace` is the **resolved** path, which is where files actually land and what every
+other tool hands back, because paths are canonicalised before the containment check. If
+your configured value reaches the same directory by a different spelling, through a symlink
+or an NTFS junction, the two differ and the configured one appears beside it as
+`workspace_configured` with a `workspace_note` saying they are one place. Expect that
+rather than reading a different drive letter as an escape; otherwise `workspace` should be
+the folder you configured.
 
 The response also carries `tools_registered`, the number of tools the server registered on
 startup. It should match the count stated at the top of [`docs/TOOLS.md`](TOOLS.md), which
@@ -280,13 +297,15 @@ If `aseprite_found` is false, the `reason` field says where it looked.
 
 ## 5. Troubleshooting
 
-**Sprites appear inside a Python environment or site-packages directory.**
-`ASEPRITE_MCP_WORKSPACE` was not set, so relative filenames resolved against the default
-next to the installed package
-([issue #54](https://github.com/MalloyTheDev/aseprite-mcp/issues/54)). Set it in your
-client's `env` block and restart the client. `health_check` reports the resolved
-workspace, which is the quickest way to confirm the variable actually reached the server
-process.
+**Sprites turn up somewhere you did not choose.** `ASEPRITE_MCP_WORKSPACE` did not reach
+the server, so relative filenames resolved against the default: `<repo>/workspace` from a
+source checkout, or the per-user data directory described in
+[Prerequisites](#1-prerequisites). Set it in your client's `env` block and restart the
+client. `health_check` reports the resolved workspace, which is the quickest way to
+confirm the variable actually arrived: a variable set in your own shell does not reach a
+server the client spawns. (Before v0.8.0 the non-checkout default landed inside the Python
+installation instead, which is
+[issue #54](https://github.com/MalloyTheDev/aseprite-mcp/issues/54).)
 
 **A tool refuses an absolute path.** That is deliberate. Relative filenames resolve inside
 the workspace, and paths that are absolute or climb out with `..` are rejected so a tool
@@ -340,7 +359,7 @@ Each block above was checked against the client's current documentation:
 - Claude Desktop: [Connect to local MCP servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers)
 - Cursor: [Model Context Protocol](https://cursor.com/docs/context/mcp)
 - Cline: [Configuring MCP Servers](https://docs.cline.bot/mcp/configuring-mcp-servers)
-- Roo Code: [Using MCP in Roo Code](https://docs.roocode.com/features/mcp/using-mcp-in-roo)
+- Roo Code: [Using MCP in Roo Code](https://roocodeinc.github.io/Roo-Code/features/mcp/using-mcp-in-roo)
 - Windsurf: [Cascade MCP](https://docs.windsurf.com/windsurf/cascade/mcp)
 - LM Studio: [Use MCP Servers](https://lmstudio.ai/docs/app/plugins/mcp)
 - Codex CLI: [Extend with MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
