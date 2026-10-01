@@ -152,6 +152,20 @@ All notable changes to this project are documented here. The format is based on
   taken: `find_layer` resolves by name, so two layers called "glow" make every later call
   that names one ambiguous.
 
+  `cast_shadow` also refuses a shadow it cannot rasterise. `ellipse_offsets` emits one
+  Lua table per pixel of a filled ellipse's *area* and builds the whole list before
+  anything is drawn, so that count is an allocation rather than a running time, and it is
+  quadratic in radii that grow with both the subject's size and how low the light sits.
+  On the widest canvas the geometry cap allows, a near-full-width subject under a low
+  light asks for about 94 million points: an out-of-memory with nothing drawn, from
+  arguments that are each individually valid, and invisible to any per-axis check for the
+  same reason a dimension limit cannot see a 17 GB canvas. The count is now checked
+  against `MAX_SHADOW_ELLIPSE_POINTS` before the rasteriser is called, the refusal names
+  both radii and the remedy, and an accepted shadow reports `ellipse_points` so a caller
+  can see how close it came. A penumbra longer than the ramp can express is refused the
+  same way rather than stacking its outer rings onto the last entry and calling a flat
+  band a soft edge.
+
   The shadow's geometry lives in `core/lighting.py` as pure arithmetic, where it is tested
   at four light angles with no editor, and is transcribed into Lua for drawing because
   only the editor knows the subject's drawn box. An integration test asserts the two

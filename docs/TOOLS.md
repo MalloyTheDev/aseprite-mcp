@@ -1907,6 +1907,13 @@ contact row and so half of it lies above the floor's top edge, where there is no
 surface. Pass `ground_y` at the floor's own top row to push it down, or leave
 `ground_layer` out and let the subject hide the upper half.
 
+A shadow is refused when rasterising it would allocate more points than the limit,
+which is reachable from legal arguments on a large canvas: the ellipse's radii grow
+with the subject's size and with how low the light sits, and the point list is built
+in full before any pixel is drawn, so that cost is memory rather than patience. The
+message names both radii and the remedy. `ellipse_points` in the result says how close
+an accepted shadow came.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |

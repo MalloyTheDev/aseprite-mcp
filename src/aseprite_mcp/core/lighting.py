@@ -173,6 +173,22 @@ def shadow_ellipse(
     )
 
 
+def filled_ellipse_points(rx: int, ry: int) -> int:
+    """An upper bound on the points a filled-ellipse rasterisation emits.
+
+    `ellipse_offsets(rx, ry, filled)` in the Lua prelude emits one entry per pixel of the
+    ellipse's **area**, not of its perimeter, and it builds the whole list before
+    returning it. So this count is an allocation, it is quadratic in the radii, and it has
+    to be checked *before* the call rather than discovered during it.
+
+    The area of an ellipse is `pi * rx * ry`. Each radius is taken one larger, which keeps
+    this an over-estimate: a guard that under-counts is not a guard. `cast_shadow`
+    transcribes this one line into Lua, because only the editor knows the radii, and it
+    reports the count back so a test can assert the two agree.
+    """
+    return math.ceil(math.pi * (rx + 1) * (ry + 1))
+
+
 # ------------------------------------------------------------------- glow ring arithmetic
 
 FALLOFFS = ("linear", "quadratic")

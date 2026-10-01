@@ -94,6 +94,22 @@ MAX_GLOW_RADIUS = 32
 # rasterised and another ramp step consumed, and a shadow whose soft edge is wider than
 # the hard core reads as a gradient rather than as a shadow.
 MAX_SHADOW_SOFTNESS = 8
+# Points one cast shadow's ellipse may rasterise. Unlike the four above, this one guards
+# the *allocation* rather than the picture, which is why it is a large round number rather
+# than a craft judgement.
+#
+# `ellipse_offsets` emits one two-element Lua table per pixel of a filled ellipse's area
+# and builds the entire list before returning it, so the point count IS the memory. The
+# radii are quadratic in the inputs and the canvas cap is generous: a 16,384-wide sprite
+# with a near-full-width subject under a low light reaches roughly 1.5e8 points, which is
+# an out-of-memory with no partial result, reached from arguments that are each
+# individually valid. A per-axis check cannot see it, exactly as a canvas dimension cannot
+# see a 17 GB canvas.
+#
+# 2^21 points is a few hundred megabytes at Lua's per-table overhead, and an ellipse that
+# large is already far past what any sprite displays usefully, so this refuses the
+# allocation without second-guessing a genuinely large sprite.
+MAX_SHADOW_ELLIPSE_POINTS = 2_097_152
 
 # --- Animation ------------------------------------------------------------- #
 # How many times a tag may say it plays. Aseprite stores the count in 16 bits and treats

@@ -12,7 +12,7 @@ import math
 
 import pytest
 
-from aseprite_mcp.core import lighting
+from aseprite_mcp.core import lighting, limits
 
 
 def _length(v):
@@ -170,6 +170,52 @@ def test_a_light_on_the_horizon_is_bounded_rather_than_infinite():
 
 def test_an_overhead_light_reaches_nowhere_sideways():
     assert lighting.shadow_projection(135, 1.0)["cot_elev"] == pytest.approx(0.0)
+
+
+# ------------------------------------------------- the rasterisation allocation bound
+def test_the_point_count_over_estimates_the_real_ellipse_area():
+    """A guard that under-counts is not a guard.
+
+    `ellipse_offsets(..., filled)` emits one entry per pixel of the ellipse's AREA, so the
+    bound has to sit at or above `pi * rx * ry` for every pair of radii.
+    """
+    for rx in (1, 2, 7, 40, 999):
+        for ry in (1, 3, 11, 250):
+            assert lighting.filled_ellipse_points(rx, ry) >= math.pi * rx * ry, (rx, ry)
+
+
+def test_the_point_count_grows_with_both_radii():
+    assert lighting.filled_ellipse_points(100, 10) > lighting.filled_ellipse_points(50, 10)
+    assert lighting.filled_ellipse_points(100, 20) > lighting.filled_ellipse_points(100, 10)
+
+
+def test_the_canvas_cap_can_reach_an_allocation_that_must_be_refused():
+    """The reason this guard exists, stated as the arithmetic that reaches it.
+
+    Each axis is individually legal and the per-axis canvas cap cannot see this, exactly
+    as a dimension check cannot see a 17 GB canvas. A near-full-width subject on the
+    widest allowed sprite, under a low light, asks for an ellipse whose point list is an
+    out-of-memory with nothing drawn.
+    """
+    widest = limits.MAX_CANVAS_DIMENSION
+    subject_width = widest - 384
+    # The subject spans almost the whole width and is tall enough for a low light to
+    # stretch the shadow to the canvas's own width, which is the most the picture bound
+    # allows through.
+    box = (192, 0, 192 + subject_width - 1, 1023)
+    _, _, rx, ry = lighting.shadow_ellipse(box, 180, 0.12, 1023)
+    points = lighting.filled_ellipse_points(rx, ry)
+
+    assert points > limits.MAX_SHADOW_ELLIPSE_POINTS, (rx, ry, points)
+    # And it is not marginal. Tens of millions of two-element Lua tables, stated as an
+    # absolute so the claim survives someone retuning the cap.
+    assert points > 50_000_000, points
+
+
+def test_an_ordinary_shadow_is_nowhere_near_the_cap():
+    """The guard must not be in the way of any sprite anyone actually draws."""
+    _, _, rx, ry = lighting.shadow_ellipse((8, 4, 20, 30), 135, 0.5, 30)
+    assert lighting.filled_ellipse_points(rx, ry) < limits.MAX_SHADOW_ELLIPSE_POINTS / 100
 
 
 # ------------------------------------------------------------------ glow ring steps

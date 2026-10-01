@@ -16,6 +16,7 @@ from ..core.limits import (
     MAX_COLOR_LIST_LENGTH,
     MAX_GLOW_RADIUS,
     MAX_OUTLINE_THICKNESS,
+    MAX_SHADOW_ELLIPSE_POINTS,
     MAX_SHADOW_SOFTNESS,
     check_count,
     check_list_length,
@@ -389,6 +390,13 @@ def cast_shadow(
     contact row and so half of it lies above the floor's top edge, where there is no
     surface. Pass `ground_y` at the floor's own top row to push it down, or leave
     `ground_layer` out and let the subject hide the upper half.
+
+    A shadow is refused when rasterising it would allocate more points than the limit,
+    which is reachable from legal arguments on a large canvas: the ellipse's radii grow
+    with the subject's size and with how low the light sits, and the point list is built
+    in full before any pixel is drawn, so that cost is memory rather than patience. The
+    message names both radii and the remedy. `ellipse_points` in the result says how close
+    an accepted shadow came.
     """
     if len(ramp) < 2:
         raise ValidationFailed(
@@ -406,6 +414,18 @@ def cast_shadow(
         "softness", softness, MAX_SHADOW_SOFTNESS,
         remedy="A penumbra wider than that reads as a gradient rather than as a shadow.",
     )
+    if softness + 1 > len(ramp):
+        # Refused rather than clamped. Each pixel of penumbra is one step lighter than the
+        # one inside it, so the request needs a core step plus one per pixel; with a
+        # shorter ramp the outer rings would all land on its last entry and the "soft"
+        # edge would be a flat band of one colour, which is not what was asked for and is
+        # invisible in the result.
+        raise ValidationFailed(
+            f"softness {softness} needs {softness + 1} ramp steps, a core plus one for "
+            f"each pixel of penumbra, but ramp has {len(ramp)}. Lower softness to "
+            f"{len(ramp) - 1}, or pass a longer ramp: stacking the outer rings onto the "
+            "last step would draw a flat band and call it a soft edge."
+        )
     opacity = check_count("opacity", opacity, 255, remedy="Opacity is 0 to 255.")
     if not new_layer.strip():
         raise ValidationFailed("new_layer must be a name, not blank.")
@@ -436,6 +456,7 @@ def cast_shadow(
         "softness": softness,
         "opacity": opacity,
         "new_layer": new_layer,
+        "max_points": MAX_SHADOW_ELLIPSE_POINTS,
     }
     body = FRAME_GUARD_LUA + _EFFECT_LAYER_LUA + """
     local spr = open_sprite(ARG.src)
@@ -484,6 +505,27 @@ def cast_shadow(
     local rx = math.max(1, round(bw / 2.0 + reach / 2.0))
     local ry = math.max(1, round((bw / 2.0) * ARG.flatten))
 
+    -- The hard bound, checked first and before anything is rasterised. Transcribed from
+    -- core.lighting.filled_ellipse_points: ellipse_offsets emits one table per pixel of a
+    -- filled ellipse's AREA and builds the whole list before it returns, so this count is
+    -- the allocation rather than the running time. The radii are quadratic in the inputs
+    -- and the canvas cap allows 16,384 pixels per axis, so a wide subject under a low
+    -- light reaches a point count that is an out-of-memory with nothing drawn, from
+    -- arguments that are each individually legal. The softness rings are larger than the
+    -- core, so the outermost is the one that has to fit.
+    local orx, ory = rx + ARG.softness, ry + ARG.softness
+    local points = math.ceil(math.pi * (orx + 1) * (ory + 1))
+    if points > ARG.max_points then
+      error(string.format(
+        "This shadow would rasterise %d points, an ellipse with radii %d and %d, past " ..
+        "the limit of %d. The whole point list is built before anything is drawn, so " ..
+        "this is memory rather than patience. Raise light_height toward 1 to shorten " ..
+        "the shadow, or cast it from a smaller subject.",
+        points, orx, ory, ARG.max_points), 0)
+    end
+
+    -- The picture bound, which is the one that fires for an ordinary sprite and names the
+    -- argument a caller would actually want to change.
     if rx > W or ry > H then
       error(string.format(
         "light_height %.3f throws a shadow %d pixels across on a %dx%d canvas, so it " ..
@@ -578,6 +620,7 @@ def cast_shadow(
                shadow_ellipse = { cx, cy, rx, ry }, contact_row = contact,
                ground_y = ground, subject_box = { x0, y0, x1, y1 },
                shadow_pixels = painted, clipped_pixels = clipped,
+               ellipse_points = points,
                softness = ARG.softness, opacity = ARG.opacity }
     """
     return run_lua(body, args)
@@ -687,14 +730,20 @@ def glow(
     local W, H = src.width, src.height
     local base = ARG.base
 
-    -- Two masks doing two different jobs. `seed` is what emits the glow; `occupied` is
-    -- every pixel of the subject, which the glow may not cover. They are the same mask
-    -- when no base_color was given, and when one was it is the difference between a gem
-    -- lighting up the air around it and a gem lighting up the hand holding it.
-    local seed, occupied = {}, {}
+    -- Two masks doing two different jobs. The glow is emitted by the pixels matching
+    -- base_color and may not cover any pixel of the subject, which are the same set when
+    -- no base_color was given and, when one was, the difference between a gem lighting up
+    -- the air around it and a gem lighting up the hand holding it.
+    --
+    -- The emitting set is stored already inverted, as `outside`, because that is the only
+    -- form anything later needs: the chamfer field measures distance *out* from the art,
+    -- so it wants a mask that is true where the art is not. Building it inverted here
+    -- rather than negating a second table afterwards keeps one full-canvas table alive
+    -- instead of two, which on a large sprite is the difference that matters.
+    local outside, occupied = {}, {}
     local seeds, solid = 0, 0
     for y = 0, H - 1 do
-      seed[y], occupied[y] = {}, {}
+      outside[y], occupied[y] = {}, {}
       for x = 0, W - 1 do
         local r, g, b, a = px_to_rgba(spr, src:getPixel(x, y))
         local is_solid = a > 0
@@ -708,7 +757,7 @@ def glow(
             is_seed = math.sqrt(0.299*dr*dr + 0.587*dg*dg + 0.114*db*db) <= ARG.tolerance
           end
         end
-        seed[y][x] = is_seed
+        outside[y][x] = not is_seed
         occupied[y][x] = is_solid
         if is_seed then seeds = seeds + 1 end
       end
@@ -723,15 +772,13 @@ def glow(
             ", so there is nothing to glow around.", 0)
     end
 
-    -- The chamfer field run on the INVERTED mask, which turns "distance into the shape"
+    -- The chamfer field run on the inverted mask, which turns "distance into the shape"
     -- into "distance out from it". One O(canvas) pass whatever the radius, where scanning
     -- a neighbourhood per pixel would have been O(canvas * radius^2).
-    local outside = {}
-    for y = 0, H - 1 do
-      outside[y] = {}
-      for x = 0, W - 1 do outside[y][x] = not seed[y][x] end
-    end
     local dist = distance_field(outside, W, H)
+    -- Dropped as soon as the field exists, so the mask and the field are not both held
+    -- while the much larger paint loop runs.
+    outside = nil
 
     local BAYER = { {0,8,2,10}, {12,4,14,6}, {3,11,1,9}, {15,7,13,5} }
     local out = Image(spr.spec)

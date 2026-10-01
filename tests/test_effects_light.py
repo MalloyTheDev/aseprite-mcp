@@ -261,6 +261,81 @@ def test_a_light_too_low_for_the_canvas_is_refused_not_reported_as_drawn(request
     assert "light_height 0.060" in str(exc.value)
 
 
+def test_the_rasterisation_point_count_matches_the_pure_bound(request):
+    """The allocation guard's arithmetic lives in Python and in Lua; they must agree.
+
+    The guard runs before anything is rasterised, so if the Lua's count drifted below the
+    pure one the bound would be checked against the wrong number.
+    """
+    name = _bare_ball(request)
+    result = effects.cast_shadow(name, "Layer 1", GROUND, light_angle=135, softness=1)
+
+    _, _, rx, ry = result["shadow_ellipse"]
+    expected = lighting.filled_ellipse_points(rx + result["softness"],
+                                              ry + result["softness"])
+    assert result["ellipse_points"] == expected
+
+
+def test_a_shadow_too_large_to_rasterise_is_refused_before_it_allocates(request):
+    """Reachable from legal arguments, and an out-of-memory with nothing drawn if not.
+
+    A wide subject under a low light asks for an ellipse whose point list is built in
+    full before any pixel is written, so the cost is memory rather than patience. The
+    canvas here is small; it is the subject's width and the light's height that drive the
+    radii, which is exactly why a per-axis canvas check cannot catch this.
+    """
+    name = f"fx/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 4000, 60)
+    drawing.draw_rectangle(name, 0, 0, 4000, 55, BODY[3], filled=True)
+
+    with pytest.raises(AsepriteError, match="would rasterise") as exc:
+        effects.cast_shadow(name, "Layer 1", GROUND, light_angle=180, light_height=0.25)
+    message = str(exc.value)
+    assert "past the limit of" in message
+    assert "memory rather than patience" in message
+
+
+def test_a_legitimately_large_shadow_on_a_large_canvas_still_draws(request):
+    """The guard must refuse the allocation without refusing a big sprite."""
+    name = f"fx/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 512, 256)
+    drawing.draw_rectangle(name, 100, 20, 300, 200, BODY[3], filled=True)
+
+    result = effects.cast_shadow(name, "Layer 1", GROUND, light_angle=135,
+                                 light_height=0.5)
+
+    # Tens of thousands of points: far larger than the other shadows here, and accepted.
+    assert result["ellipse_points"] > 20_000, result["ellipse_points"]
+    assert result["ellipse_points"] < 2_097_152
+    assert result["shadow_pixels"] > 0
+
+    # A 64x64 window on the shadow itself: `get_pixels` caps a single read at 4096 px, so
+    # the whole canvas cannot be asked for in one call at this size.
+    cx, cy, _, _ = result["shadow_ellipse"]
+    x0 = max(0, min(512 - 64, cx - 32))
+    y0 = max(0, min(256 - 64, cy - 32))
+    shadow = inspect.get_pixels(name, x0, y0, 64, 64, layer=result["layer"])["pixels"]
+    drawn = [p for row in shadow for p in row if not p.lower().endswith("00")]
+    assert drawn, "the window should land on the shadow"
+    assert quality.palette_conformance(shadow, GROUND) == 1.0
+
+
+def test_a_penumbra_longer_than_the_ramp_is_refused_not_flattened(request):
+    """Each pixel of penumbra is one ramp step, so the ramp has to have them.
+
+    Clamping the outer rings onto the last entry would draw a flat band of one colour and
+    report it as a soft edge, which is invisible in the result.
+    """
+    name = _scene(request)
+    with pytest.raises(ValidationFailed, match="needs 4 ramp steps") as exc:
+        effects.cast_shadow(name, "ball", GROUND[:3], softness=3)
+    assert "Lower softness to 2" in str(exc.value)
+
+    # And the largest penumbra the ramp can express is accepted.
+    result = effects.cast_shadow(name, "ball", GROUND[:3], softness=2)
+    assert len({p[:7] for p in _cells(name, result["layer"]).values()}) == 3
+
+
 def test_cast_shadow_rejects_arguments_that_cannot_mean_anything(request):
     name = _scene(request)
     with pytest.raises(ValidationFailed, match="at least 2 colours"):
