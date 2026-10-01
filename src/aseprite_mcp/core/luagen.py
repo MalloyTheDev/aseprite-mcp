@@ -295,6 +295,23 @@ end
 -- it cannot drift from where the pixels actually go.
 local function ramp_palette_state(spr, ramp)
   local pal = spr.palettes[1]
+
+  -- nearest_index *errors* when no entry can draw, which is right for a tool trying to
+  -- write and wrong here: this runs after the body has already succeeded, so raising
+  -- would turn a completed call into a failure. A no-op shade on a sprite whose palette
+  -- holds one transparent entry did exactly that, failing a call that had done nothing
+  -- at all and therefore had nothing to fail about. Answered rather than asked.
+  local drawable = 0
+  for ix = 0, #pal - 1 do
+    if ix ~= spr.transparentColor and pal:getColor(ix).alpha > 0 then
+      drawable = drawable + 1
+    end
+  end
+  if drawable == 0 then
+    return { steps = {}, declared = #ramp, resolved = 0, exact = 0,
+             undrawable_palette = true }
+  end
+
   local steps, distinct, exact = {}, {}, 0
   local resolved = 0
   for i, c in ipairs(ramp) do
@@ -999,10 +1016,18 @@ def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
         # already follows (a list of parsed colours under exactly that name). A meta-test
         # pins it, so a new tool cannot quietly opt out by naming its argument something
         # else.
+        # pcall'd, and that is not defensive habit. This runs *after* the body has
+        # succeeded and outside the pcall that guards it, so anything raising in here
+        # aborts the script before RESULT is ever printed: a reporting path would turn a
+        # completed operation into a failure with no result at all. It has already
+        # happened once, when nearest_index refused a palette with nothing drawable
+        # during a shade that had written nothing. A measurement that cannot be taken is
+        # worth less than the call it describes.
         "  if type(RESULT) == 'table' and _sprite ~= nil and\n"
         "     _sprite.colorMode == ColorMode.INDEXED and\n"
         "     type(ARG.ramp) == 'table' and #ARG.ramp > 0 then\n"
-        "    RESULT.ramp_on_palette = ramp_palette_state(_sprite, ARG.ramp)\n"
+        "    local _rok, _rstate = pcall(ramp_palette_state, _sprite, ARG.ramp)\n"
+        "    if _rok then RESULT.ramp_on_palette = _rstate end\n"
         "  end\n"
         f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"
