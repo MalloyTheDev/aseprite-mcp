@@ -196,8 +196,15 @@ indexed mode is for and is allowed; losing pixels is not recoverable and is the 
 thing a mode change must never do quietly. `set_palette` or `add_palette_color` fix a
 palette that has nothing to draw with.
 
-Returns the sprite's structured info, plus `drawn_pixels` (verified unchanged by the
-conversion) and the `palette_source` used, for indexed targets.
+That check counts every pixel of every frame, twice. Past `MAX_VERIFY_PIXELS` the
+conversion still runs and reports `verified: false` with the reason, rather than
+being refused: a capability that declines to work on a large sheet because the check
+is unaffordable is worse than one that works and says what it did not check.
+`diff_sprites` against a copy taken beforehand answers the same question by hand.
+
+Returns the sprite's structured info, plus `drawn_pixels` and `verified` (whether
+that count was actually compared across the conversion) and the `palette_source`
+used, for indexed targets.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -237,7 +244,11 @@ Args:
     ramp: Declare the ramp the art should be on and the report adds palette
         conformance: the fraction of drawn pixels sitting exactly on it. This is the
         measurement that separates shading from filtering, and it is omitted rather
-        than reported as a meaningless 1.0 when no ramp is given.
+        than reported as a meaningless 1.0 when no ramp is given. On an **indexed**
+        sprite the readings also say how much of the ramp the palette can actually
+        hold, because conformance cannot see a ramp step that collapsed onto its
+        neighbour: the colour it collapsed to is still on the ramp, so banded
+        shading still scores 1.0.
     check_tiling: For a tile, also measure how much worse the wrapping edge looks
         than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
     layer: Measure one layer instead of the flattened frame.

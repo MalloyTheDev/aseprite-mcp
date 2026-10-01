@@ -10,12 +10,12 @@ from pathlib import Path
 from mcp.server.mcpserver import Image
 
 from ..app import mcp
-from ..core import config, quality, spritediff
+from ..core import config, indexed, quality, spritediff
 from ..core.errors import ValidationFailed
 from ..core.limits import MAX_ASSESS_PIXELS, MAX_DIFF_COLORS
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import AsepriteError, run_cli, run_lua
-from .common import lua_path, resolve_path
+from .common import lua_path, parse_color, resolve_path
 
 
 @mcp.tool()
@@ -331,7 +331,11 @@ def assess_sprite(
         ramp: Declare the ramp the art should be on and the report adds palette
             conformance: the fraction of drawn pixels sitting exactly on it. This is the
             measurement that separates shading from filtering, and it is omitted rather
-            than reported as a meaningless 1.0 when no ramp is given.
+            than reported as a meaningless 1.0 when no ramp is given. On an **indexed**
+            sprite the readings also say how much of the ramp the palette can actually
+            hold, because conformance cannot see a ramp step that collapsed onto its
+            neighbour: the colour it collapsed to is still on the ramp, so banded
+            shading still scores 1.0.
         check_tiling: For a tile, also measure how much worse the wrapping edge looks
             than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
         layer: Measure one layer instead of the flattened frame.
@@ -343,6 +347,12 @@ def assess_sprite(
     measured = run_lua(_ASSESS_LUA, {
         "src": lua_path(src), "frame": int(frame), "layer": layer,
         "max_pixels": MAX_ASSESS_PIXELS,
+        # Passed through so the harness can report what the ramp becomes on an indexed
+        # palette. Conformance against a ramp the palette cannot hold is not a
+        # meaningful number, and it is the misleading direction: a pixel that snapped to
+        # a neighbouring ramp step is still on the ramp, so conformance reads 1.0 for
+        # shading that banded. The Lua does nothing else with it.
+        "ramp": [parse_color(c) for c in ramp] if ramp else None,
     })
     grid = _expand(measured)
     metrics = quality.score(grid, ramp)
@@ -352,6 +362,10 @@ def assess_sprite(
                                 "vertical": round(vertical, 3)}
 
     notes = quality.readings(metrics, width=measured["width"], height=measured["height"])
+    # Before the tiling note, because it changes how palette_conformance above should be
+    # read: on an indexed sprite whose palette does not hold the declared ramp, the
+    # conformance number is measuring the palette rather than the shading.
+    notes.extend(indexed.ramp_readings(measured.get("ramp_on_palette") or {}))
     if check_tiling and "tile_seam" in metrics:
         seam = metrics["tile_seam"]
         for axis in ("horizontal", "vertical"):
@@ -429,58 +443,6 @@ local function frame_image(spr, framenum, layer_ref)
   img:clear()
   img:drawSprite(spr, framenum)
   return img
-end
-
--- Visible pixels straight out of the byte buffer. Every pixel's alpha sits at a fixed
--- stride in Image.bytes, so counting what is drawn needs no getPixel and no px_to_rgba
--- per pixel, which at the size cap is the difference between milliseconds and seconds.
--- Reading a block at a time is the trick the frame hash uses: string.byte one index at a
--- time is the slow part, not the loop.
-local function visible_count(spr, img)
-  local cm = spr.colorMode
-  local stride, first, clear = 4, 4, { [0] = true }
-  if cm == ColorMode.GRAY then
-    stride, first = 2, 2
-  elseif cm == ColorMode.INDEXED then
-    stride, first = 1, 1
-    -- Indexed transparency is two separate things and both have to count: the sprite's
-    -- transparent index, and any palette entry that is itself fully transparent. Testing
-    -- only the first is the bug this server has already been bitten by once.
-    clear = { [spr.transparentColor] = true }
-    local pal = spr.palettes[1]
-    for ix = 0, #pal - 1 do
-      if pal:getColor(ix).alpha == 0 then clear[ix] = true end
-    end
-  end
-
-  local s = img.bytes
-  if #s ~= img.width * img.height * stride then
-    -- Not the layout assumed above. Count the slow, certain way rather than a wrong way.
-    local n = 0
-    for y = 0, img.height - 1 do
-      for x = 0, img.width - 1 do
-        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y))
-        if alpha > 0 then n = n + 1 end
-      end
-    end
-    return n
-  end
-
-  -- 512 is a multiple of every stride above, so `first` stays aligned block to block.
-  -- It is a byte count rather than a pixel count on purpose: string.byte returns one
-  -- value per byte, and asking it for a few thousand at once is how you find Lua's
-  -- result limit.
-  local n, len, i = 0, #s, 1
-  local block = 512
-  while i <= len do
-    local j = math.min(i + block - 1, len)
-    local t = table.pack(string.byte(s, i, j))
-    for k = first, t.n, stride do
-      if not clear[t[k]] then n = n + 1 end
-    end
-    i = j + 1
-  end
-  return n
 end
 
 local a = load_sprite(ARG.a, "sprite")

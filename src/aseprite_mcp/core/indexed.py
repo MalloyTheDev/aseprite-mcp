@@ -232,3 +232,123 @@ def palette_readings(state: dict, color_mode: str) -> list[str]:
             "expected to draw with one of them."
         )
     return out
+
+# --------------------------------------------------------------------------- #
+# A declared ramp against the palette that has to hold it                     #
+# --------------------------------------------------------------------------- #
+# Below this share of a ramp surviving as distinct colours, the ramp is not really on
+# this palette and the shading will band however well the tool does its job. Two steps
+# merging out of eight is a palette with a gap in it; half of them merging is the wrong
+# palette for this ramp. The number is a reporting threshold only: nothing is refused.
+RAMP_MOSTLY_PRESENT = 0.75
+
+
+def ramp_readings(state: dict) -> list[str]:
+    """What is worth saying about a ramp declared against an indexed sprite's palette.
+
+    `state` is the measurement the Lua harness takes whenever a tool is given a `ramp`
+    and the sprite is indexed: `declared` (how many steps were passed), `resolved` (how
+    many distinct palette entries those steps landed on), `exact` (how many were in the
+    palette exactly) and `steps`, one record per entry with the colour asked for, the
+    index it resolved to and the colour that index holds.
+
+    An indexed pixel is an offset into a palette, so a shading tool cannot write a colour
+    the palette does not hold. `rgba_to_px` sends it through `nearest_index` and it lands
+    on the nearest entry that can draw. That is not a bug and refusing it would make the
+    shading tools unusable on exactly the sprites that most want a fixed palette, which
+    is why every reading here is a reading and not a refusal.
+
+    It needs saying because two of its consequences are invisible in the result:
+
+    * **A shade between two steps that resolve to one entry does nothing.** The tool
+      reports the pixels it wrote and the picture is unchanged. Measured: a sprite drawn
+      in a ramp's step 1, shifted one step up against a palette holding three of the
+      ramp's five colours, came back byte for byte identical with
+      `pixels_written: 144`.
+    * **`palette_conformance` does not catch it.** The colour the pixel snapped to is
+      still a colour on the declared ramp, so conformance reads 1.0 for a no-op. The
+      metric that exists to separate shading from filtering is blind to this case,
+      which is why the finding has to come from the palette and not from the pixels.
+
+    Nothing is said when every step is present and distinct, which is the normal case for
+    a palette built from the ramp (`generate_ramp` then `set_palette`), and nothing is
+    said about RGB or grayscale sprites because the harness only measures indexed ones.
+    """
+    steps = state.get("steps") or []
+    declared = state.get("declared") or len(steps)
+    resolved = state.get("resolved") or 0
+    exact = state.get("exact") or 0
+
+    if state.get("undrawable_palette"):
+        # No step can be resolved, because no entry can draw. Said here rather than left
+        # to the measurement's silence: a tool that wrote nothing on such a sprite
+        # succeeds (there was nothing to write), and the reason it had no effect is a
+        # fact about the palette that nothing else in its result mentions. A tool that
+        # does try to draw gets the refusal from `nearest_index` instead.
+        return [
+            "This sprite's palette has no entry that can draw a visible pixel, so none "
+            f"of the {declared} declared ramp steps could be resolved and shading it "
+            "cannot do anything. add_palette_color or set_palette first."
+        ]
+
+    if not steps or not declared:
+        return []
+
+    out: list[str] = []
+
+    if resolved < declared:
+        # Grouped by the index they landed on, in ramp order, so the reader sees which
+        # steps merged rather than a count they have to reconstruct.
+        groups: dict[int, list[dict]] = {}
+        for entry in steps:
+            groups.setdefault(entry.get("index"), []).append(entry)
+        merged = [group for group in groups.values() if len(group) > 1]
+        named = "; ".join(
+            "steps {} ({}) all resolve to palette entry {} ({})".format(
+                " and ".join(str(e.get("step")) for e in group),
+                ", ".join(str(e.get("want")) for e in group),
+                group[0].get("index"),
+                group[0].get("got"),
+            )
+            for group in merged
+        )
+        out.append(
+            f"This sprite is indexed and its palette holds {resolved} of the "
+            f"{declared} declared ramp steps as distinct colours: {named}. A shade "
+            "between two steps that resolve to the same entry changes nothing, and "
+            "still reports the pixels it wrote. palette_conformance will not show it "
+            "either, because the colour landed on is still on the ramp. Add the missing "
+            "colours with add_palette_color or set_palette, or declare the ramp the "
+            "palette actually holds."
+        )
+    elif exact < declared:
+        # Every step still distinct, so the shading will read as shading; the colours are
+        # just not the ones that were asked for. Worth one line, not an alarm.
+        shifted = [e for e in steps if not e.get("exact")]
+        # Four examples and then a count, not the whole list: past a handful this is the
+        # measurement again rather than a finding, and `ramp_on_palette` carries every
+        # step for anyone who wants them all.
+        shown = ", ".join(f"{e.get('want')} as {e.get('got')}" for e in shifted[:4])
+        rest = f", and {len(shifted) - 4} more" if len(shifted) > 4 else ""
+        out.append(
+            f"{len(shifted)} of the {declared} declared ramp steps are not in this "
+            f"indexed sprite's palette and were drawn as their nearest entry instead: "
+            f"{shown}{rest}. Each step still landed on a different colour, so the "
+            "shading holds its shape; the colours are not the ones declared."
+        )
+
+    if resolved == 1 and declared > 1:
+        out.append(
+            f"Every one of the {declared} ramp steps resolves to the same palette "
+            f"entry ({steps[0].get('index')}, {steps[0].get('got')}), so there is no "
+            "ramp on this sprite to shade along and nothing this tool writes can vary. "
+            "The palette needs the ramp's colours before any shading will show."
+        )
+    elif declared and resolved / declared < RAMP_MOSTLY_PRESENT:
+        out.append(
+            f"Only {resolved / declared:.0%} of the ramp survives as distinct colours "
+            "here, so the result will band wherever the merged steps meet. "
+            "extract_palette on the art and generate_ramp against it is the usual way "
+            "to get a ramp this palette can hold."
+        )
+    return out
