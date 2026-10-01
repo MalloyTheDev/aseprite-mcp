@@ -1,13 +1,13 @@
 # Aseprite MCP — Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **141 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **142 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
 ## Contents
 
 - [Sprite lifecycle](#sprite-lifecycle) (10)
-- [Inspection & preview](#inspection--preview) (5)
+- [Inspection & preview](#inspection--preview) (6)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (7)
 - [Animation (motion, timing, checks)](#animation-motion-timing-checks) (3)
@@ -218,6 +218,64 @@ the measurements, so this is cheap to call after every pass.
 | `layer` | string | no | _none_ |
 | `ramp` | array<string> | no | _none_ |
 | `check_tiling` | boolean | no | False |
+
+
+### `diff_sprites`
+
+Compare two frames pixel for pixel and say what changed.
+
+This is the tool for the question an editing agent cannot otherwise answer: *did my
+last call do what I meant?* `assess_sprite` judges one frame on its own and
+`render_preview` returns a picture a text-only model cannot read. This reports the
+difference between two frames as counts, which is the only form in which "the shading
+pass moved the outline" is visible without eyes.
+
+**Nothing changed is the loudest result, not the quiet one.** An edit that silently
+went nowhere, to the wrong layer, inside a stale selection, off the canvas, looks
+exactly like an edit that was not needed. When the two frames are identical this says
+so first and names the usual causes.
+
+A difference is never reported as a fault, because different is not wrong. Pass
+`expect` to turn the measurement into a check.
+
+Args:
+    filename: The sprite to compare, and the "before" side of the report.
+    frame: Which frame of it (1-based).
+    layer: Compare this layer alone instead of the composite, on both sides unless
+        `other_layer` says otherwise. Worth reaching for: drawing tools write to ONE
+        layer, so a composite diff can show nothing while the layer underneath
+        changed completely, and the reverse.
+    other: The sprite to compare against. Defaults to `filename`, which is what makes
+        a frame-to-frame diff inside one animation this same call.
+    other_frame: Which frame of `other` (1-based).
+    other_layer: The layer to read on the `other` side, when it is named differently.
+    expect: What the change should be: "identical", "silhouette", "interior",
+        "coverage" or "mixed". Adds a verdict block with a pass or a fail, and is
+        omitted rather than guessed at.
+
+Returns counts in four buckets that add up to `changed_pixels`, so a change is never
+reported as a single number that could mean two different things:
+
+* `silhouette_added` / `silhouette_removed`: pixels that entered or left the shape.
+  These are the ones that move a collision box, an outline and a trimmed export box.
+* `interior_changed`: pixels that were visible before and after and changed colour.
+* `coverage_changed`: pixels that kept their colour and changed only their alpha,
+  which is an opacity or anti-aliasing change rather than a repaint.
+
+Both frames must be the same size; a mismatch is refused with both canvas sizes and
+both content boxes, because a diff of differently sized frames is an offset question
+in disguise. Different colour modes compare fine: both sides are read as RGBA, so an
+indexed sprite and its RGB export can be checked against each other.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `frame` | integer | no | 1 |
+| `layer` | string | no | _none_ |
+| `other` | string | no | _none_ |
+| `other_frame` | integer | no | 1 |
+| `other_layer` | string | no | _none_ |
+| `expect` | string | no | _none_ |
 
 
 ### `get_pixels`

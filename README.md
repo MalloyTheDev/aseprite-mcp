@@ -33,7 +33,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **141 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **142 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -53,6 +53,12 @@ Aseprite GUI.
   whether it is centred, and what fraction of it sits exactly on a declared ramp. An agent
   cannot look at its own sprite, so every fault comes back as a line saying what it is and
   which tool puts it right, and `remove_stray_pixels` is the one that answers for noise.
+- **Edits you can check** - `diff_sprites` compares two frames and says what changed, in
+  buckets that mean different things: pixels that entered or left the *silhouette*, pixels
+  repainted inside it, and pixels that changed only their alpha. An edit that silently went
+  nowhere, to the wrong layer, inside a stale selection, off the canvas, looks exactly like
+  an edit that was not needed, so "nothing changed" is reported loudly rather than quietly.
+  Pass `expect=` to turn the measurement into a check.
 - **Animation you can check** - `offset_cels` moves a cel along a line or an arc across
   any number of frames in one launch, with the spacing distributed so it reads as speed
   rather than as a limp; `apply_timing_curve` gives the cycle a shape in time by setting
@@ -77,7 +83,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 141 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 142 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -393,6 +399,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `render_preview` | Render a frame to a PNG image you can view (scaled). |
 | `get_pixels` | Read composited pixel colours of a region (≤ 64×64 per call). |
 | `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why. |
+| `diff_sprites` | Compare two frames pixel for pixel: pixels added to or removed from the silhouette, repainted inside it, or changed in alpha alone, plus the colours involved and the box they sit in. Says so loudly when nothing changed, and takes `expect=` to turn the measurement into a pass or a fail. |
 | `list_sprites` | List sprite/image files in the workspace. |
 
 ### Layers
