@@ -399,3 +399,70 @@ def test_a_bad_argument_is_refused_without_opening_the_sprite(request, kwargs):
         sprite.set_color_mode(name, **kwargs)
 
     assert _digest(name) == before
+
+
+# ------------------------------------------------------- what the check costs (#144)
+# The pixel-loss guard above counts every pixel of every frame, twice. That is free on a
+# 16x16 sprite and is not free on a sheet, and nothing used to bound it but the
+# invocation timeout: a working conversion of a large sheet became a timeout with nothing
+# useful in it. The cap skips the *check*, never the conversion.
+def test_a_conversion_under_the_cap_says_it_verified(request):
+    """`verified` is reported either way, so the caller branches on a field rather than
+    on whether `drawn_pixels` happens to be present."""
+    name = _name(request)
+    sprite.create_sprite(name, 8, 8)
+    drawing.draw_rectangle(name, 2, 2, 4, 4, "#6b4a2f", filled=True)
+
+    result = sprite.set_color_mode(name, "indexed")
+
+    assert result["verified"] is True
+    assert result["drawn_pixels"] == 16
+    assert "unverified_reason" not in result
+
+
+def test_a_conversion_past_the_verification_cap_converts_and_says_so(request, monkeypatch):
+    """The whole point of #144: past the cap the conversion still happens.
+
+    Refusing instead would trade a rare slow call for a permanent gap in a capability,
+    which is worse than the problem. The cap is monkeypatched rather than met for real
+    because meeting it needs 33.5M pixels, and a test that spends twenty seconds building
+    a 4096x4096 sheet to exercise one branch is a test nobody runs.
+    """
+    name = _name(request)
+    sprite.create_sprite(name, 8, 8)
+    drawing.draw_rectangle(name, 2, 2, 4, 4, "#6b4a2f", filled=True)
+    monkeypatch.setattr(sprite, "MAX_VERIFY_PIXELS", 8)
+
+    result = sprite.set_color_mode(name, "indexed")
+
+    assert result["colorMode"] == "indexed", "converted, not refused"
+    assert result["verified"] is False
+    assert "drawn_pixels" not in result, "no count, rather than a 0 that reads as empty"
+    reason = result["unverified_reason"]
+    assert "64 pixels across 1 frame(s)" in reason, "says what it measured"
+    assert "diff_sprites" in reason, "names the tool that answers it by hand"
+    # Unverified is not the same as damaged: the art is still there, and the test says so
+    # rather than leaving "we did not check" to imply "it broke".
+    assert _drawn(name, 8) == 16
+
+
+def test_the_two_callers_of_the_shared_count_agree(request):
+    """`set_color_mode` and `diff_sprites` both need the number of pixels that would
+    show, and until #144 each had its own loop for it: one per-pixel through getPixel,
+    one reading alpha at a byte stride. Two implementations of one number is two chances
+    to be wrong about indexed transparency, which is the mistake this file is named for.
+
+    They now call one prelude helper. This is the test that notices if a second copy
+    comes back, because a copy would have to agree here to pass.
+    """
+    name = _name(request)
+    sprite.create_sprite(name, 8, 8)
+    palette.set_palette(name, ["#00000000", "#6b4a2fff", "#ffffff00"])
+    frames.add_frame(name)
+    drawing.draw_rectangle(name, 2, 2, 4, 4, "#6b4a2f", filled=True, frame=1)
+
+    converted = sprite.set_color_mode(name, "indexed", palette_source="keep")
+    diffed = inspect.diff_sprites(name, 1, other_frame=2)
+
+    assert converted["drawn_pixels"] == diffed["a"]["drawn_pixels"] == 16
+    assert diffed["b"]["drawn_pixels"] == 0, "frame 2 was never drawn on"

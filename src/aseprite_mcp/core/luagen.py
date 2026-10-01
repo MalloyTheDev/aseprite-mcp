@@ -130,6 +130,9 @@ local _linked_hit_frame, _linked_hit_others = nil, nil
 -- drawing, which is worse than not supporting selections at all.
 local _sel = nil
 
+-- The sprite the body opened, for the harness. See open_sprite.
+local _sprite = nil
+
 -- For tools that decline a write on purpose (a gradient leaving transparent pixels
 -- alone, say). Deliberate and out-of-bounds are different facts and are reported so.
 local function note_skipped(n)
@@ -276,6 +279,58 @@ local function nearest_index(spr, r, g, b)
   return best
 end
 
+-- What a declared ramp actually becomes on this sprite's palette.
+--
+-- On an indexed sprite a pixel is an offset, so a shading tool cannot write a colour the
+-- palette does not hold: rgba_to_px sends it through nearest_index and it lands on the
+-- nearest entry that can draw. That is what indexed mode means and refusing it would
+-- make these tools unusable on exactly the sprites that most need a fixed palette. What
+-- was wrong is that nothing said so, and two consequences are invisible in the result:
+-- two ramp steps can resolve to one entry, so a shade between them changes nothing while
+-- reporting the pixels it wrote, and palette_conformance stays at 1.0 throughout because
+-- the colour it lands on is still a colour on the declared ramp (#145).
+--
+-- One nearest_index call per ramp entry, not per pixel, so this is free at any sprite
+-- size. Measured against the sprite's own palette through the sprite's own resolver, so
+-- it cannot drift from where the pixels actually go.
+local function ramp_palette_state(spr, ramp)
+  local pal = spr.palettes[1]
+
+  -- nearest_index *errors* when no entry can draw, which is right for a tool trying to
+  -- write and wrong here: this runs after the body has already succeeded, so raising
+  -- would turn a completed call into a failure. A no-op shade on a sprite whose palette
+  -- holds one transparent entry did exactly that, failing a call that had done nothing
+  -- at all and therefore had nothing to fail about. Answered rather than asked.
+  local drawable = 0
+  for ix = 0, #pal - 1 do
+    if ix ~= spr.transparentColor and pal:getColor(ix).alpha > 0 then
+      drawable = drawable + 1
+    end
+  end
+  if drawable == 0 then
+    return { steps = {}, declared = #ramp, resolved = 0, exact = 0,
+             undrawable_palette = true }
+  end
+
+  local steps, distinct, exact = {}, {}, 0
+  local resolved = 0
+  for i, c in ipairs(ramp) do
+    local col = mkcolor(c)
+    local index = nearest_index(spr, col.red, col.green, col.blue)
+    local got = pal:getColor(index)
+    local is_exact = (got.red == col.red and got.green == col.green
+                      and got.blue == col.blue)
+    if is_exact then exact = exact + 1 end
+    if distinct[index] == nil then
+      distinct[index] = true
+      resolved = resolved + 1
+    end
+    steps[i] = { step = i, want = color_hex(col), index = index, got = color_hex(got),
+                 exact = is_exact }
+  end
+  return { steps = steps, declared = #ramp, resolved = resolved, exact = exact }
+end
+
 -- Convert a colour spec table (with r,g,b,a and/or index) to a raw pixel value
 -- appropriate for the sprite's colour mode.
 local function to_pixel(spr, c)
@@ -331,6 +386,84 @@ local function img_solid(spr, img, x, y)
   if x < 0 or y < 0 or x >= img.width or y >= img.height then return false end
   local _, _, _, a = px_to_rgba(spr, img:getPixel(x, y))
   return a > 0
+end
+
+-- How many pixels of `img` would show, read straight out of the byte buffer.
+--
+-- Every pixel's alpha sits at a fixed stride in Image.bytes, so counting what is drawn
+-- needs no getPixel and no px_to_rgba per pixel. Measured on this machine: 0.088us per
+-- pixel against 0.58us for the getPixel loop, so about 6.6x, which is the difference
+-- between a 33Mpx verification scan costing 3 seconds and costing 20. Reading a block at
+-- a time is the trick the frame hash uses: string.byte one index at a time is the slow
+-- part, not the loop.
+--
+-- Shared rather than copied because two tools already need exactly this number and get
+-- it wrong in different ways if they each write it: `diff_sprites` reports it per side,
+-- and `set_color_mode` compares it across a conversion to refuse one that would make
+-- drawn pixels disappear. Note what it does *not* give you: a bounding box (shrinkBounds
+-- answers that, and disagrees with this about indexed transparency, see below) or
+-- per-pixel colour. `trim_sprite` and `extract_palette` need those, so they still scan.
+local function visible_count(spr, img)
+  local cm = spr.colorMode
+  local stride, first, clear = 4, 4, { [0] = true }
+  if cm == ColorMode.GRAY then
+    stride, first = 2, 2
+  elseif cm == ColorMode.INDEXED then
+    stride, first = 1, 1
+    -- Indexed transparency is two separate things and both have to count: the sprite's
+    -- transparent index, and any palette entry that is itself fully transparent. Testing
+    -- only the first is the bug this server has already been bitten by once. It is also
+    -- where Image:shrinkBounds parts company with us: it honours the transparent index
+    -- only, so a pixel held in a transparent palette entry counts as content to it and
+    -- as nothing here.
+    clear = { [spr.transparentColor] = true }
+    local pal = spr.palettes[1]
+    for ix = 0, #pal - 1 do
+      if pal:getColor(ix).alpha == 0 then clear[ix] = true end
+    end
+  end
+
+  local s = img.bytes
+  if #s ~= img.width * img.height * stride then
+    -- Not the layout assumed above. Count the slow, certain way rather than a wrong way.
+    local n = 0
+    for y = 0, img.height - 1 do
+      for x = 0, img.width - 1 do
+        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y))
+        if alpha > 0 then n = n + 1 end
+      end
+    end
+    return n
+  end
+
+  -- 512 is a multiple of every stride above, so `first` stays aligned block to block.
+  -- It is a byte count rather than a pixel count on purpose: string.byte returns one
+  -- value per byte, and asking it for a few thousand at once is how you find Lua's
+  -- result limit.
+  local n, len, i = 0, #s, 1
+  local block = 512
+  while i <= len do
+    local j = math.min(i + block - 1, len)
+    local t = table.pack(string.byte(s, i, j))
+    for k = first, t.n, stride do
+      if not clear[t[k]] then n = n + 1 end
+    end
+    i = j + 1
+  end
+  return n
+end
+
+-- Drawn pixels across every frame of a sprite, flattened. The composite is what the
+-- caller sees, so this is the number a conversion must not change.
+local function visible_count_all_frames(spr)
+  local n = 0
+  for f = 1, #spr.frames do
+    local flat = Image(spr.spec)
+    flat:clear()
+    flat:drawSprite(spr, f)
+    n = n + visible_count(spr, flat)
+  end
+  return n
 end
 
 -- Alpha-composite colour (r,g,b) with coverage `cov` (0..1) over the pixel at
@@ -416,6 +549,11 @@ local function open_sprite(path)
   local spr = app.open(path)
   if spr == nil then error("Could not open sprite: " .. tostring(path)) end
   app.sprite = spr
+  -- Recorded for the harness, which reports a declared ramp against an indexed palette
+  -- after the body has run and has no other way to reach the sprite. The last one wins;
+  -- the two tools that open a second sprite (stamp_file, extract_palette with
+  -- from_image) take no ramp, so there is nothing to be ambiguous about yet.
+  _sprite = spr
 
   -- A selection is NOT stored in the .aseprite file: reopen a sprite and it is empty
   -- again. Every tool call here is its own Aseprite run, so a selection is kept in a
@@ -867,6 +1005,29 @@ def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
         # says what it touched without each one having to remember to.
         "  if type(RESULT) == 'table' and _linked_hit_frame ~= nil then\n"
         "    RESULT.linked_frames_also_changed = _linked_hit_others\n"
+        "  end\n"
+        # A ramp declared against an indexed palette is resolved, not written: every
+        # entry lands on the nearest palette offset that can draw. Attached here because
+        # ten tools take a `ramp` and the measurement is the same question for all of
+        # them, so putting it in each body would be ten chances to leave it out. The
+        # judgement is Python, in core.indexed; this is only the measurement.
+        #
+        # Keyed on ARG.ramp by convention, which is the convention every ramp tool
+        # already follows (a list of parsed colours under exactly that name). A meta-test
+        # pins it, so a new tool cannot quietly opt out by naming its argument something
+        # else.
+        # pcall'd, and that is not defensive habit. This runs *after* the body has
+        # succeeded and outside the pcall that guards it, so anything raising in here
+        # aborts the script before RESULT is ever printed: a reporting path would turn a
+        # completed operation into a failure with no result at all. It has already
+        # happened once, when nearest_index refused a palette with nothing drawable
+        # during a shade that had written nothing. A measurement that cannot be taken is
+        # worth less than the call it describes.
+        "  if type(RESULT) == 'table' and _sprite ~= nil and\n"
+        "     _sprite.colorMode == ColorMode.INDEXED and\n"
+        "     type(ARG.ramp) == 'table' and #ARG.ramp > 0 then\n"
+        "    local _rok, _rstate = pcall(ramp_palette_state, _sprite, ARG.ramp)\n"
+        "    if _rok then RESULT.ramp_on_palette = _rstate end\n"
         "  end\n"
         f'  print("{result_prefix(nonce)}" .. json_encode(RESULT))\n'
         "else\n"

@@ -6,6 +6,80 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **The shading tools now say when an indexed palette cannot hold the ramp they were
+  given.** An indexed pixel is an offset into a palette, so a shading tool cannot write a
+  colour the palette does not hold: `rgba_to_px` sends it through `nearest_index` and it
+  lands on the nearest entry that can draw. That is what indexed mode means, and refusing
+  it would make these tools unusable on exactly the sprites that most want a fixed
+  palette, so this is a measurement and not a refusal.
+
+  It needed saying because two of its consequences were invisible. A shade between two
+  ramp steps that resolve to the same palette entry does nothing at all: measured on a
+  sprite drawn in step 1 of a five step ramp against a palette holding three of those
+  colours, `shift_along_ramp(steps=1)` reported 144 pixels written and left the picture
+  byte for byte identical. And `palette_conformance` does not catch it, because the
+  colour the pixel snapped to is still a colour on the declared ramp, so the one metric
+  that separates shading from filtering read 1.0 for a no-op.
+
+  Every tool that takes a `ramp` now returns `ramp_on_palette` on an indexed sprite: how
+  many steps were declared, how many distinct palette entries they resolved to, how many
+  were in the palette exactly, and the resolution of each step. Where steps merged, the
+  `warnings` name which ones and which colour they merged into. `assess_sprite(ramp=...)`
+  says it too, in its readings beside the conformance number it qualifies. Costs one
+  `nearest_index` call per ramp entry rather than per pixel, so it is free at any sprite
+  size, and it is measured through the sprite's own resolver so it cannot drift from
+  where the pixels actually go.
+
+  Attached by the Lua harness rather than by each of the nine tools, the way the pixel
+  counts and the linked-cel report already are, with the judgement itself pure in
+  `core.indexed.ramp_readings`. A meta-test pins every ramp-taking tool to the wrapper,
+  because a tool that quietly used plain `run_lua` would be a tool whose shading bands on
+  indexed art with nothing said. `smear_frame` is deliberately not covered: it resolves
+  its ramp in Python into a colour-to-colour lookup table and passes no ramp to Lua, so
+  the question for it is what that table's *targets* resolve to, which is a different
+  measurement.
+
+  Nothing is reported on RGB or grayscale sprites, where a pixel carries its own colour
+  and there is no palette to snap to, and nothing is reported when the palette holds the
+  ramp exactly, which is the normal case for a palette built with `generate_ramp` and
+  `set_palette`.
+
+  The indexed path through the shading layer was also completely untested: every test in
+  `test_shading.py`, `test_lighting.py` and `test_effects_light.py` built an RGB sprite.
+  It now has coverage, including the no-op above pinned as a test that would fail if the
+  reading were ever dropped on the theory that conformance would catch it.
+
+### Changed
+- **`set_color_mode` no longer risks turning a large conversion into a timeout.** The
+  tool counts every drawn pixel before and after a conversion to indexed, so it can
+  refuse one that would make art disappear, and nothing bounded that scan but the
+  invocation timeout. On the sprites this server is used on it is free; on a 4096x4096
+  sheet of several frames it is tens of millions of pixels counted twice, and the only
+  backstop was `ASEPRITE_MCP_TIMEOUT` turning a working conversion into a timeout with
+  nothing useful in it.
+
+  Past `MAX_VERIFY_PIXELS` (33,554,432, the canvas area times the frame count) the
+  conversion now runs and reports `verified: false` with a reason naming the measurement
+  and pointing at `diff_sprites`, instead of being refused. Refusing would have traded a
+  rare slow call for a permanent gap in a capability, which is worse than the problem.
+  Indexed targets now always carry `verified`, so the caller branches on a field rather
+  than on whether `drawn_pixels` happens to be present.
+
+  The count itself moved into the Lua prelude, where `diff_sprites` and `set_color_mode`
+  share one implementation instead of carrying a loop each. The shared version reads
+  alpha at a fixed byte stride out of `Image.bytes` rather than calling `getPixel` per
+  pixel, measured at 0.088us per pixel against 0.58us, so the scan is about 6.6 times
+  cheaper as well as bounded. Two implementations of one number were two chances to be
+  wrong about indexed transparency, which has already shipped here once.
+
+- **The pixel-loss refusal no longer guesses which palette was at fault.** It used to
+  pick one of two remedies based on `palette_source`, and the `from_art` branch said
+  "Unexpected with palette_source='from_art'" because no case reaching it was ever
+  found: quantizing from the art is what stops pixels being lost. A message that has
+  never run cannot be relied on to be right when it finally does, so both remedies are
+  now offered and neither route is blamed.
+
 ### Fixed
 - **Sorting a palette corrupted an indexed sprite that had linked cels.** `sort_palette`
   remaps every pixel through the same table it reorders the palette with, so the image
