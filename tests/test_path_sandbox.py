@@ -450,3 +450,53 @@ def test_create_parent_false_is_no_longer_a_no_op(ws):
     out = ensure_output_path("nested/deep/sheet.png", create_parent=False)
     assert not out.parent.exists()
     assert out == (ws / "nested" / "deep" / "sheet.png").resolve()
+
+
+# --------------------------------------------- the two spellings of one workspace (#99)
+# `resolve` canonicalises before it checks containment, which is what stops a junction
+# from reaching outside the workspace and also what makes every tool hand back a path
+# that need not look like the configured one. `health_check` reported the configured
+# value, so behind a relocated Documents folder the two disagreed on the drive letter and
+# read as a sandbox escape. `describe_workspace` takes both paths rather than reading
+# them, which is what lets the differing case be tested on a runner with no junction.
+def test_one_spelling_is_reported_as_one_field():
+    report = config.describe_workspace("/work/ws", "/work/ws")
+    assert report == {"workspace": "/work/ws"}
+
+
+def test_a_differing_resolution_reports_both_and_says_they_are_one_place():
+    report = config.describe_workspace(
+        r"C:\Users\x\Documents\ws", r"F:\Users\x\Documents\ws")
+
+    assert report["workspace"] == r"F:\Users\x\Documents\ws", "files land at the resolved one"
+    assert report["workspace_configured"] == r"C:\Users\x\Documents\ws"
+    note = report["workspace_note"]
+    assert r"C:\Users\x\Documents\ws" in note and r"F:\Users\x\Documents\ws" in note
+    assert "one directory" in note, "the note has to defuse the sandbox-escape reading"
+
+
+def test_the_resolved_path_is_the_one_called_workspace():
+    """Not a cosmetic choice. Every other tool returns resolved paths, so `workspace`
+    has to mean the same thing here or the report cannot be compared with them."""
+    report = config.describe_workspace("configured", "resolved")
+    assert report["workspace"] == "resolved"
+
+
+def test_a_path_object_is_described_as_its_string():
+    report = config.describe_workspace(Path("/a/b"), Path("/a/b"))
+    assert report == {"workspace": str(Path("/a/b"))}
+
+
+def test_the_comparison_does_not_depend_on_the_platform():
+    """`Path` equality is case-insensitive on Windows and case-sensitive elsewhere, so a
+    report built on it would differ by machine. A spelling that differs only in case is
+    still worth showing: it is the spelling the other tools will return."""
+    report = config.describe_workspace("/Work/WS", "/work/ws")
+    assert report["workspace_configured"] == "/Work/WS"
+
+
+def test_the_resolved_workspace_is_the_one_the_sandbox_uses(ws):
+    """One definition of where the workspace is, so the report and the containment check
+    cannot drift apart about it."""
+    assert config.resolved_workspace() == ws.resolve()
+    assert config.resolve("a.aseprite").parent == config.resolved_workspace()

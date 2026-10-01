@@ -26,8 +26,14 @@ SUPPORTED_TYPES = (
 )
 
 
-def _parse_data(raw) -> tuple[object | None, str]:
-    """Return (parsed_json_or_None, raw_string). Non-JSON data is kept only as the string."""
+def parse_user_data(raw) -> tuple[object | None, str]:
+    """Return (parsed_json_or_None, raw_string). Non-JSON data is kept only as the string.
+
+    Public because `list_slices` reads user-data back through it too. Slice user-data is
+    a plain string in Aseprite and whether it carries structure is a guess, so the guess
+    is made in exactly one place: a second copy that disagreed about what counts as JSON
+    would have the export and the readback describe the same slice differently.
+    """
     raw_str = raw if isinstance(raw, str) else ""
     if not raw_str.strip():
         return None, raw_str
@@ -57,7 +63,7 @@ def _resolve_type_id(name: str, data_obj) -> tuple[str, str | None]:
 
 def _slice_entry(raw: dict) -> dict:
     name = str(raw.get("name", ""))
-    data_obj, raw_data = _parse_data(raw.get("data"))
+    data_obj, raw_data = parse_user_data(raw.get("data"))
     slice_type, slice_id = _resolve_type_id(name, data_obj)
     center = raw.get("center")
     pivot = raw.get("pivot")

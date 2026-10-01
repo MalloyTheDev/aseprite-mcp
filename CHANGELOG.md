@@ -50,6 +50,53 @@ All notable changes to this project are documented here. The format is based on
   `"rgb"`: an RGB sprite here always has an alpha channel, so "rgba" is a guess about
   which of the three modes was meant, and `set_color_mode` already refused it.
 
+- **A slice's user-data could be written but not read back.** `add_slice` and `set_slice`
+  store `Slice.data`, and the whole point of sending it as `{"type": "hitbox", "id":
+  "body"}` is that an engine reads a slice's type and id from it. Nothing reported it:
+  `sprite_info` built each slice as `{name, bounds, center?, pivot?}` and dropped both
+  `data` and `color`, and `list_slices` returns those entries, so it showed the same thing
+  for a slice carrying structured data and a slice carrying nothing. The only way to see
+  what a slice held was to write an export file and parse it, which is also why confirming
+  the earlier slice-data fix was inconclusive the first time.
+
+  `sprite_info` now reports `color` and, when it is not empty, `data` exactly as Aseprite
+  stores it, so the string round-trips through `set_slice` unedited. `list_slices` adds
+  `data_parsed` when that string is valid JSON, which is the shape worth sending; a slice
+  with no user-data has neither field, so "set and forgot" and "never set" are
+  distinguishable at last. Whether a string is a document is guessed in exactly one place,
+  `core.slice_metadata.parse_user_data`, because an export and a readback describing the
+  same slice differently is the failure worth preventing.
+
+  That also removes a second slice reader. `export_slice_metadata` had a private Lua copy
+  which was the only thing reporting a slice's colour and user-data, and it launched
+  Aseprite a second time to use it, on top of the launch it already made for the sprite
+  summary. Both now come from the shared serializer in one launch. Two copies of one
+  reader drifting apart is exactly the bug fixed in the indexed-transparency decode a
+  release ago.
+- **`health_check` reported a workspace no other tool would ever return.** Paths are
+  canonicalised before the containment check, which is what stops a junction from reaching
+  outside the workspace, and it means every tool hands back a resolved path. `health_check`
+  reported the configured value instead. On a machine where `Documents` is relocated behind
+  a junction, which is a common way to move it off the system drive, the two differed by
+  drive letter: `health_check` said `C:\Users\x\Documents\aseprite-mcp` while
+  `create_sprite` said `F:\Users\x\Documents\aseprite-mcp`. They are one directory reached
+  two ways, but two paths on different drives is also exactly what a sandbox escape looks
+  like, and it cost real investigation time to rule that out, including checking whether a
+  file had been written outside the workspace.
+
+  `workspace` is now the resolved path, because that is where files land and what the other
+  tools report, and the configured value appears beside it as `workspace_configured` with a
+  note saying the two are the same place, only when they differ. The canonicalisation is
+  stated in the tool's own description too, since that is where a caller looks first.
+  `config.resolved_workspace` is now the single definition of where the workspace is, so
+  the report and the containment check cannot drift apart about it.
+
+  Fixed in passing: `health_check` read the workspace while building its result, so a
+  workspace that could not be created raised out of the tool instead of being reported. The
+  one tool whose job is to say what is wrong said nothing at all, and took every other check
+  down with it. An unusable workspace is now a `workspace_error` field with `ok` false, and
+  the rest of the self-test is still reported.
+
 - **Transparent pixels counted as drawn on indexed sprites.** The Lua prelude resolves an
   indexed pixel through `spr.transparentColor` before the palette, and `tools/inspect.py`
   had two local copies of that decode, neither of which did. On a sprite whose transparent

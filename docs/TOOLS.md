@@ -2331,7 +2331,16 @@ Args:
 
 ### `list_slices`
 
-List all slices in the sprite with their bounds, center, and pivot.
+List every slice with its bounds, center, pivot, colour and user-data.
+
+User-data comes back two ways, because it is one string that is sometimes a document.
+`data` is the string exactly as Aseprite stores it, so it round-trips through
+`set_slice` unchanged. `data_parsed` is added only when that string is valid JSON,
+which is the shape worth sending: `{"type": "hitbox", "id": "body"}` is what
+`export_slice_metadata` reads a slice's type and id from, and what
+`build_asset_from_spec` writes. A slice with no user-data has neither field, so "set
+and forgot" and "never set" are now distinguishable, which they were not while this
+tool reported the same thing for both.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -3126,9 +3135,15 @@ window yourself.
 
 Run a self-test of the server and its Aseprite integration.
 
-Returns whether Aseprite was found, its version, the resolved workspace, the
-number of registered tools, and whether a real create-sprite + export-PNG
-round-trip succeeds. `ok` is True only if the full round-trip works.
+Returns whether Aseprite was found, its version, the workspace, the number of
+registered tools, and whether a real create-sprite plus export-PNG round-trip
+succeeds. `ok` is True only if the round-trip works and the workspace is usable.
+
+`workspace` is the **resolved** path, which is where files land and what every other
+tool reports, because paths are canonicalised before the containment check that keeps
+them inside the workspace. When the configured value spells the same directory
+differently, which is what a junction or a symlink does, it is reported alongside as
+`workspace_configured` with a note; the two are one place, not two.
 
 _No parameters._
 

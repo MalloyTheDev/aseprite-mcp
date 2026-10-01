@@ -15,10 +15,9 @@ from ..core.engines import godot
 from ..core.errors import ExportError
 from ..core.manifest import export_entry, file_entry, sprite_summary, workflow_manifest
 from ..core.paths import ensure_output_path
-from ..core.runner import run_lua
 from ..core.slice_metadata import build_slice_metadata
 from . import export, inspect
-from .common import lua_path, resolve_path
+from .common import resolve_path
 
 
 @mcp.tool()
@@ -91,26 +90,6 @@ def export_godot_spriteframes(
     )
 
 
-_SLICE_LUA = """
-local spr = open_sprite(ARG.src)
-local slices = {}
-for i, sl in ipairs(spr.slices) do
-  local s = {
-    name = sl.name,
-    bounds = { x = sl.bounds.x, y = sl.bounds.y, width = sl.bounds.width, height = sl.bounds.height },
-    color = color_hex(sl.color),
-    data = sl.data or "",
-  }
-  if sl.center ~= nil then
-    s.center = { x = sl.center.x, y = sl.center.y, width = sl.center.width, height = sl.center.height }
-  end
-  if sl.pivot ~= nil then s.pivot = { x = sl.pivot.x, y = sl.pivot.y } end
-  slices[i] = s
-end
-RESULT = { width = spr.width, height = spr.height, slices = slices }
-"""
-
-
 @mcp.tool()
 def export_slice_metadata(
     filename: str,
@@ -133,20 +112,27 @@ def export_slice_metadata(
 
     Returns a ``workflow_manifest.v1`` manifest (kind ``engine_metadata``).
     """
-    src = resolve_path(filename)
+    # Validated before an output path is claimed, and the result deliberately unused:
+    # ensure_output_path below can create the output's parent directory, and a source
+    # filename that is going to be refused must not leave one behind. get_sprite_info
+    # resolves it again, which is cheap and is not a reason to let the order slip.
+    resolve_path(filename)
     out_rel = output or str(Path(filename).with_name(f"{Path(filename).stem}_slices.json"))
     out_path = ensure_output_path(out_rel, overwrite=overwrite, error_type=ExportError)
 
-    raw = run_lua(_SLICE_LUA, {"src": lua_path(src)})
+    # One read, through the shared serializer. This used to launch Aseprite twice, once
+    # for a slice reader of its own and once for the sprite summary below, and the
+    # private reader was the only thing that reported a slice's colour and user-data.
+    # Now that sprite_info reports both, the second copy has nothing left to say.
+    info = inspect.get_sprite_info(filename)
     metadata = build_slice_metadata(
         sprite=Path(filename).name,
-        width=raw["width"],
-        height=raw["height"],
-        slices=raw.get("slices") or [],
+        width=info["width"],
+        height=info["height"],
+        slices=info.get("slices") or [],
     )
     out_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8", newline="\n")
 
-    info = inspect.get_sprite_info(filename)
     n = len(metadata["slices"])
     warnings = ["No slices found in the sprite."] if n == 0 else []
     return workflow_manifest(

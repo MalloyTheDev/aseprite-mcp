@@ -26,6 +26,7 @@ from pydantic import TypeAdapter, ValidationError
 
 import aseprite_mcp.server  # noqa: F401  -- importing registers the real tools
 from aseprite_mcp.app import mcp
+from aseprite_mcp.core.slice_metadata import parse_user_data
 from aseprite_mcp.tools import slices
 from aseprite_mcp.tools.slices import _coerce_slice_data
 
@@ -100,3 +101,36 @@ def test_data_is_advertised_as_a_plain_string():
         schema = tools[name].input_schema["properties"]["data"]
         assert schema == {"type": "string"}, f"{name}.data is advertised as {schema}"
         assert "data" not in tools[name].input_schema.get("required", [])
+
+
+# ------------------------------------------- reading user-data back again (#106)
+# Writing structured data worked and reading it back did not: `sprite_info` dropped
+# `data` and `color`, `list_slices` inherited the gap, and the only way to see what a
+# slice carried was to write an export file and parse it. The guess about whether a
+# string is a document is made in exactly one place, because the export and the readback
+# describing the same slice differently is the failure that matters.
+@pytest.mark.parametrize("raw,expected", [
+    ('{"type": "hitbox", "id": "body"}', {"type": "hitbox", "id": "body"}),
+    ('["a", "b"]', ["a", "b"]),
+    ('"just a json string"', "just a json string"),
+    ("42", 42),
+])
+def test_valid_json_user_data_is_parsed(raw, expected):
+    parsed, kept = parse_user_data(raw)
+    assert parsed == expected
+    assert kept == raw, "the exact string is kept so it round-trips through set_slice"
+
+
+@pytest.mark.parametrize("raw", ["hitbox", "{not json", "", "   ", None, 5])
+def test_anything_else_parses_to_nothing_and_is_never_an_error(raw):
+    """User-data is a free string in Aseprite. A slice labelled `hitbox` by convention
+    rather than by JSON is ordinary, so failing to parse is not a fault."""
+    parsed, _ = parse_user_data(raw)
+    assert parsed is None
+
+
+def test_a_non_string_is_kept_as_an_empty_string_rather_than_as_itself():
+    """Aseprite stores a string or nothing, so a non-string can only come from a caller
+    confusing the raw field with the parsed one. Keeping it would propagate the mistake."""
+    assert parse_user_data(None) == (None, "")
+    assert parse_user_data(5) == (None, "")
