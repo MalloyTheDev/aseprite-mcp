@@ -1,4 +1,4 @@
-"""Integration tests for export_slice_metadata — require Aseprite (--run-aseprite)."""
+"""Integration tests for export_slice_metadata: require Aseprite (--run-aseprite)."""
 
 import asyncio
 import json

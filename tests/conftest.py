@@ -1,7 +1,7 @@
 """Pytest configuration and the --run-aseprite gate.
 
 Test tiers:
-  * Pure-Python unit tests (test_unit.py) ALWAYS run — no Aseprite needed. This is
+  * Pure-Python unit tests (test_unit.py) ALWAYS run: no Aseprite needed. This is
     what CI exercises for real on every push.
   * Aseprite integration & golden-output tests run ONLY when `--run-aseprite` is
     passed (and Aseprite is installed). They are the local/optional release gate:
@@ -30,7 +30,7 @@ PURE_PYTHON_TESTS = (
     "test_quality", "test_slice_data", "test_tool_docs", "test_loopcheck",
     "test_motion", "test_timing", "test_ramps",
     "test_frameops", "test_spritediff", "test_indexed", "test_lighting",
-    "test_inbetween",
+    "test_inbetween", "test_style",
 )
 # Deliberately absent: test_walk_template_batch, which compares a batched scaffold against
 # the per-frame one it replaced and so needs the real editor. It belongs to the

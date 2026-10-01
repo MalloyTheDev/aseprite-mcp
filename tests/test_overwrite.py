@@ -1,4 +1,4 @@
-"""Integration tests for the no-clobber overwrite policy — require Aseprite.
+"""Integration tests for the no-clobber overwrite policy: require Aseprite.
 
 Run only under `pytest --run-aseprite`. Verify that output-writing tools refuse to
 replace an existing file by default, that `overwrite=True` restores the old

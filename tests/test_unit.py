@@ -1,4 +1,4 @@
-"""Pure-Python unit tests — no Aseprite required (always run, incl. on CI).
+"""Pure-Python unit tests: no Aseprite required (always run, incl. on CI).
 
 Cover colour parsing, Python->Lua serialization, and the workspace path sandbox.
 """

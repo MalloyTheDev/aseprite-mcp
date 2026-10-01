@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **Removed every em dash from tracked content, and added the test that keeps it that
+  way.** The project does not use U+2014, new work had respected that for a long time,
+  and the tree still carried 121 of them across 43 files. That is not a cosmetic
+  inconsistency: it is what made the rule unenforceable. A `git grep` over a dirty
+  baseline reports the same hits on every run, so there was no way to tell a new
+  violation from an old one, and the convention could only ever be upheld by whoever
+  happened to remember it.
+
+  Each occurrence was replaced with the punctuation that fits rather than with one
+  substitute, because the character was doing three different jobs: separating a label
+  from its description (now a colon, which is most of the CHANGELOG's feature rows),
+  joining two independent clauses (a semicolon), and marking an appositive or an aside
+  (a comma). Six sites needed rewording instead, where no single mark read properly.
+  Released CHANGELOG sections are included: the punctuation changes, the record does not.
+
+  `tests/test_style.py` now fails on any tracked file containing the character, naming
+  every offender as `file:line` with its text, and it builds the character from its code
+  point so the test is not itself the thing it forbids. `docs/TOOLS.md` is generated from
+  docstrings, so the fix there was upstream in the docstrings; the test asserts that file
+  is still tracked, because if it stopped being tracked a regression could land through
+  the generator with nothing failing.
+
 ### Added
 - **The shading tools now say when an indexed palette cannot hold the ramp they were
   given.** An indexed pixel is an offset into a palette, so a shading tool cannot write a
@@ -664,11 +687,11 @@ are now serialized rather than racing.
 - `python -m aseprite_mcp` works, which several clients document in preference to the
   console script, and which avoids holding `Scripts/aseprite-mcp.exe` open (that lock
   blocks `uv sync` on Windows while the server is running).
-- **Declarative asset spec** (`aseprite_mcp.asset_spec.v1`) — describe an asset in one
+- **Declarative asset spec** (`aseprite_mcp.asset_spec.v1`): describe an asset in one
   document instead of orchestrating dozens of calls. Three tools: `validate_asset_spec`
-  (is the spec valid?), `plan_asset_spec` (pure dry-run — the ordered steps a build would
+  (is the spec valid?), `plan_asset_spec` (pure dry-run: the ordered steps a build would
   run, no Aseprite launched), and `build_asset_from_spec` (executes the plan via existing
-  workflow/batch/export tools). Build is **structure only** — canvas, layers, frames, tags,
+  workflow/batch/export tools). Build is **structure only**: canvas, layers, frames, tags,
   slices, palette, and exports; it never draws pixels and hands the art back to the agent.
   Kinds: character, enemy, item_sheet, icon_set, tileset, walk_8dir. Pure schema/planner in
   `core/asset_spec.py`. (113 tools.)
@@ -800,7 +823,7 @@ are now serialized rather than racing.
   into the glyph-box pre-check rejected a 7x7 box at scale 64 (200,704 > 200,000) even
   for a line of spaces that plots nothing. The bitmap allocation and the plotted-pixel
   budget are now separate limits.
-- **Supply-chain hardening of CI** — GitHub Actions are now pinned to commit SHAs
+- **Supply-chain hardening of CI**: GitHub Actions are now pinned to commit SHAs
   (`actions/checkout`, `astral-sh/setup-uv`) instead of mutable tags, and a
   `.github/dependabot.yml` keeps actions and Python deps (uv ecosystem) current via
   reviewed PRs (with version annotations). Future bumps are Dependabot PRs, not a manual
@@ -887,13 +910,13 @@ cosmetic gap.*
 First engine-ready export layer: take a sprite all the way to game-engine resources.
 
 ### Added
-- **Godot 4 export preset** — `export_godot_spriteframes` exports a sprite as a Godot 4
+- **Godot 4 export preset**: `export_godot_spriteframes` exports a sprite as a Godot 4
   `SpriteFrames` resource (.tres) plus a packed sheet (+ JSON rects): one Godot animation
   per Aseprite tag (or a single `default` animation when untagged), each frame an
   `AtlasTexture` region, with per-frame timing derived from Aseprite frame durations. The
-  pure builder lives in `core/engines/godot.py`. v1 is SpriteFrames only — no
+  pure builder lives in `core/engines/godot.py`. v1 is SpriteFrames only: no
   pivot/origin/hitbox/9-slice; tag direction isn't mapped (Godot animations only loop).
-- **Slice metadata export** — `export_slice_metadata` writes engine-agnostic
+- **Slice metadata export**: `export_slice_metadata` writes engine-agnostic
   `<sprite>_slices.json` (schema `aseprite_mcp.slice_metadata.v1`): every slice as
   `{name, type, id, bounds, pivot, nine_slice, color, data, raw_data}`. Type comes from a
   slice's JSON `data` field (`{"type":...}`) or the `<type>:<id>` name convention (hitbox,
@@ -904,7 +927,7 @@ First engine-ready export layer: take a sprite all the way to game-engine resour
   (no break-out of Lua string literals), colour parsing (valid normalize, arbitrary text
   never crashes, channels stay 0–255), and the path sandbox (relative paths never escape;
   absolutes rejected). `hypothesis` added as a dev-only dependency.
-- `scripts/release_gate.py` — one command runs the whole local gate (lint → pure tests →
+- `scripts/release_gate.py`: one command runs the whole local gate (lint → pure tests →
   integration → docs-sync → build), fail-fast, with `--skip-aseprite` to mirror CI.
 
 ### Security
@@ -924,13 +947,13 @@ First engine-ready export layer: take a sprite all the way to game-engine resour
 Safety hardening patch release. The default output behaviour is now no-clobber.
 
 ### Security
-- **No-clobber output policy** — output-writing tools (`create_sprite`, `save_sprite_as`,
+- **No-clobber output policy**: output-writing tools (`create_sprite`, `save_sprite_as`,
   `export_png`, `export_gif`, `export_spritesheet`, `export_game_asset_bundle`) now refuse
   to overwrite an existing file by default. Pass `overwrite=True` to replace one
   intentionally. Multi-file exports (sprite sheet + JSON, asset bundle) validate **every**
   planned output up front, so they fail before writing anything if any target already exists.
   Sprite saves raise `WorkspaceError` on conflict; exports raise `ExportError`.
-- **CI least privilege** — the GitHub Actions workflow now runs with
+- **CI least privilege**: the GitHub Actions workflow now runs with
   `permissions: contents: read`.
 
 ### Added
@@ -941,7 +964,7 @@ Safety hardening patch release. The default output behaviour is now no-clobber.
 ## [0.6.0] - 2026-06-12
 
 ### Added
-- **Atomic batch operations** — `apply_operations(filename, operations, dry_run)` applies a
+- **Atomic batch operations**: `apply_operations(filename, operations, dry_run)` applies a
   curated set of 21 mutating ops (layers, frames, tags, drawing, slices, `replace_color`) to
   one sprite in a **single Aseprite process**, inside one `app.transaction`: open once → run
   all ops → save only if every op succeeds. `dry_run=True` validates the op list with **zero**
@@ -950,30 +973,30 @@ Safety hardening patch release. The default output behaviour is now no-clobber.
 
 ### Changed
 - **Internal hardening (since v0.5.0):**
-  - Typed error hierarchy — `AsepriteMCPError` base with `ConfigError`/`AsepriteNotFoundError`/
+  - Typed error hierarchy: `AsepriteMCPError` base with `ConfigError`/`AsepriteNotFoundError`/
     `WorkspaceError`/`AsepriteTimeoutError`/`LuaToolError`/`AsepriteCLIError`/`ExportError`/
     `ValidationFailed`. `AsepriteError` kept as a backwards-compatible alias.
   - Typed value models (`Point`/`Size`/`Rect`/`Pixel`/`ColorSpec`/`LayerRef`/`FrameRef`/
     `FrameRange`/`SpritePath`) at the validation boundary; `parse_color` delegates to `ColorSpec`.
-  - `core/` vs MCP-tool split — reusable logic now lives in `aseprite_mcp.core` (importable
+  - `core/` vs MCP-tool split: reusable logic now lives in `aseprite_mcp.core` (importable
     without the FastMCP app); backwards-compatible top-level import shims are preserved.
 
 ## [0.5.0] - 2026-06-12
 
 ### Added
-- **Workflow pack 2** — three more high-level generators, each returning a
+- **Workflow pack 2**: three more high-level generators, each returning a
   `workflow_manifest.v1` that suggests a follow-up `validate_sprite_for_game_export` call:
   `create_icon_set` and `create_rpg_item_sheet` (grid sheets with a placeholder + a named
   slice per cell) and `make_8_direction_walk_template` (frames + one animation tag per
   direction). `sprite_summary` now reports `slices`.
-- **Top-of-README showcase** — a three-tier gallery (Easy / Medium / Hard) demonstrating
+- **Top-of-README showcase**: a three-tier gallery (Easy / Medium / Hard) demonstrating
   the create → animate → validate → export pipeline, with media generated entirely via the
   MCP tools (`docs/assets/showcase/`).
 
 ## [0.4.0] - 2026-06-12
 
 ### Added
-- **`validate_sprite_for_game_export`** — a game-readiness validation workflow. Checks
+- **`validate_sprite_for_game_export`**: a game-readiness validation workflow. Checks
   optional criteria (dimensions / tile multiples, colour mode, frame counts, required
   animation tags, transparent-background expectations, palette budget, expected export
   files, sprite-sheet metadata) and returns a `workflow_manifest.v1` (kind `validation`)
@@ -986,7 +1009,7 @@ Safety hardening patch release. The default output behaviour is now no-clobber.
 - **High-level workflow tools** that scaffold whole assets in one call and return a
   structured manifest (files, paths, frames, tags, dimensions, suggested next actions):
   `create_character_sprite`, `make_4_frame_idle_animation`, `create_tileset_project`,
-  and `export_game_asset_bundle`. They compose the existing low-level tools — deterministic
+  and `export_game_asset_bundle`. They compose the existing low-level tools: deterministic
   scaffolding, no AI/model generation.
 - A `--run-aseprite` pytest flag gating the integration & golden suites; pure-Python unit
   tests always run. Golden-output tests assert exact dimensions, pixel colours, frame/layer
@@ -996,7 +1019,7 @@ Safety hardening patch release. The default output behaviour is now no-clobber.
 ## [0.2.0] - 2026-06-12
 
 ### Added
-- `health_check` self-test tool — reports whether Aseprite is found, its version, the
+- `health_check` self-test tool: reports whether Aseprite is found, its version, the
   workspace, the registered tool count, and a real create-sprite + export-PNG round-trip.
 - Pure-Python unit tests (`parse_color`, `to_lua`, path sandbox) that run in CI **without**
   an Aseprite install, giving real coverage even where the integration suite skips.
@@ -1016,35 +1039,35 @@ and the Aseprite CLI.
 
 ### Added
 
-- **Core engine** — Python→Lua serialization, a shared Lua prelude (JSON encoder,
+- **Core engine**: Python→Lua serialization, a shared Lua prelude (JSON encoder,
   colour/pixel helpers, deterministic drawing primitives, `sprite_info`), and a runner
   that parses sentinel JSON / errors from `aseprite -b`.
-- **Sprite lifecycle** — create, save-as, colour-mode conversion, resize canvas, crop,
+- **Sprite lifecycle**: create, save-as, colour-mode conversion, resize canvas, crop,
   scale, flatten, trim-to-content, background ↔ layer conversion.
-- **Inspection** — structured `get_sprite_info`, `render_preview` (returns a PNG image),
+- **Inspection**: structured `get_sprite_info`, `render_preview` (returns a PNG image),
   `get_pixels`, `list_sprites`.
-- **Layers** — add, group, remove, rename, properties, reorder, duplicate, merge-down.
-- **Frames & tags** — add/duplicate/remove frames, per-frame & uniform durations,
+- **Layers**: add, group, remove, rename, properties, reorder, duplicate, merge-down.
+- **Frames & tags**: add/duplicate/remove frames, per-frame & uniform durations,
   animation tags (forward/reverse/pingpong).
-- **Cels** — inspect, reposition, opacity, copy between frames, delete.
-- **Drawing** — pixels, lines (with pixel-perfect & anti-aliased modes), polylines,
+- **Cels**: inspect, reposition, opacity, copy between frames, delete.
+- **Drawing**: pixels, lines (with pixel-perfect & anti-aliased modes), polylines,
   Bézier curves, rectangles, ellipses (with anti-aliased fill), flood fill, fill/clear.
-- **Brushes & symmetry** — custom ASCII-mask brushes, pattern tiling, layer mirroring,
+- **Brushes & symmetry**: custom ASCII-mask brushes, pattern tiling, layer mirroring,
   symmetric pixel plotting.
-- **Effects** — linear/radial gradients (with dithering), checkerboard, outline,
+- **Effects**: linear/radial gradients (with dithering), checkerboard, outline,
   drop shadow, colour replace, invert, brightness/contrast, hue/saturation, desaturate.
-- **Text** — render text with a built-in bitmap font or any TrueType font.
-- **Tilemaps** — create tilemap layers, define/paint tiles, place/read the tile grid.
-- **Palette** — get/set, edit/add/resize entries, load files, transparency, extract
+- **Text**: render text with a built-in bitmap font or any TrueType font.
+- **Tilemaps**: create tilemap layers, define/paint tiles, place/read the tile grid.
+- **Palette**: get/set, edit/add/resize entries, load files, transparency, extract
   unique colours, sort (with indexed remap), generate hue-shifted ramps.
-- **Slices** — named regions with optional 9-patch center, pivot, colour, and data.
-- **Image stamping** — composite files or inline base64 images onto a layer.
-- **Transforms** — flip and rotate the whole sprite.
-- **Export** — PNG, animated GIF, per-tag GIF, sprite sheets (+ JSON metadata, layer/tag
+- **Slices**: named regions with optional 9-patch center, pivot, colour, and data.
+- **Image stamping**: composite files or inline base64 images onto a layer.
+- **Transforms**: flip and rotate the whole sprite.
+- **Export**: PNG, animated GIF, per-tag GIF, sprite sheets (+ JSON metadata, layer/tag
   filters & splits), per-frame, per-layer, per-tag files, and onion-skin composites.
-- **Reference / rotoscope** — dimmed locked reference layers and per-frame reference
+- **Reference / rotoscope**: dimmed locked reference layers and per-frame reference
   sequences.
-- **GUI companion mode** — `open_in_editor` opens a sprite in the live Aseprite window
+- **GUI companion mode**: `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
 [0.9.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.9.0

@@ -23,7 +23,7 @@ def test_dry_run_does_not_touch_file_and_returns_plan():
 
 
 def test_batch_applies_in_one_process_with_carried_state():
-    # add a layer, then draw on that same new layer — proves ops see earlier ops.
+    # add a layer, then draw on that same new layer, which proves ops see earlier ops.
     sprite.create_sprite("b/chain.aseprite", 16, 16, "rgb")
     m = batch.apply_operations("b/chain.aseprite", [
         {"op": "add_layer", "args": {"name": "fg"}},

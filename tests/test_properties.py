@@ -3,12 +3,12 @@
 These fuzz the three places where untrusted input crosses into generated Lua, into
 colour parsing, and into the path sandbox:
 
-  * ``to_lua`` — generated strings must never break out of their quoted Lua literal
+  * ``to_lua``: generated strings must never break out of their quoted Lua literal
     (no injection), and arbitrary nested values must serialize to a structurally
     sound literal (balanced tables, self-contained strings).
-  * ``ColorSpec.parse`` / ``parse_color`` — valid colours normalize; arbitrary text
+  * ``ColorSpec.parse`` / ``parse_color``: valid colours normalize; arbitrary text
     never raises anything but ``ValueError``; channels stay in 0–255.
-  * ``config.resolve`` / ``ensure_output_path`` — a relative path either resolves
+  * ``config.resolve`` / ``ensure_output_path``: a relative path either resolves
     inside the workspace or is rejected; it never escapes. Absolute paths are rejected.
 
 Pure-Python (no Aseprite); always run. Profiles are kept tight (max_examples=100,
@@ -203,7 +203,7 @@ def test_resolve_relative_never_escapes(sandbox, rel):
     try:
         out = config.resolve(rel)
     except (WorkspaceError, OSError):
-        return  # rejected (escape) or unwritable name — both acceptable
+        return  # rejected (escape) or unwritable name, both acceptable
     ws = config.workspace().resolve()
     assert out.is_relative_to(ws)   # resolved paths are always inside the workspace
 

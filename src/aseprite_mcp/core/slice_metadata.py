@@ -1,11 +1,11 @@
-"""Generic slice-metadata builder — ``aseprite_mcp.slice_metadata.v1``.
+"""Generic slice-metadata builder: ``aseprite_mcp.slice_metadata.v1``.
 
 Engine-agnostic: turns raw Aseprite slice records into a clean JSON-able structure that
 Godot, Unity, or a custom engine can consume. Each slice gets a semantic ``type``/``id``:
 
   1. if the slice's user-data is JSON with a string ``type``, that wins (and its ``id``);
   2. else the name convention ``<type>:<id>`` (the part before ``:`` is the type, after is
-     the id) — unrecognized types fall back to ``"custom"`` (never an error);
+     the id). Unrecognized types fall back to ``"custom"`` (never an error);
   3. ``nine_slice`` (from Aseprite's 9-patch center rect) and ``pivot`` are emitted whenever
      the slice has them, independent of the type.
 

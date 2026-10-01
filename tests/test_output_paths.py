@@ -1,4 +1,4 @@
-"""Pure-Python tests for the no-clobber output-path policy — no Aseprite (always run).
+"""Pure-Python tests for the no-clobber output-path policy: no Aseprite (always run).
 
 Covers `core.paths.ensure_output_path`: existing targets are refused by default,
 `overwrite=True` allows replacement, parent directories are created, and the

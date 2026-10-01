@@ -1,4 +1,4 @@
-"""Slices — named rectangular regions, with optional 9-patch center and pivot.
+"""Slices: named rectangular regions, with optional 9-patch center and pivot.
 
 Slices are exported in sprite-sheet JSON data and are handy for UI atlases,
 9-patch widgets, and marking sub-regions of a sprite.
