@@ -48,6 +48,7 @@ def test_a_recovered_ramp_can_be_shaded_with(request):
     assert metrics["palette_conformance"] == 1.0
 
 
+@pytest.mark.pure
 def test_the_ends_are_the_colours_that_were_asked_for():
     built = palette.ramp_between(SHADOW, LIGHT, steps=6)
     assert built["colors"][0] == SHADOW
@@ -103,16 +104,19 @@ def test_an_empty_frame_says_nothing_is_drawn(request):
 
 
 # --------------------------------------------------- refused before Aseprite is launched
+@pytest.mark.pure
 def test_a_single_step_ramp_is_refused():
     with pytest.raises(ValidationFailed, match="minimum is 2"):
         palette.ramp_between(SHADOW, LIGHT, steps=1)
 
 
+@pytest.mark.pure
 def test_an_unknown_easing_lists_the_ones_that_exist():
     with pytest.raises(ValidationFailed, match="perceptual"):
         palette.ramp_between(SHADOW, LIGHT, easing="smooth")
 
 
+@pytest.mark.pure
 def test_applying_without_a_file_is_refused():
     with pytest.raises(ValidationFailed, match="filename is required"):
         palette.ramp_between(SHADOW, LIGHT, apply="replace")

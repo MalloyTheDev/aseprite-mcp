@@ -146,11 +146,13 @@ def test_antialiasing_softens_the_edge_and_stays_in_the_box(request):
 
 
 # ----------------------------------------------------------------------------- refusals
+@pytest.mark.pure
 def test_a_zero_sized_box_is_refused():
     with pytest.raises(ValidationFailed, match="at least 1"):
         drawing.draw_ellipse_in_box("unused.aseprite", 0, 0, 0, 5, "#ffffff")
 
 
+@pytest.mark.pure
 def test_a_negative_box_is_refused():
     with pytest.raises(ValidationFailed, match="at least 1"):
         drawing.draw_ellipse_in_box("unused.aseprite", 0, 0, 5, -3, "#ffffff")

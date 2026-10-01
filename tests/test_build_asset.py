@@ -58,6 +58,7 @@ def test_build_icon_set_makes_named_slices():
     assert {s["name"] for s in info["slices"]} == {f"icon_{i}" for i in range(4)}
 
 
+@pytest.mark.pure
 def test_build_rejects_invalid_spec_without_launching():
     with pytest.raises(ValidationFailed, match="Invalid asset spec"):
         asset_spec.build_asset_from_spec({"name": "w/bad", "kind": "character"})  # no canvas
@@ -87,6 +88,7 @@ def test_build_targets_one_file_whatever_the_name_carries(name, expected):
     assert {t["name"] for t in m["sprite"]["tags"]} == {"idle"}
 
 
+@pytest.mark.pure
 def test_build_refuses_an_over_cap_spec_before_creating_the_sprite():
     """Pre-flight: the batch cap is checked against the plan, not discovered mid-build."""
     spec = {"name": "w/over_cap_build", "kind": "character",

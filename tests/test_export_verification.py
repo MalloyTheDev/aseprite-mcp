@@ -121,12 +121,14 @@ def test_every_export_reports_the_size_of_the_file_it_actually_wrote(one_frame):
         assert got["bytes"] == Path(got["output"]).stat().st_size > 0
 
 
+@pytest.mark.pure
 def test_an_export_that_wrote_nothing_is_not_a_success(tmp_path):
     """Aseprite exits 0 for work it skipped, so a clean exit is not proof of an export."""
     with pytest.raises(ExportError, match="wrote nothing"):
         export._verify_written(tmp_path / "never_created.png", "export_png")
 
 
+@pytest.mark.pure
 def test_an_export_that_wrote_an_empty_file_is_not_a_success(tmp_path):
     empty = tmp_path / "empty.png"
     empty.touch()

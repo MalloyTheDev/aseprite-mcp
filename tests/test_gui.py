@@ -16,6 +16,7 @@ def test_gui_available():
     assert out["executable"]
 
 
+@pytest.mark.pure
 def test_open_in_editor_missing_file_errors():
     with pytest.raises(AsepriteError, match="No such sprite"):
         gui.open_in_editor("gui/does_not_exist.aseprite")

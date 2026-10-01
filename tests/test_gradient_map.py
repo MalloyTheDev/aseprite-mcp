@@ -134,21 +134,25 @@ def test_a_region_leaves_the_rest_of_the_sprite_alone(request):
 
 
 # --------------------------------------------------- refused before Aseprite is launched
+@pytest.mark.pure
 def test_a_one_colour_ramp_is_refused():
     with pytest.raises(ValidationFailed, match="at least 2"):
         shading.gradient_map("unused.aseprite", ["#ffffff"])
 
 
+@pytest.mark.pure
 def test_zero_contrast_is_refused_and_says_what_it_would_be():
     with pytest.raises(ValidationFailed, match="fill_layer"):
         shading.gradient_map("unused.aseprite", RAMP, contrast=0.0)
 
 
+@pytest.mark.pure
 def test_a_bias_outside_the_range_is_refused():
     with pytest.raises(ValidationFailed, match=r"between -1\.0 and 1\.0"):
         shading.gradient_map("unused.aseprite", RAMP, bias=2.0)
 
 
+@pytest.mark.pure
 def test_an_unknown_dither_lists_the_ones_that_exist():
     with pytest.raises(ValidationFailed, match="bayer4"):
         shading.gradient_map("unused.aseprite", RAMP, dither="noise")

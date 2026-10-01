@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from aseprite_mcp.core import config
 from aseprite_mcp.core.errors import WorkspaceError
 from aseprite_mcp.tools import health
@@ -17,6 +19,7 @@ def test_health_check_round_trip():
     assert out["aseprite_version"]
 
 
+@pytest.mark.pure
 def test_the_workspace_reported_is_the_resolved_one(tmp_path, monkeypatch):
     """#99: this tool reported the configured value while every other tool returned the
     resolved one. Behind a relocated Documents folder the two differ by drive letter,
