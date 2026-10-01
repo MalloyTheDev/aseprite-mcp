@@ -158,6 +158,53 @@ def workspace() -> Path:
     return base
 
 
+def resolved_workspace() -> Path:
+    """The workspace with links resolved: the directory files actually land in.
+
+    `resolve` canonicalises before it checks containment, which is what makes the
+    junction-escape protection work. One definition of it lives here so the report and
+    the sandbox cannot drift apart about where the workspace is.
+    """
+    return workspace().resolve()
+
+
+def describe_workspace(configured: Path | str, resolved: Path | str) -> dict:
+    """What a report should say about the workspace, given both spellings of it.
+
+    Canonicalising before the containment check is correct, and it also means every tool
+    returns a path that can look nothing like the configured one. Behind a junction, a
+    workspace configured as `C:\\Users\\x\\Documents\\w` hands back
+    `F:\\Users\\x\\Documents\\w`. Both name the same directory, but two paths on
+    different drives is also exactly what a sandbox escape looks like, and a caller
+    comparing the two strings has no way to tell which it is being shown. It cost real
+    investigation time once, including checking whether a file had been written outside
+    the workspace.
+
+    So the resolved path is reported as *the* workspace, because it is where files land,
+    and the configured value appears beside it only when they differ, with a line saying
+    they are the same place.
+
+    Pure, and given both paths rather than reading them, so the differing case is
+    testable on a runner with no junction to build one with. The comparison is on the
+    strings rather than on `Path` equality because `Path` compares case-insensitively on
+    Windows and case-sensitively elsewhere, and a report should not depend on which
+    machine is printing it: a spelling that differs only in case is still worth showing,
+    since it is the spelling every other tool will hand back.
+    """
+    resolved_s, configured_s = str(resolved), str(configured)
+    out = {"workspace": resolved_s}
+    if resolved_s != configured_s:
+        out["workspace_configured"] = configured_s
+        out["workspace_note"] = (
+            f"The workspace is configured as '{configured_s}' and resolves to "
+            f"'{resolved_s}'. That is one directory reached two ways, through a link or "
+            "a junction, not two directories: paths are canonicalised before the "
+            "containment check, so every tool reports the resolved spelling and files "
+            "land there."
+        )
+    return out
+
+
 def allow_absolute() -> bool:
     """Whether absolute / workspace-escaping paths are permitted (off by default)."""
     return os.environ.get("ASEPRITE_MCP_ALLOW_ABSOLUTE", "").strip().lower() in (
@@ -224,7 +271,7 @@ def resolve(filename: str, *, create_parent: bool = False) -> Path:
     workspace out of nothing but failing calls. The output helpers in `core.paths` pass
     `create_parent=True` so saves still never fail on a missing folder.
     """
-    ws = workspace().resolve()
+    ws = resolved_workspace()
     if not filename or not str(filename).strip():
         raise WorkspaceError(
             "No filename was given. Pass a path relative to the workspace "
