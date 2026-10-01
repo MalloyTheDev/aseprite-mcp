@@ -27,8 +27,7 @@ from ..core.limits import (
     check_list_length,
 )
 from ..core.models import FRAME_GUARD_LUA
-from ..core.runner import run_lua
-from .common import lua_path, parse_color, resolve_path
+from .common import lua_path, parse_color, resolve_path, run_ramp_lua
 
 # Shared by every ramp-aware tool here: find the ramp entry a pixel belongs to.
 #
@@ -156,7 +155,7 @@ def shift_along_ramp(
                frame = framenum, steps = ARG.steps, ramp_size = #ramp,
                pixels_matched = matched }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)
 
 
 # Chamfer distance transform plus a Lambert term, shared by the form-shading tools.
@@ -519,7 +518,7 @@ def shade_region_by_light(
                depth = maxd, ramp_size = #ramp, per_step = per_step,
                fill_light = (ARG.fill ~= nil) }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)
 
 
 @mcp.tool()
@@ -795,7 +794,7 @@ def specular_highlight(
                requested_size = ARG.size, pixels = coords,
                seat = { sx, sy }, peak_alignment = peak, depth = maxd }
     """
-    result = run_lua(body, args)
+    result = run_ramp_lua(body, args)
     # Said in Python rather than Lua because only Python knows what the caller asked for:
     # the Lua is handed one colour and cannot tell a ramp step from a near-white glint.
     result["highlight_on_ramp"] = highlight_color is None or spec_color in parsed_ramp
@@ -957,7 +956,7 @@ def contact_shadow(
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
                occluder_pixels = occ_count, darkened_pixels = darkened }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)
 
 
 @mcp.tool()
@@ -1091,7 +1090,7 @@ def outline_smart(
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
                mode = ARG.mode, outline_pixels = #pending }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)
 
 
 @mcp.tool()
@@ -1243,7 +1242,7 @@ def dither_band(
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
                pattern = ARG.pattern, dithered_pixels = #pending }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)
 
 
 @mcp.tool()
@@ -1379,4 +1378,4 @@ def gradient_map(
     RESULT = { ok = true, layer = layer.name, frame = framenum,
                pixels_written = written, steps = #ramp, per_step = histogram }
     """
-    return run_lua(body, args)
+    return run_ramp_lua(body, args)

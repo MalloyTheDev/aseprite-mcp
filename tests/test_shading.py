@@ -796,3 +796,123 @@ def test_fill_strength_is_ignored_without_a_fill_angle(request):
 
     result = shading.shade_region_by_light(name, RAMP, fill_strength=5.0)
     assert result["fill_light"] is False
+
+# =============================================== the shading layer on indexed art (#145)
+# Every test above this line builds an RGB sprite, so the indexed path through the whole
+# shading layer was untested. It is not a corner: an indexed pixel is an offset into a
+# palette, so a ramp colour the palette does not hold cannot be written at all. It
+# resolves to the nearest entry that can draw, and the result says the pixels were
+# written because they were.
+#
+# Built index by index (`create_sprite(color_mode="indexed")`, `set_palette`, then draw)
+# rather than by converting an RGB sprite, because the palette is the whole point of
+# these cases and a quantization would decide it for us.
+def _indexed_sprite(request, colors: list[str], draw: str, suffix: str = "") -> str:
+    name = f"sh/{request.node.name}{suffix}.aseprite"
+    sprite.create_sprite(name, 32, 32, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", *colors])
+    drawing.draw_ellipse(name, 16, 16, 12, 12, draw, filled=True)
+    return name
+
+
+def test_a_ramp_the_indexed_palette_holds_shades_and_conforms(request):
+    """The arrangement this server recommends: a palette built from the ramp. Shading
+    then behaves exactly as it does on RGB, conformance is 1.0, and nothing is warned
+    about, because there is nothing wrong."""
+    name = _indexed_sprite(request, RAMP, RAMP[3])
+
+    result = shading.shade_region_by_light(
+        name, ramp=RAMP, light_angle=135.0, tolerance=64.0)
+
+    assert "warnings" not in result, "a palette that holds the ramp is not worth a word"
+    assessed = inspect.assess_sprite(name, ramp=RAMP)
+    assert assessed["metrics"]["palette_conformance"] == 1.0
+    assert assessed["readings"] == [] or all(
+        "ramp" not in note for note in assessed["readings"]
+    )
+    assert assessed["metrics"]["colors"] > 2, "it actually shaded"
+
+
+def test_a_ramp_the_indexed_palette_cannot_hold_reports_the_collapse(request):
+    """The defect. The palette holds three of the ramp's five colours, so steps 1 and 2
+    both resolve to entry 1 and steps 3 and 4 both resolve to entry 2.
+
+    A one-step shade of art drawn in step 1 therefore rewrites every pixel to the colour
+    it already was: measured at 144 pixels written and a sprite identical afterwards. No
+    existing signal catches that. `pixels_written` counts the writes, which happened, and
+    `palette_conformance` reads 1.0 because the colour landed on is still on the declared
+    ramp. The only place the finding can come from is the palette.
+    """
+    sparse = [RAMP[0], RAMP[2], RAMP[4]]
+    name = _indexed_sprite(request, sparse, RAMP[0])
+    before = inspect.get_pixels(name, 0, 0, 32, 32)["pixels"]
+
+    result = shading.shift_along_ramp(name, ramp=RAMP, steps=1, tolerance=64.0)
+
+    assert result["pixels_written"] > 0, "it reported writing pixels"
+    assert inspect.get_pixels(name, 0, 0, 32, 32)["pixels"] == before, (
+        "and the picture is unchanged, which is the whole problem"
+    )
+    measured = result["ramp_on_palette"]
+    assert (measured["declared"], measured["resolved"]) == (5, 3)
+    assert measured["exact"] == 3
+    warning = " ".join(result["warnings"])
+    assert "3 of the 5" in warning
+    assert "steps 1 and 2" in warning
+    assert "changes nothing" in warning
+
+    # And the metric that is supposed to separate shading from filtering is blind to it,
+    # which is why this is reported from the palette and not from the pixels. Pinned so
+    # the reading is never dropped on the theory that conformance would have caught it.
+    assert inspect.assess_sprite(name, ramp=RAMP)["metrics"]["palette_conformance"] == 1.0
+
+
+def test_assess_sprite_says_when_conformance_is_measuring_the_palette(request):
+    """`assess_sprite(ramp=...)` is the tool a caller uses to check their shading. On an
+    indexed sprite whose palette does not hold the declared ramp, the conformance number
+    is about the palette rather than the shading, and the report has to say so where the
+    number is, not leave the caller to infer it."""
+    name = _indexed_sprite(request, [RAMP[0], RAMP[2], RAMP[4]], RAMP[0])
+
+    assessed = inspect.assess_sprite(name, ramp=RAMP)
+
+    notes = " ".join(assessed["readings"])
+    assert "3 of the 5 declared ramp steps" in notes
+    assert "palette_conformance" in notes, "named explicitly, beside the number it qualifies"
+    assert assessed["metrics"]["palette_conformance"] == 1.0, (
+        "the number itself is unchanged; it is the reading that was missing"
+    )
+
+
+def test_a_ramp_with_no_colours_in_the_palette_says_there_is_no_ramp(request):
+    """The catastrophic end: a palette of one drawable colour. Distinct from banding,
+    because nothing the tool writes can vary at all."""
+    name = _indexed_sprite(request, ["#808080"], "index:1")
+
+    result = shading.gradient_map(name, ramp=RAMP)
+
+    joined = " ".join(result["warnings"])
+    assert "no ramp on this sprite to shade along" in joined
+    assert result["ramp_on_palette"]["resolved"] == 1
+
+
+def test_an_rgb_sprite_is_never_told_about_a_palette(request, sphere):
+    """The reading must not become noise on the common case. An RGB pixel carries its own
+    colour, there is no palette to snap to, and the measurement is skipped rather than
+    computed and found uninteresting."""
+    result = shading.shift_along_ramp(sphere, ramp=RAMP, steps=-1, tolerance=64.0)
+
+    assert "ramp_on_palette" not in result
+    assert "warnings" not in result
+
+
+def test_effects_that_take_a_ramp_report_it_too(request):
+    """The finding is not specific to shading.py: `cast_shadow` and `glow` resolve a ramp
+    against the same palette through the same `rgba_to_px`, so they get the same reading
+    from the same place rather than each growing their own."""
+    name = _indexed_sprite(request, [RAMP[0], RAMP[2], RAMP[4]], RAMP[2])
+
+    result = effects.glow(name, ramp=RAMP, radius=2, tolerance=64.0)
+
+    assert result["ramp_on_palette"]["declared"] == 5
+    assert any("declared ramp steps" in note for note in result["warnings"])

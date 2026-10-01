@@ -215,3 +215,130 @@ def test_a_state_the_lua_never_measured_does_not_raise():
     field has to be survivable rather than an exception in a reporting path."""
     assert indexed.palette_readings({}, "indexed") == []
     assert indexed.palette_readings({}, "") == []
+
+# ----------------------------------------------- a ramp against the palette (#145)
+# Every one of these is the arithmetic of "what did the ramp become", with no editor
+# involved. What Aseprite actually does to the pixels is in test_indexed_sprites.py.
+def _step(step: int, want: str, index: int, got: str) -> dict:
+    return {"step": step, "want": want, "index": index, "got": got,
+            "exact": want == got}
+
+
+def _ramp_state(*steps: dict) -> dict:
+    return {
+        "steps": list(steps),
+        "declared": len(steps),
+        "resolved": len({s["index"] for s in steps}),
+        "exact": sum(1 for s in steps if s["exact"]),
+    }
+
+
+def test_a_ramp_the_palette_holds_exactly_says_nothing():
+    """The normal case, and it has to be silent. A palette built from the ramp
+    (`generate_ramp` then `set_palette`) is the arrangement this server recommends, so a
+    warning here would fire on every correct use and teach the caller to ignore it."""
+    state = _ramp_state(
+        _step(1, "#1a1a2eff", 1, "#1a1a2eff"),
+        _step(2, "#3d3d5cff", 2, "#3d3d5cff"),
+        _step(3, "#6b6b8fff", 3, "#6b6b8fff"),
+    )
+
+    assert indexed.ramp_readings(state) == []
+
+
+def test_two_steps_resolving_to_one_entry_are_named():
+    """The measured reproduction: a five-step ramp against a palette holding three of
+    its colours. Steps 1 and 2 both land on entry 1, so a one-step shade between them
+    rewrote 144 pixels to the colour they already were and reported success."""
+    state = _ramp_state(
+        _step(1, "#1a1a2eff", 1, "#1a1a2eff"),
+        _step(2, "#3d3d5cff", 1, "#1a1a2eff"),
+        _step(3, "#6b6b8fff", 2, "#6b6b8fff"),
+        _step(4, "#9a9ac2ff", 2, "#6b6b8fff"),
+        _step(5, "#ccccf0ff", 3, "#ccccf0ff"),
+    )
+
+    notes = indexed.ramp_readings(state)
+
+    assert notes, "a ramp that collapses has to say so"
+    first = notes[0]
+    assert "3 of the 5" in first
+    assert "steps 1 and 2" in first and "steps 3 and 4" in first
+    assert "#3d3d5cff" in first, "the colour that was lost is named"
+    assert "palette_conformance" in first, (
+        "the reading has to say why the usual metric will not show this"
+    )
+
+
+def test_the_no_op_is_stated_rather_than_implied():
+    """The finding a caller cannot reach any other way. Two steps on one entry means a
+    shade between them changes nothing, and neither the pixel counts nor
+    palette_conformance will say so: the colour landed on is still on the ramp."""
+    state = _ramp_state(
+        _step(1, "#111111ff", 1, "#111111ff"),
+        _step(2, "#222222ff", 1, "#111111ff"),
+    )
+
+    joined = " ".join(indexed.ramp_readings(state))
+
+    assert "changes nothing" in joined
+    assert "reports the pixels it wrote" in joined
+
+
+def test_a_ramp_that_collapses_to_a_single_colour_says_there_is_no_ramp():
+    """The catastrophic end of the same scale. Distinct from the banding case: nothing
+    the tool writes can vary at all, so "it will band" understates it."""
+    state = _ramp_state(
+        _step(1, "#1a1a2eff", 1, "#808080ff"),
+        _step(2, "#3d3d5cff", 1, "#808080ff"),
+        _step(3, "#6b6b8fff", 1, "#808080ff"),
+    )
+
+    joined = " ".join(indexed.ramp_readings(state))
+
+    assert "no ramp on this sprite to shade along" in joined
+    assert "#808080ff" in joined
+
+
+def test_steps_that_shift_but_stay_distinct_are_reported_more_softly():
+    """Every step on a different entry means the shading keeps its shape; the colours
+    are simply not the declared ones. That is worth a line and not an alarm, because it
+    is what snapping to a fixed palette means and refusing it would make these tools
+    useless on the sprites that most want one."""
+    state = _ramp_state(
+        _step(1, "#1a1a2eff", 1, "#191930ff"),
+        _step(2, "#3d3d5cff", 2, "#3c3c5aff"),
+        _step(3, "#6b6b8fff", 3, "#6b6b8fff"),
+        _step(4, "#ccccf0ff", 4, "#cdcdf1ff"),
+    )
+
+    notes = indexed.ramp_readings(state)
+
+    joined = " ".join(notes)
+    assert "nearest entry" in joined
+    assert "shading holds its shape" in joined
+    assert "changes nothing" not in joined, "nothing collapsed, so say nothing about it"
+
+
+def test_a_long_ramp_names_a_few_shifted_steps_and_stops():
+    """A reading is a sentence, not a table. Twelve shifted steps listed in full is the
+    measurement again rather than a finding."""
+    state = _ramp_state(*[
+        _step(i, f"#{i:02x}{i:02x}{i:02x}ff", i, f"#{i + 1:02x}{i + 1:02x}{i + 1:02x}ff")
+        for i in range(1, 13)
+    ])
+
+    joined = " ".join(indexed.ramp_readings(state))
+
+    assert "12 of the 12" in joined
+    assert joined.count(" as #") == 4, "four examples named"
+    assert "and 8 more" in joined, "and the rest counted rather than listed"
+
+
+def test_a_ramp_state_the_lua_never_measured_does_not_raise():
+    """Same contract as `palette_readings`: this is a reporting path handed whatever the
+    measurement produced, so an absent or empty measurement is silence, not an
+    exception. The harness omits `ramp_on_palette` entirely on RGB and gray sprites."""
+    assert indexed.ramp_readings({}) == []
+    assert indexed.ramp_readings({"steps": [], "declared": 0}) == []
+    assert indexed.ramp_readings({"declared": 3}) == []
