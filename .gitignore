@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+venv/
 *.egg-info/
 dist/
 build/
@@ -9,12 +10,64 @@ build/
 # uv
 .uv/
 
-# Aseprite MCP workspace (generated sprites) — keep the folder, ignore contents
+# Test, lint and type-check caches. None of these are inputs to anything.
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Scratch output from test runs and local tooling. `.pt` is the pytest temp root used by
+# the integration tier, which fills with sprites, resource packs and exported PNGs; the
+# rest are editors and helpers writing beside the project. All are per-machine and none
+# are reproducible, so committing any of them would be committing noise.
+.pt/
+.mdreader/
+*.log
+
+# Aseprite MCP workspace: generated sprites. Keep the folder, ignore the contents.
 /workspace/*
 !/workspace/.gitkeep
+
+# Claude Code. Agent worktrees under here are entire checkouts of this repository, so a
+# stray `git add -A` would commit thousands of duplicated files; session state and
+# per-user settings are local by nature. Project config that is meant to be shared is
+# re-included below.
+#
+# The pattern excludes the directory's *contents* rather than the directory itself,
+# because git cannot re-include a path whose parent directory is excluded.
+/.claude/*
+!/.claude/settings.json
+!/.claude/agents/
+!/.claude/skills/
+!/.claude/commands/
+!/.claude/hooks/
+!/.claude/launch.json
+
+# Credentials and environment files. Nothing here is expected to exist; these patterns
+# are a backstop, not a description of the project. A key or a token committed once is in
+# every clone of the history afterwards, which no later ignore rule can undo.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+id_rsa
+id_ed25519
+secrets.json
+credentials.json
 
 # Editor / OS
 .vscode/
 .idea/
+*.swp
 .DS_Store
 Thumbs.db
+desktop.ini

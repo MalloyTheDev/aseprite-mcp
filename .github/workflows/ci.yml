@@ -22,14 +22,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # `requires-python = ">=3.10"` has no upper bound, so every minor it
+        # admits has to be tested or the claim is not one. 3.14 was added after
+        # the suite was run against it locally: 956 passed, 499 skipped.
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       # Actions are pinned to commit SHAs (supply-chain hardening); Dependabot keeps
       # them current and annotates the version (see .github/dependabot.yml).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}

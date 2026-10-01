@@ -11,6 +11,15 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    # Per-minor, because PyPI's sidebar and its search filters read these and not
+    # `requires-python`. Kept in step with the CI matrix by
+    # `tests/test_imports.py::test_declared_python_support_matches_what_ci_tests`, since
+    # the defect this replaced was the two drifting apart.
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Multimedia :: Graphics :: Editors",
     "Topic :: Software Development :: Libraries",
 ]

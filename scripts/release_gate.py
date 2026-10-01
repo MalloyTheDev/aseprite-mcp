@@ -2,8 +2,8 @@
 
 Runs each step in order and stops at the first failure:
 
-  1. ruff check . --select F,E9        (lint: no unused imports / undefined names)
-  2. pytest -q                          (pure-Python tests — what CI runs)
+  1. ruff check src tests scripts       (lint: the same invocation and rules as CI)
+  2. pytest -q                          (pure-Python tests, which is what CI runs)
   3. pytest -q --run-aseprite           (integration + golden; needs a real Aseprite)
   4. gen_tool_docs.py --check           (docs/TOOLS.md is in sync with the registry)
   5. uv build                           (wheel + sdist build)
@@ -29,7 +29,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 def _steps(skip_aseprite: bool) -> list[tuple[str, list[str]]]:
     steps: list[tuple[str, list[str]]] = [
-        ("lint (ruff F,E9)", ["uv", "run", "ruff", "check", ".", "--select", "F,E9"]),
+        # Exactly what CI runs. `--select F,E9` *overrides* [tool.ruff.lint], so the old
+        # invocation checked pyflakes and syntax only and walked more paths while
+        # enforcing fewer rules: a release could pass this gate and then fail CI on an
+        # import order or a mutable default. A release gate weaker than the pull-request
+        # gate inverts the point of having one.
+        ("lint (ruff, CI's rule set)", ["uv", "run", "ruff", "check", "src", "tests", "scripts"]),
         ("pure tests (pytest)", ["uv", "run", "pytest", "-q"]),
     ]
     if not skip_aseprite:
