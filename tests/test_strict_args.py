@@ -1,6 +1,6 @@
 """Unknown arguments must fail loudly rather than be dropped.
 
-This server has 117 tools and 125 parameter names used by exactly one tool each, so the
+This server has 147 tools and 173 parameter names used by exactly one tool each, so the
 guess-the-name surface is large -- and until now a wrong guess produced no feedback at all.
 `create_sprite(colour_mode="indexed")` returned ok and an RGB sprite, because the parameter
 is `color_mode` and the schema layer discards keys it does not recognise.

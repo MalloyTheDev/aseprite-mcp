@@ -143,7 +143,7 @@ def test_a_client_can_also_send_it_as_a_json_string():
 
 # ------------------------------------------- reading a slice back without exporting (#106)
 def test_list_slices_reads_structured_data_back_on_its_own():
-    """The gap that made confirming #24 inconclusive: `list_slices` showed the same thing
+    """The gap that made confirming PR #24 inconclusive: `list_slices` showed the same thing
     for a slice with data and one without, so the only way to see what a slice carried
     was to write an export file and parse it."""
     sprite.create_sprite("w/read.aseprite", 16, 16)

@@ -1,4 +1,4 @@
-"""Pure-Python tests for the v0.7.1 hardening pass: no Aseprite (always run).
+"""Pure-Python tests for the v0.8.0 hardening pass: no Aseprite (always run).
 
 Each group pins one guard that was missing or unsound before:
 
