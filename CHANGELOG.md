@@ -73,6 +73,7 @@ All notable changes to this project are documented here. The format is based on
   summary. Both now come from the shared serializer in one launch. Two copies of one
   reader drifting apart is exactly the bug fixed in the indexed-transparency decode a
   release ago.
+
 - **`health_check` reported a workspace no other tool would ever return.** Paths are
   canonicalised before the containment check, which is what stops a junction from reaching
   outside the workspace, and it means every tool hands back a resolved path. `health_check`
@@ -181,7 +182,8 @@ All notable changes to this project are documented here. The format is based on
   The ramp matching lives in pure Python: the read pass returns the subject's distinct
   colours, Python matches them and builds a lookup table, and the generated Lua looks
   colours up without making a colour judgement. So there is one matcher with tests rather
-  than a second one in Lua that nearly agrees with `shading.py`'s.
+  than a second one in Lua that nearly agrees with `shading.py`'s. (147 tools.)
+
 - **The top end of the ramp: `specular_highlight`, and a second light for
   `shade_region_by_light`.** `shade_region_by_light` describes a form under one light and
   spreads the ramp's top step over the whole lit side, which is what a matte surface does
@@ -286,7 +288,7 @@ All notable changes to this project are documented here. The format is based on
   only the editor knows the subject's drawn box. An integration test asserts the two
   agree on a real sprite, which is the only thing that keeps a formula in two places
   honest; the rounding in both is floor(v + 0.5) rather than Python's banker's rounding,
-  which would otherwise have disagreed at a half pixel on even-width subjects.
+  which would otherwise have disagreed at a half pixel on even-width subjects. (145 tools.)
 
 - **`diff_sprites`: compare two frames and say what changed.** An agent cannot look at
   its own sprite, and the gap that leaves is not "is this good" (`assess_sprite` answers
@@ -324,7 +326,7 @@ All notable changes to this project are documented here. The format is based on
   only then per-pixel work on the rows that actually hold a difference. The per-pixel pass
   is the authority on what counts as changed, which matters because the cheaper tests
   disagree about pixels that are transparent in both frames, and a tool that trusted them
-  would report "identical" and "47 pixels differ" in the same breath.
+  would report "identical" and "47 pixels differ" in the same breath. (142 tools.)
 
 - **A tag can say how many times it plays, and frames can be reordered.** Three gaps in
   the frame and tag layer, each of which forced a workaround that damaged the sprite.
@@ -371,7 +373,7 @@ All notable changes to this project are documented here. The format is based on
   it, because the useful control is not which colours are used but how much of the art
   each step takes; `dither` resolves the fraction between two steps with an ordered
   pattern, which reads as a gradient without adding a colour. Alpha is carried through, so
-  anti-aliased edges keep their coverage and the silhouette does not move.
+  anti-aliased edges keep their coverage and the silhouette does not move. (137 tools.)
 - **`remove_stray_pixels`** - the noise `assess_sprite` counts, with something to do
   about it. A stray is a pixel with no neighbour of its own colour in any of the eight
   directions, which is what a shading pass leaves at a band boundary and what reads as
