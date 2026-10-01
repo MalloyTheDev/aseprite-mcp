@@ -182,6 +182,111 @@ All notable changes to this project are documented here. The format is based on
   colours, Python matches them and builds a lookup table, and the generated Lua looks
   colours up without making a colour judgement. So there is one matcher with tests rather
   than a second one in Lua that nearly agrees with `shading.py`'s.
+- **The top end of the ramp: `specular_highlight`, and a second light for
+  `shade_region_by_light`.** `shade_region_by_light` describes a form under one light and
+  spreads the ramp's top step over the whole lit side, which is what a matte surface does
+  and is why its output reads as plastic. Two things were missing above it.
+
+  `specular_highlight` places the glint: a two or three pixel blob on the part of the form
+  whose normal faces the *half-vector* between the light and the viewer, not the light
+  itself. That offset toward the viewer is the whole difference between a specular and a
+  brighter patch of diffuse, and it is why this is a tool rather than a larger `bias`.
+  `size` is a pixel count rather than a radius, because a specular is two or three pixels
+  and the point of the tool is that it stays that small; the pixels are grown outward from
+  the brightest one so the result is one glint rather than dots scattered over every part
+  of the form that happens to face the light. `tightness` is a threshold on that
+  alignment, not an exponent: raising something to a power does not change the ranking, so
+  an exponent would have been a parameter that did nothing.
+
+  It will not touch an edge pixel. A glint on the silhouette's border reads as a hole
+  punched in the form, so only pixels with all eight neighbours inside the region are
+  candidates, and a region with no such pixel is refused with the same message
+  `shade_region_by_light` already gives for a form too thin to shade. The two share their
+  region mask, distance field and normals rather than computing them twice, because a
+  specular derived from a slightly different normal field lands beside the highlight it is
+  meant to sit inside.
+
+  Two refusals are worth naming. A light that reflects nowhere on the form is refused with
+  the best alignment the form actually offers, so the number to lower `tightness` to is in
+  the error rather than a guess. And a glint painted in the colour that is already there
+  is refused outright: shading with the full ramp leaves nothing above its top step, so
+  the default workflow is to shade with the ramp minus its last entry and reserve that
+  step, which the error says. Writing three pixels the colour they already were and
+  reporting success would have been the no-op-that-looks-fine this project keeps finding.
+
+  Its colour is the ramp's top step, so `palette_conformance` stays at 1.0. Metal is the
+  one material whose specular is genuinely brighter than its own ramp, and
+  `highlight_color` is the flag for it; the result reports `highlight_on_ramp` so a colour
+  off the ramp is a stated trade rather than a silent conformance drop.
+
+  `shade_region_by_light` also takes `fill_angle` and `fill_strength` now: a second,
+  weaker light, which is how a shadow side stays readable instead of going flat at
+  `ambient`. The two are summed and clamped rather than averaged, because averaging scales
+  the key down as the fill comes up, so adding a fill light would have darkened the sprite
+  overall and quietly cost it the ramp's top step. `fill_strength` is capped below 1: a
+  fill matching the key puts the two terminators on opposite sides of one shape and adds
+  up to the flat fill the shading was meant to replace. `per_step` in the result counts
+  pixels per ramp entry, so "the fill lightened the shadow side" is a number rather than
+  an impression. Omitting `fill_angle` leaves the output bit-identical to before.
+
+- **`cast_shadow` and `glow`, both made of ramp steps rather than of alpha.**
+  `add_drop_shadow` offsets a copy of the art and tints it, which is a sticker of the
+  subject floating beside it, and `add_outline` gives one flat ring, which reads as a
+  sticker too. Neither of the two effects every sprite eventually needs could be assembled
+  from what was here.
+
+  `cast_shadow` puts a shadow on a *surface*: away from the light, foreshortened by the
+  light's height, an ellipse under the subject rather than a second silhouette. The
+  direction is the opposite of `light_angle` and the length is the real cotangent of the
+  light's elevation, so an overhead light casts straight down and a low one throws the
+  shadow far to one side; the light's height moves the length and not the depth, since the
+  depth is the floor's foreshortening and has nothing to do with the light. `ground_y`
+  defaults to the subject's own contact row, the same measurement `validate_loop` reports
+  as `contact_rows`, and `ground_layer` answers the other half of the geometry question:
+  the shadow is clipped to that layer's pixels, so it cannot run off the edge of a
+  platform and hang in the air, and a surface with nothing where the shadow falls is
+  refused rather than drawn onto nothing. The core is the ramp's darkest step and each
+  pixel of `softness` around it is one step lighter, so the penumbra is ramp entries
+  arranged in space; `opacity` is the layer's, and the docstring says plainly that
+  lowering it blends the shadow with the ground and takes the composite off the ramp.
+
+  `glow` is several rings, each a step further down a ramp, hottest against the artwork.
+  `falloff` chooses whether the steps are evenly spaced or drop away faster, which is the
+  difference between a coloured border and something that reads as a light source, and
+  `dither_edge` thins the outermost ring with an ordered pattern so the halo ends softly.
+  That fade is in the coverage rather than in an alpha value, so every pixel it draws is
+  still exactly a ramp entry and `palette_conformance` stays at 1.0. `base_color` scopes
+  it, so a gem glows and the hand holding it does not; distance is measured out from those
+  pixels but the glow is never painted over any part of the subject, so a body blocks its
+  own gem's halo. The ring distances come from one chamfer pass over the inverted
+  silhouette, which costs the same whatever the radius, where a neighbourhood scan per
+  pixel would have been quadratic in it.
+
+  Both write to their own layer below the subject, so the subject's cel is untouched and
+  deleting one layer removes the effect, and both refuse a layer name that is already
+  taken: `find_layer` resolves by name, so two layers called "glow" make every later call
+  that names one ambiguous.
+
+  `cast_shadow` also refuses a shadow it cannot rasterise. `ellipse_offsets` emits one
+  Lua table per pixel of a filled ellipse's *area* and builds the whole list before
+  anything is drawn, so that count is an allocation rather than a running time, and it is
+  quadratic in radii that grow with both the subject's size and how low the light sits.
+  On the widest canvas the geometry cap allows, a near-full-width subject under a low
+  light asks for about 94 million points: an out-of-memory with nothing drawn, from
+  arguments that are each individually valid, and invisible to any per-axis check for the
+  same reason a dimension limit cannot see a 17 GB canvas. The count is now checked
+  against `MAX_SHADOW_ELLIPSE_POINTS` before the rasteriser is called, the refusal names
+  both radii and the remedy, and an accepted shadow reports `ellipse_points` so a caller
+  can see how close it came. A penumbra longer than the ramp can express is refused the
+  same way rather than stacking its outer rings onto the last entry and calling a flat
+  band a soft edge.
+
+  The shadow's geometry lives in `core/lighting.py` as pure arithmetic, where it is tested
+  at four light angles with no editor, and is transcribed into Lua for drawing because
+  only the editor knows the subject's drawn box. An integration test asserts the two
+  agree on a real sprite, which is the only thing that keeps a formula in two places
+  honest; the rounding in both is floor(v + 0.5) rather than Python's banker's rounding,
+  which would otherwise have disagreed at a half pixel on even-width subjects.
 
 - **`diff_sprites`: compare two frames and say what changed.** An agent cannot look at
   its own sprite, and the gap that leaves is not "is this good" (`assess_sprite` answers

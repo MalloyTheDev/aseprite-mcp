@@ -33,7 +33,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **144 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **147 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -43,11 +43,14 @@ Aseprite GUI.
   icon set, a tileset or an eight-direction walk template, and a **batch op-runner**
   applies hundreds of edits atomically in a single Aseprite process.
 - **Shading that stays on the palette** - `shade_region_by_light` turns a flat region
-  into a lit form from a ramp and a light direction, `gradient_map` brings imported or
-  filtered art onto a ramp in the first place, and `contact_shadow`, `outline_smart` and
+  into a lit form from a ramp and a light direction (with an optional second, weaker fill
+  light so the shadow side stays readable), `gradient_map` brings imported or
+  filtered art onto a ramp in the first place, and `specular_highlight`, `contact_shadow`,
+  `cast_shadow`, `glow`, `outline_smart` and
   `dither_band` finish it. A brightness filter moves every pixel off
   the palette; these move pixels *along the ramp*, so the art still uses exactly the
-  colours it was given.
+  colours it was given. A glow of blended alpha or a shadow of multiplied alpha would
+  break that, which is why both are built of ramp steps arranged in space instead.
 - **Work you can check** - `assess_sprite` measures the drawing itself: pixels with no
   neighbour of their own colour, jagged diagonals, how much of the canvas the art fills,
   whether it is centred, and what fraction of it sits exactly on a declared ramp. An agent
@@ -87,7 +90,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 144 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 147 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -476,6 +479,7 @@ and says so rather than doing it quietly.
 | `shade_region_by_light` | Shade a flat region as a lit form, from a ramp and a light direction. |
 | `gradient_map` | Put every pixel on a ramp by its brightness, whatever it started as: the tool that brings imported or filtered art onto a palette at all. Optional ordered dithering. |
 | `shift_along_ramp` | Move pixels along a colour ramp, keeping every one of them on the palette. |
+| `specular_highlight` | Place a small glint where the light reflects at the viewer, never on an edge pixel. The ramp's top step, or a brighter colour for metal. |
 | `contact_shadow` | Darken the pixels where one form meets another, along its ramp. |
 | `outline_smart` | Outline a shape in colours taken from its own ramp, not one flat colour. |
 | `dither_band` | Dither the boundary between two adjacent ramp steps, widening the transition. |
@@ -506,6 +510,8 @@ and every result that touched pixels reports `selection_applied`.
 | `fill_checkerboard` | Two-colour checkerboard pattern. |
 | `add_outline` | Pixel outline around art (outside/inside, 4/8-connectivity, thickness). |
 | `add_drop_shadow` | Hard drop shadow on a new layer beneath the art. |
+| `cast_shadow` | A shadow on the ground, away from the light and foreshortened by its height, built of ramp steps and clipped to the surface it falls on. |
+| `glow` | A halo of several rings, each a step further down a ramp, optionally dithered at the outer edge. Its own layer, so deleting it removes the effect. |
 | `replace_color` | Swap a colour (with per-channel tolerance). |
 | `remove_stray_pixels` | Replace pixels with no neighbour of their own colour by the colour around them: the dirt a shading pass leaves, without touching a dither or introducing a colour. |
 | `invert_colors` | Invert RGB (alpha preserved). |

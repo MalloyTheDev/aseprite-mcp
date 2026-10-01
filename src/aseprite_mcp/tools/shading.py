@@ -16,10 +16,14 @@ written), so it is implemented as palette index arithmetic instead.
 from __future__ import annotations
 
 from ..app import mcp
+from ..core import lighting
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_COLOR_LIST_LENGTH,
+    MAX_FILL_LIGHT_STRENGTH,
     MAX_OUTLINE_THICKNESS,
+    MAX_SPECULAR_PIXELS,
+    check_count,
     check_list_length,
 )
 from ..core.models import FRAME_GUARD_LUA
@@ -208,6 +212,118 @@ local function distance_field(mask, w, h)
 end
 """
 
+# The three steps every form-shading tool takes before it has an opinion about light:
+# decide which pixels are the region, check the region has an interior at all, and turn
+# the distance field into a surface normal per pixel.
+#
+# Shared rather than copied because `specular_highlight` has to agree with
+# `shade_region_by_light` about all three. A specular computed from a slightly different
+# normal field lands in a slightly different place from the highlight it is supposed to
+# sit inside, and a specular that refuses a thin region on a different threshold than the
+# shading does is the "silently different result" the issue asking for this called out.
+_FORM_LUA = r"""
+-- The region: opaque, near base_color when one was given, and inside the selection when
+-- one is active. Restricting the field to the selection matters: a field over the whole
+-- silhouette would measure depth into pixels this call may not touch, and would light the
+-- wrong shape.
+local function build_region(spr, img, W, H, base, tolerance)
+  local mask, count = {}, 0
+  for y = 0, H - 1 do
+    mask[y] = {}
+    for x = 0, W - 1 do
+      local inside = false
+      local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+      if a > 0 and (_sel == nil or _sel:contains(x, y)) then
+        if base == nil then
+          inside = true
+        else
+          local dr, dg, db = r - base.r, g - base.g, b - base.b
+          local d = math.sqrt(0.299*dr*dr + 0.587*dg*dg + 0.114*db*db)
+          inside = d <= tolerance
+        end
+      end
+      mask[y][x] = inside
+      if inside then count = count + 1 end
+    end
+  end
+  return mask, count
+end
+
+-- The distance field, plus the one refusal both tools owe the caller. Below roughly 6px
+-- across, the field never exceeds a pixel: there is no interior, so there is no form to
+-- describe and nothing honest to do with a light direction.
+local function require_interior(mask, W, H)
+  local field, maxd = distance_field(mask, W, H)
+  if maxd < 2.0 then
+    error(string.format(
+      "This region is too thin to shade: its deepest point is %.1f pixels from an " ..
+      "edge, so there is no interior to describe. Place the highlight and shadow by " ..
+      "hand with draw_pixels instead.", maxd), 0)
+  end
+  return field, maxd
+end
+
+-- A function giving the surface normal at a pixel, from the distance field.
+--
+-- Height from the distance field, as a quarter-circle profile: steep near the edge and
+-- flat in the middle, which is what a round form does. The gradient of that gives a
+-- normal following the form rather than the outline, which is the whole difference
+-- between form shading and pillow shading.
+--
+-- Returned as a closure rather than as three filled tables: the caller reads each pixel
+-- once, and three more full-canvas tables on top of the mask, the field and the smoothing
+-- pass is the difference between a large sprite working and a large sprite exhausting
+-- memory.
+local function form_normals(mask, field, maxd, W, H, bulge)
+  -- The chamfer field is integer-weighted, and those steps land straight in the gradient
+  -- as single-pixel speckle along every band boundary. One box pass over the in-region
+  -- neighbours costs nothing and removes most of it. This is not the cluster-smoothing
+  -- pass that shaping band edges properly would need; it just stops the lighting term
+  -- inheriting the distance metric's own quantisation.
+  local smooth = {}
+  for y = 0, H - 1 do
+    smooth[y] = {}
+    for x = 0, W - 1 do
+      if mask[y][x] then
+        local total, n = 0, 0
+        for dy = -1, 1 do
+          for dx = -1, 1 do
+            local sx, sy = x + dx, y + dy
+            if sx >= 0 and sy >= 0 and sx < W and sy < H and mask[sy][sx] then
+              total = total + field[sy][sx]
+              n = n + 1
+            end
+          end
+        end
+        smooth[y][x] = total / n
+      else
+        smooth[y][x] = 0
+      end
+    end
+  end
+
+  local function height(x, y)
+    if x < 0 or y < 0 or x >= W or y >= H or not mask[y][x] then return 0.0 end
+    local t = (smooth[y][x] / 3.0) / maxd
+    if t > 1 then t = 1 end
+    -- Scaled by maxd, not left as 0..1. Height has to be in the same units as x and y or
+    -- the gradient is vanishingly small on any region bigger than a couple of pixels,
+    -- every normal points straight up, and the whole form quantises to one or two ramp
+    -- steps. At bulge = 1 this makes a region of radius R exactly R tall, which is a true
+    -- sphere.
+    return math.sqrt(math.max(0.0, 1.0 - (1.0 - t) * (1.0 - t))) * maxd * bulge
+  end
+
+  return function(x, y)
+    local dhdx = (height(x+1, y) - height(x-1, y)) * 0.5
+    local dhdy = (height(x, y+1) - height(x, y-1)) * 0.5
+    local nx, ny, nz = -dhdx, -dhdy, 1.0
+    local nl = math.sqrt(nx*nx + ny*ny + nz*nz)
+    return nx/nl, ny/nl, nz/nl
+  end
+end
+"""
+
 
 @mcp.tool()
 def shade_region_by_light(
@@ -220,6 +336,8 @@ def shade_region_by_light(
     ambient: float = 0.35,
     rim: float = 0.0,
     bias: float = 0.0,
+    fill_angle: float | None = None,
+    fill_strength: float = 0.35,
     tolerance: float = 24.0,
     layer: str | None = None,
     frame: int = 1,
@@ -254,10 +372,28 @@ def shade_region_by_light(
             bounce; a lot reads as backlight.
         bias: Shift the whole result along the ramp, in steps. Use this when the result
             is uniformly a shade too dark or light, rather than re-tuning the lighting.
+        fill_angle: Degrees, a second light. Omitted by default, which leaves the result
+            exactly as it was before this argument existed. Set it opposite `light_angle`
+            for the fill or bounce light that keeps a shadow side readable instead of
+            letting it go flat dark: the shadow side is where a sprite stops describing
+            its form, and one light can only ever leave it at `ambient`.
+        fill_strength: How strong the fill is next to the key, 0 to 1 and capped below 1.
+            A fill that matches the key cancels the form entirely, because the two
+            terminators land on opposite sides of the same shape and sum to a flat fill,
+            so the cap refuses the value that destroys what the tool is for. A third to a
+            half is the conventional choice.
         tolerance: How close a pixel must be to `base_color` to count as part of the
             region, as a weighted RGB distance. Ignored when `base_color` is omitted.
         layer: Target layer (default: top layer).
         frame: Target frame, 1-based.
+
+    The two lights are summed and clamped, not averaged: averaging would dim the key side
+    as the fill came up, so adding a fill light would make the whole sprite darker and
+    quietly cost the ramp's top step. Clamping leaves the key side as it was and lightens
+    only what the key did not reach, which is what a fill light is.
+
+    `per_step` in the result counts pixels per ramp entry, which is how to check a fill
+    actually lightened the shadow side rather than trusting that it did.
 
     Refuses a region with no interior to shade: below roughly 6px across, the distance
     field never exceeds a pixel and there is no form to describe. The honest answer
@@ -279,7 +415,17 @@ def shade_region_by_light(
         raise ValidationFailed("bulge must be greater than 0.")
     if tolerance < 0:
         raise ValidationFailed("tolerance must not be negative.")
+    if fill_angle is not None and not 0.0 <= fill_strength <= MAX_FILL_LIGHT_STRENGTH:
+        raise ValidationFailed(
+            f"fill_strength must be between 0 and {MAX_FILL_LIGHT_STRENGTH}; got "
+            f"{fill_strength}. A fill light as strong as the key cancels the form: the "
+            "two terminators fall on opposite sides of the shape and add up to the flat "
+            "fill the shading was meant to replace. Lower it, or drop fill_angle to "
+            "shade with one light."
+        )
 
+    key = lighting.light_vector(light_angle, light_z)
+    fill = None if fill_angle is None else lighting.light_vector(fill_angle, light_z)
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer,
@@ -288,13 +434,16 @@ def shade_region_by_light(
         "base": parse_color(base_color) if base_color else None,
         "angle": float(light_angle),
         "light_z": float(light_z),
+        "key": list(key),
+        "fill": None if fill is None else list(fill),
+        "fill_strength": float(fill_strength),
         "bulge": float(bulge),
         "ambient": float(ambient),
         "rim": float(rim),
         "bias": float(bias),
         "tolerance": float(tolerance),
     }
-    body = FRAME_GUARD_LUA + _RAMP_LUA + _FIELD_LUA + """
+    body = FRAME_GUARD_LUA + _RAMP_LUA + _FIELD_LUA + _FORM_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
@@ -302,108 +451,47 @@ def shade_region_by_light(
     local img = get_draw_image(spr, layer, framenum)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
-    local base = ARG.base
 
-    -- The region: opaque, near base_color when one was given, and inside the selection
-    -- when one is active. Restricting the field to the selection matters: a field over
-    -- the whole silhouette would measure depth into pixels this call may not touch, and
-    -- would light the wrong shape.
-    local mask = {}
-    local count = 0
-    for y = 0, H - 1 do
-      mask[y] = {}
-      for x = 0, W - 1 do
-        local inside = false
-        local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
-        if a > 0 and (_sel == nil or _sel:contains(x, y)) then
-          if base == nil then
-            inside = true
-          else
-            local dr, dg, db = r - base.r, g - base.g, b - base.b
-            local d = math.sqrt(0.299*dr*dr + 0.587*dg*dg + 0.114*db*db)
-            inside = d <= ARG.tolerance
-          end
-        end
-        mask[y][x] = inside
-        if inside then count = count + 1 end
-      end
-    end
-
+    local mask, count = build_region(spr, img, W, H, ARG.base, ARG.tolerance)
     if count == 0 then
       error("Nothing to shade: no pixel matched. Check base_color and tolerance, or " ..
-            "whether a selection is excluding the region.")
+            "whether a selection is excluding the region.", 0)
     end
 
-    local field, maxd = distance_field(mask, W, H)
-    if maxd < 2.0 then
-      error(string.format(
-        "This region is too thin to shade: its deepest point is %.1f pixels from an " ..
-        "edge, so there is no interior to describe. Place the highlight and shadow by " ..
-        "hand with draw_pixels instead.", maxd))
-    end
+    local field, maxd = require_interior(mask, W, H)
+    local normal_at = form_normals(mask, field, maxd, W, H, ARG.bulge)
 
-    -- Screen y grows downward, so an upward light is negative in y.
-    local rad = math.rad(ARG.angle)
-    local lx, ly, lz = math.cos(rad), -math.sin(rad), ARG.light_z
-    local ll = math.sqrt(lx*lx + ly*ly + lz*lz)
-    lx, ly, lz = lx/ll, ly/ll, lz/ll
-
-    -- Height from the distance field, as a quarter-circle profile: steep near the edge
-    -- and flat in the middle, which is what a round form does. The gradient of that
-    -- gives a normal following the form rather than the outline, which is the whole
-    -- difference between form shading and pillow shading.
-    -- The chamfer field is integer-weighted, and those steps land straight in the
-    -- gradient as single-pixel speckle along every band boundary. One box pass over the
-    -- in-region neighbours costs nothing and removes most of it. This is not the
-    -- cluster-smoothing pass that shaping band edges properly would need; it just stops
-    -- the lighting term inheriting the distance metric's own quantisation.
-    local smooth = {}
-    for y = 0, H - 1 do
-      smooth[y] = {}
-      for x = 0, W - 1 do
-        if mask[y][x] then
-          local total, n = 0, 0
-          for dy = -1, 1 do
-            for dx = -1, 1 do
-              local sx, sy = x + dx, y + dy
-              if sx >= 0 and sy >= 0 and sx < W and sy < H and mask[sy][sx] then
-                total = total + field[sy][sx]
-                n = n + 1
-              end
-            end
-          end
-          smooth[y][x] = total / n
-        else
-          smooth[y][x] = 0
-        end
-      end
-    end
-
-    local function height(x, y)
-      if x < 0 or y < 0 or x >= W or y >= H or not mask[y][x] then return 0.0 end
-      local t = (smooth[y][x] / 3.0) / maxd
-      if t > 1 then t = 1 end
-      -- Scaled by maxd, not left as 0..1. Height has to be in the same units as x and
-      -- y or the gradient is vanishingly small on any region bigger than a couple of
-      -- pixels, every normal points straight up, and the whole form quantises to one
-      -- or two ramp steps. At bulge = 1 this makes a region of radius R exactly R tall,
-      -- which is a true sphere.
-      return math.sqrt(math.max(0.0, 1.0 - (1.0 - t) * (1.0 - t))) * maxd * ARG.bulge
-    end
+    -- Both lights arrive already normalised from Python, where the sign convention for an
+    -- upward light (negative in y, because screen y grows downward) is written down once.
+    local lx, ly, lz = ARG.key[1], ARG.key[2], ARG.key[3]
+    local fx, fy, fz
+    if ARG.fill ~= nil then fx, fy, fz = ARG.fill[1], ARG.fill[2], ARG.fill[3] end
 
     local steps = #ramp - 1
     local shaded = 0
+    local per_step = {}
+    for i = 1, #ramp do per_step[i] = 0 end
+
     for y = 0, H - 1 do
       for x = 0, W - 1 do
         if mask[y][x] then
-          local dhdx = (height(x+1, y) - height(x-1, y)) * 0.5
-          local dhdy = (height(x, y+1) - height(x, y-1)) * 0.5
-          local nx, ny, nz = -dhdx, -dhdy, 1.0
-          local nl = math.sqrt(nx*nx + ny*ny + nz*nz)
-          nx, ny, nz = nx/nl, ny/nl, nz/nl
+          local nx, ny, nz = normal_at(x, y)
 
           local ndotl = nx*lx + ny*ly + nz*lz
           if ndotl < 0 then ndotl = 0 end
+
+          if fx ~= nil then
+            -- The fill is a second diffuse term, summed with the key and clamped rather
+            -- than averaged in. Averaging would scale the key down as the fill came up,
+            -- so the brightest step would drop out of the result and adding a fill light
+            -- would darken the sprite overall. Clamped, the key side is untouched (an
+            -- opposing fill contributes nothing where the key peaks) and only the shadow
+            -- side rises, which is the whole point of a fill.
+            local ndotf = nx*fx + ny*fy + nz*fz
+            if ndotf > 0 then ndotl = ndotl + ARG.fill_strength * ndotf end
+            if ndotl > 1 then ndotl = 1 end
+          end
+
           local lit = ARG.ambient + (1.0 - ARG.ambient) * ndotl
 
           if ARG.rim > 0 then
@@ -418,6 +506,7 @@ def shade_region_by_light(
           local c = ramp[idx]
           local _, _, _, a = px_to_rgba(spr, img:getPixel(x, y))
           img_set(img, x, y, rgba_to_px(spr, c.r, c.g, c.b, a))
+          per_step[idx] = per_step[idx] + 1
           shaded = shaded + 1
         end
       end
@@ -427,9 +516,290 @@ def shade_region_by_light(
     save_sprite(spr)
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
                region_pixels = count, shaded_pixels = shaded,
-               depth = maxd, ramp_size = #ramp }
+               depth = maxd, ramp_size = #ramp, per_step = per_step,
+               fill_light = (ARG.fill ~= nil) }
     """
     return run_lua(body, args)
+
+
+@mcp.tool()
+def specular_highlight(
+    filename: str,
+    ramp: list[str],
+    light_angle: float = 135.0,
+    light_z: float = 0.45,
+    size: int = 2,
+    tightness: float = 0.7,
+    bulge: float = 1.0,
+    highlight_color: str | None = None,
+    base_color: str | None = None,
+    tolerance: float = 24.0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Place a small specular highlight where the light actually reflects at the viewer.
+
+    `shade_region_by_light` spreads the ramp's top step over the whole lit side, which is
+    what a matte surface does and why its output reads as plastic. A specular is the other
+    thing at the top of the ramp: a two or three pixel glint on the one part of the form
+    whose normal sends the light straight back at you. It is the difference between a
+    stone and a gem, and it is small by definition.
+
+    Run this **after** `shade_region_by_light`, on the same region and the same light: it
+    reuses that tool's region mask, distance field and surface normals, so the glint lands
+    inside the highlight rather than beside it.
+
+    **Reserve the top step for it.** Shade the form with the ramp *minus its last entry*
+    and then call this with the whole ramp:
+
+        shade_region_by_light(f, ramp[:-1], light_angle=135)
+        specular_highlight(f, ramp, light_angle=135, size=2)
+
+    Shading with the full ramp spreads its top step over the entire lit side, which leaves
+    nothing above it for a glint to be: the specular then paints pixels the colour they
+    already are, and that call is refused rather than reported as a success that changed
+    nothing. The refusal says this and names the way out, so it is a reminder rather than
+    a puzzle.
+
+    Where it goes: on the normal closest to the half-vector between the light and the
+    viewer, not on the normal closest to the light. That offset toward the viewer is what
+    makes a specular sit inside the lit side instead of out on its shoulder, and it is the
+    whole reason this is a separate tool rather than a brighter `bias`.
+
+    What it will not do: touch an edge pixel. A specular on the silhouette's border reads
+    as a hole punched in the form rather than as a shine, so only pixels with all eight
+    neighbours inside the region are candidates. On a region with no such pixel there is
+    nothing to put a glint on, and the call is refused with the same message
+    `shade_region_by_light` gives for a region too thin to shade.
+
+    Args:
+        ramp: Colours darkest first, the same ramp the form was shaded with.
+        light_angle: Degrees, and it must match the shading pass or the glint contradicts
+            the form. 0 is from the right, 90 from above, 135 from the upper left.
+        light_z: How much the light comes from the viewer, 0 to 1. Match the shading pass.
+        size: How many pixels the glint covers. A count, not a radius: a specular is two
+            or three pixels on most sprites, and the point of this tool is that it stays
+            that small. The pixels are grown outward from the brightest one and stay
+            touching, so the result is one glint rather than scattered dots.
+        tightness: How narrowly the surface has to face the reflection to count, 0 to 1,
+            as a threshold on the normal against the half-vector. High is a tiny hard
+            glint on a polished surface; low lets a broader shoulder qualify, from which
+            `size` still takes only the best pixels. If nothing clears it the call is
+            refused and the message names the best alignment the form actually offers, so
+            the number to lower it to is in the error rather than a guess.
+        bulge: How rounded the form reads. Match the shading pass, or the normals this
+            works from are not the normals the shading used.
+        highlight_color: The glint's colour, defaulting to the ramp's top step so
+            `palette_conformance` stays at 1.0. This is the flag for metal, which is the
+            one material whose specular is genuinely brighter than its own ramp: name a
+            near-white there. A colour that is not on `ramp` will drop conformance against
+            that ramp, which is the honest trade rather than a bug, and the result says
+            whether it happened.
+        base_color: Only consider pixels near this colour, as for `shade_region_by_light`.
+            Scope it the same way you scoped the shading.
+        tolerance: How close a pixel must be to `base_color` to count as part of the
+            region. Ignored when `base_color` is omitted.
+        layer: Target layer (default: top layer).
+        frame: Target frame, 1-based.
+
+    Returns `specular_pixels` (how many were placed, which is below `size` when the
+    eligible area is smaller than the budget), `pixels` (where they went, so a later
+    `remove_stray_pixels` can be told to protect them), `pixels_changed` (how many were
+    not already that colour) and `peak_alignment`, the best normal against the
+    half-vector found anywhere in the region.
+    """
+    if len(ramp) < 2:
+        raise ValidationFailed("ramp needs at least 2 colours to take a highlight from.")
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    if not 0.0 <= light_z <= 1.0:
+        raise ValidationFailed("light_z must be between 0 and 1.")
+    if not 0.0 <= tightness <= 1.0:
+        raise ValidationFailed(
+            "tightness must be between 0 and 1: it is a threshold on how closely the "
+            "surface faces the reflection, and both ends of that are alignments."
+        )
+    if bulge <= 0:
+        raise ValidationFailed("bulge must be greater than 0.")
+    if tolerance < 0:
+        raise ValidationFailed("tolerance must not be negative.")
+    size = check_count(
+        "size", size, MAX_SPECULAR_PIXELS, minimum=1,
+        remedy="A specular wider than that is a second lit region, which "
+               "shade_region_by_light describes better than a glint can.",
+    )
+
+    parsed_ramp = [parse_color(c) for c in ramp]
+    spec_color = parse_color(highlight_color) if highlight_color else parsed_ramp[-1]
+    half = lighting.specular_direction(light_angle, light_z)
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "ramp": parsed_ramp,
+        "spec": spec_color,
+        "base": parse_color(base_color) if base_color else None,
+        "half": list(half),
+        "size": size,
+        "tightness": float(tightness),
+        "bulge": float(bulge),
+        "tolerance": float(tolerance),
+    }
+    body = FRAME_GUARD_LUA + _RAMP_LUA + _FIELD_LUA + _FORM_LUA + """
+    local spr = open_sprite(ARG.src)
+    local layer = find_layer(spr, ARG.layer)
+    if layer.isGroup then error("Cannot shade a group layer: " .. layer.name, 0) end
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img = get_draw_image(spr, layer, framenum)
+    local W, H = img.width, img.height
+
+    local mask, count = build_region(spr, img, W, H, ARG.base, ARG.tolerance)
+    if count == 0 then
+      error("Nothing to highlight: no pixel matched. Check base_color and tolerance, " ..
+            "or whether a selection is excluding the region.", 0)
+    end
+
+    local field, maxd = require_interior(mask, W, H)
+    local normal_at = form_normals(mask, field, maxd, W, H, ARG.bulge)
+
+    local hx, hy, hz = ARG.half[1], ARG.half[2], ARG.half[3]
+
+    local function in_region(x, y)
+      if x < 0 or y < 0 or x >= W or y >= H then return false end
+      return mask[y][x]
+    end
+
+    -- A candidate needs all eight neighbours inside the region. That is exactly "not an
+    -- edge pixel", which is the craft rule this tool exists to encode: a glint on the
+    -- border reads as a hole, not as a shine. It also makes a canvas-edge pixel a
+    -- non-candidate for free, since its off-canvas neighbours are not in the region.
+    local function is_interior(x, y)
+      for dy = -1, 1 do
+        for dx = -1, 1 do
+          if not in_region(x + dx, y + dy) then return false end
+        end
+      end
+      return true
+    end
+
+    -- One table doing two jobs: the score of every pixel that clears the threshold, and
+    -- the membership test for "could be part of the glint". `peak` is tracked over every
+    -- interior pixel regardless of the threshold, because that is the number the refusal
+    -- has to quote.
+    local elig = {}
+    local peak, interior_count = 0.0, 0
+    for y = 0, H - 1 do
+      elig[y] = {}
+      for x = 0, W - 1 do
+        if mask[y][x] and is_interior(x, y) then
+          interior_count = interior_count + 1
+          local nx, ny, nz = normal_at(x, y)
+          local ndoth = nx*hx + ny*hy + nz*hz
+          if ndoth < 0 then ndoth = 0 end
+          if ndoth > peak then peak = ndoth end
+          if ndoth >= ARG.tightness then elig[y][x] = ndoth end
+        end
+      end
+    end
+
+    if interior_count == 0 then
+      error(string.format(
+        "This region is too thin to shade: its deepest point is %.1f pixels from an " ..
+        "edge, so there is no interior to describe. Place the highlight and shadow by " ..
+        "hand with draw_pixels instead.", maxd), 0)
+    end
+
+    local sx, sy, best = nil, nil, nil
+    for y = 0, H - 1 do
+      for x = 0, W - 1 do
+        local s = elig[y][x]
+        -- Strictly greater, so the first pixel in scan order wins a tie and the same
+        -- sprite always gets the same glint in the same place.
+        if s ~= nil and (best == nil or s > best) then sx, sy, best = x, y, s end
+      end
+    end
+
+    if sx == nil then
+      error(string.format(
+        "No part of this form faces the reflection closely enough for a specular: the " ..
+        "best alignment anywhere in the region is %.2f and tightness is %.2f. Lower " ..
+        "tightness below %.2f, or change light_angle and light_z so the light actually " ..
+        "reflects toward the viewer.", peak, ARG.tightness, peak), 0)
+    end
+
+    -- Grown outward from the brightest pixel, always taking the best neighbour of what is
+    -- already chosen, so the glint is one connected blob. Picking the top `size` scores
+    -- globally would scatter it across every part of the form that happens to face the
+    -- light, which is not a specular.
+    local chosen, picked = {}, {}
+    local function take(x, y)
+      if chosen[y] == nil then chosen[y] = {} end
+      chosen[y][x] = true
+      picked[#picked + 1] = { x = x, y = y }
+    end
+    take(sx, sy)
+    while #picked < ARG.size do
+      local cx, cy, cs = nil, nil, nil
+      for _, p in ipairs(picked) do
+        for dy = -1, 1 do
+          for dx = -1, 1 do
+            local nx2, ny2 = p.x + dx, p.y + dy
+            if nx2 >= 0 and ny2 >= 0 and nx2 < W and ny2 < H then
+              local s = elig[ny2][nx2]
+              local already = chosen[ny2] ~= nil and chosen[ny2][nx2]
+              if s ~= nil and not already and (cs == nil or s > cs) then
+                cx, cy, cs = nx2, ny2, s
+              end
+            end
+          end
+        end
+      end
+      if cx == nil then break end
+      take(cx, cy)
+    end
+
+    local c = ARG.spec
+    local changed, coords = 0, {}
+    for i, p in ipairs(picked) do
+      -- Alpha carried through, so a glint on an anti-aliased edge pixel cannot change the
+      -- silhouette. It cannot reach one anyway, but the invariant is cheaper to keep than
+      -- to reason about.
+      local old = img:getPixel(p.x, p.y)
+      local _, _, _, a = px_to_rgba(spr, old)
+      local new = rgba_to_px(spr, c.r, c.g, c.b, a)
+      if new ~= old then changed = changed + 1 end
+      img_set(img, p.x, p.y, new)
+      coords[i] = { p.x, p.y }
+    end
+
+    -- A glint the same colour as what was already there is not a glint. This happens by
+    -- default rather than rarely: shade_region_by_light spreads the ramp's top step over
+    -- the whole lit side, which is the matte look the issue asking for this tool called
+    -- out, and a specular painted in that same step lands invisibly on top of it. Saying
+    -- "ok, 3 pixels" there would be a tool reporting success for a no-op, so it refuses
+    -- and names both ways out.
+    if changed == 0 then
+      error(string.format(
+        "This glint would be invisible: all %d pixels it covers are already the colour " ..
+        "it would paint them. shade_region_by_light spreads the ramp's top step across " ..
+        "the whole lit side, so there is nothing left at the top for a specular to be. " ..
+        "Shade the form with the ramp minus its last entry, which reserves that step " ..
+        "for this call, or pass highlight_color for a glint brighter than the ramp.",
+        #picked), 0)
+    end
+
+    commit_image(spr, layer, framenum, img)
+    save_sprite(spr)
+    RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
+               region_pixels = count, interior_pixels = interior_count,
+               specular_pixels = #picked, pixels_changed = changed,
+               requested_size = ARG.size, pixels = coords,
+               seat = { sx, sy }, peak_alignment = peak, depth = maxd }
+    """
+    result = run_lua(body, args)
+    # Said in Python rather than Lua because only Python knows what the caller asked for:
+    # the Lua is handed one colour and cannot tell a ramp step from a near-white glint.
+    result["highlight_on_ramp"] = highlight_color is None or spec_color in parsed_ramp
+    return result
 
 
 @mcp.tool()

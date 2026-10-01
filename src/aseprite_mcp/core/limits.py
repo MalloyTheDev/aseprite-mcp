@@ -68,6 +68,49 @@ MAX_ASSESS_PIXELS = 1_048_576
 # histogram rather than a finding, and the count still says how many there were.
 MAX_DIFF_COLORS = 24
 
+# --- Lighting and effects -------------------------------------------------- #
+# These three guard the *picture* rather than the process, which makes them the odd family
+# in this module: none of them bounds an allocation or a loop. They are here because the
+# alternative is three magic numbers buried in three tool bodies, and a cap nobody can
+# find is a cap nobody can raise.
+#
+# How strong a fill light may be, as a fraction of the key light. A fill that matches the
+# key cancels the form: the two terminators land on opposite sides and the result is the
+# flat fill the shading was meant to replace. Pixel art conventionally fills at a third to
+# a half of key, so this leaves plenty of headroom above the usual choice while refusing
+# the value that destroys the thing being asked for.
+MAX_FILL_LIGHT_STRENGTH = 0.75
+# Pixels in one specular highlight. A specular is two or three pixels on most sprites,
+# and a glint spread wide enough to need a cap has stopped being a glint and become a
+# second lit region, which shade_region_by_light describes properly. The number is also
+# what bounds the blob-growing loop, which is quadratic in it.
+MAX_SPECULAR_PIXELS = 64
+# Rings in one glow. The distance field is a chamfer transform over the whole canvas, so
+# the cost is the same whatever the radius and this is not a work bound. It is a craft
+# bound: a glow wider than a sprite is tall has stopped being a halo and become a
+# background fill, which fill_gradient does better.
+MAX_GLOW_RADIUS = 32
+# Pixels of penumbra around a cast shadow's core. Each one is another whole ellipse
+# rasterised and another ramp step consumed, and a shadow whose soft edge is wider than
+# the hard core reads as a gradient rather than as a shadow.
+MAX_SHADOW_SOFTNESS = 8
+# Points one cast shadow's ellipse may rasterise. Unlike the four above, this one guards
+# the *allocation* rather than the picture, which is why it is a large round number rather
+# than a craft judgement.
+#
+# `ellipse_offsets` emits one two-element Lua table per pixel of a filled ellipse's area
+# and builds the entire list before returning it, so the point count IS the memory. The
+# radii are quadratic in the inputs and the canvas cap is generous: a 16,384-wide sprite
+# with a near-full-width subject under a low light reaches roughly 1.5e8 points, which is
+# an out-of-memory with no partial result, reached from arguments that are each
+# individually valid. A per-axis check cannot see it, exactly as a canvas dimension cannot
+# see a 17 GB canvas.
+#
+# 2^21 points is a few hundred megabytes at Lua's per-table overhead, and an ellipse that
+# large is already far past what any sprite displays usefully, so this refuses the
+# allocation without second-guessing a genuinely large sprite.
+MAX_SHADOW_ELLIPSE_POINTS = 2_097_152
+
 # --- Animation ------------------------------------------------------------- #
 # How many times a tag may say it plays. Aseprite stores the count in 16 bits and treats
 # 0 as "forever", which is how a cycle is marked; the cap is the format's, not ours.
