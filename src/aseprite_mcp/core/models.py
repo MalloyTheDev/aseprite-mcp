@@ -2,7 +2,7 @@
 
 A small, dependency-free (stdlib `dataclasses` only) validation boundary so parsing
 and validation live in one place as the codebase grows. **Public MCP tool signatures
-are unchanged** — tools still accept plain `str`/`int`; these models are used
+are unchanged**: tools still accept plain `str`/`int`; these models are used
 internally (e.g. `common.parse_color` delegates to `ColorSpec.parse`).
 """
 

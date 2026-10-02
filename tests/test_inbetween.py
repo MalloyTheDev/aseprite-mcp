@@ -220,12 +220,6 @@ def test_the_perpendicular_is_the_axis_a_smear_thins_across():
     assert inbetween.perpendicular((0, -5)) == (1.0, 0.0)
 
 
-def test_the_half_extent_is_the_box_projected_onto_that_axis():
-    box = {"x": 0, "y": 0, "width": 11, "height": 21}
-    assert inbetween.box_half_extent(box, (0.0, 1.0)) == 10.0
-    assert inbetween.box_half_extent(box, (1.0, 0.0)) == 5.0
-
-
 def test_the_plots_come_back_furthest_first_so_the_nearer_copy_wins():
     plan = inbetween.plan_smear((10, 0), mode="stretch", strength=1.0, steps=3,
                                 ramp_length=5)
@@ -314,3 +308,152 @@ def test_headroom_is_taken_from_the_lightest_colour_in_the_art():
     both = [{"px": 1, "r": 44, "g": 27, "b": 46},
             {"px": 2, "r": 224, "g": 122, "b": 95}]
     assert inbetween.ramp_headroom(both, RAMP) == 3
+
+
+# --------------------------------------- the tween's anchor and sample cap, purely (#149)
+# These two decisions used to exist only in Lua, where the pure tier cannot reach them, so
+# a regression in either kept CI green and was caught only by a --run-aseprite run, which
+# is the tier CI does not run at all. They are arithmetic over the source cel's drawn
+# bounds and belong here; the Lua keeps a transcription, and the agreement tests in
+# test_animation.py hold the two together.
+@pytest.mark.parametrize(
+    "mode, expected",
+    [
+        ("center", (11.5, 21.0)),
+        ("top", (11.5, 14.0)),
+        ("bottom", (11.5, 28.0)),
+        ("left", (8.0, 21.0)),
+        ("right", (15.0, 21.0)),
+    ],
+)
+def test_the_anchor_sits_on_pixel_centres_not_box_edges(mode, expected):
+    """An 8x15 box at (8, 14) spans columns 8..15 and rows 14..28.
+
+    Its centre is therefore 11.5 and 21.0, not 12.0 and 21.5: the measurement is over
+    pixel centres, and a box of even width has no centre pixel. Half a pixel sounds like
+    nothing and is the difference between a scaled shape that stays put and one that
+    creeps a pixel a frame, which over an eight frame tween has visibly walked.
+    """
+    bounds = {"x": 8, "y": 14, "width": 8, "height": 15}
+
+    assert inbetween.anchor_point(bounds, mode) == expected
+
+
+@pytest.mark.parametrize("mode", list(inbetween.ANCHORS))
+def test_every_anchor_of_a_one_pixel_box_is_that_pixel(mode):
+    """The degenerate case, which is the one an edge-measuring implementation gets wrong:
+    a 1x1 box has width - 1 == 0, so every anchor must land on the pixel itself rather
+    than half a pixel off it."""
+    assert inbetween.anchor_point({"x": 5, "y": 7, "width": 1, "height": 1}, mode) == (5.0, 7.0)
+
+
+def test_an_unknown_anchor_is_refused_rather_than_defaulted():
+    """The Lua transcription falls through to the centre for anything it does not
+    recognise, which is right there: by then the value has already been validated. Here it
+    raises, because this is the validating side and a silent default would turn a typo
+    into a tween that pivots somewhere the caller did not ask for."""
+    with pytest.raises(ValueError, match="unknown anchor"):
+        inbetween.anchor_point({"x": 0, "y": 0, "width": 4, "height": 4}, "middle")
+
+
+def test_the_sample_budget_counts_the_source_pass_as_well_as_the_frames():
+    """The source box is read once whatever the transforms are, so it is in the budget
+    rather than on top of it. A cap that ignored it would not bound the call it exists to
+    bound: on a large canvas that single pass is already millions of reads."""
+    bounds = {"x": 0, "y": 0, "width": 10, "height": 10}
+    identity = {"f00": 1.0, "f01": 0.0, "f10": 0.0, "f11": 1.0}
+
+    budget = inbetween.tween_sample_budget(
+        bounds, [identity], anchor="center", canvas_width=100, canvas_height=100)
+
+    # 100 for the source pass, plus an 11x11 destination box, and the asymmetry is the
+    # point: the 10x10 image of the identity transform gets a pixel of rounding slop each
+    # way, but this box sits at the canvas origin, so the slop to the left and above is
+    # clipped away and only the right and bottom actually grow. A budget that assumed the
+    # slop always adds two pixels per axis would over-count every cel drawn against an
+    # edge, which is where a sprite's content usually is after a trim.
+    assert budget["samples"] == 100 + 121
+    assert budget["boxes"] == [
+        {"x0": 0, "y0": 0, "x1": 10, "y1": 10, "off_canvas": False}
+    ]
+
+
+def test_a_frame_that_lands_off_the_canvas_is_reported_before_it_is_clipped():
+    """`off_canvas` is the caller's business and is invisible once the box has been
+    clipped to fit, so it is recorded from the unclipped box. The clipping itself is still
+    right: nothing off the canvas will be sampled, so it is not work."""
+    bounds = {"x": 0, "y": 0, "width": 10, "height": 10}
+    double = {"f00": 4.0, "f01": 0.0, "f10": 0.0, "f11": 4.0}
+
+    budget = inbetween.tween_sample_budget(
+        bounds, [double], anchor="center", canvas_width=16, canvas_height=16)
+
+    box = budget["boxes"][0]
+    assert box["off_canvas"] is True, "a 40px image on a 16px canvas does not fit"
+    assert (box["x0"], box["y0"], box["x1"], box["y1"]) == (0, 0, 15, 15), "clipped to fit"
+
+
+def test_a_rotation_is_bounded_by_its_corners_not_its_axes():
+    """The transform is affine, so the image of a rectangle is a parallelogram and its
+    axis-aligned bound is the bound of its four corners. A 45 degree rotation of a square
+    is the case that would expose an implementation measuring width and height instead:
+    the diagonal is longer than either side."""
+    import math as _math
+    bounds = {"x": 0, "y": 0, "width": 11, "height": 11}
+    half = _math.sqrt(2) / 2
+    turned = {"f00": half, "f01": -half, "f10": half, "f11": half}
+
+    budget = inbetween.tween_sample_budget(
+        bounds, [turned], anchor="center", canvas_width=100, canvas_height=100)
+
+    box = budget["boxes"][0]
+    span = box["x1"] - box["x0"] + 1
+    assert span > 11 + 2, f"a turned square needs more than its own width, got {span}"
+
+
+# ------------------------------------------- what a trail copy keeps, per line (#150)
+def test_the_whole_span_survives_at_the_subject_and_only_its_centre_at_the_tip():
+    """A smear leaves the subject at the subject's own width and ends in a single pixel.
+    Those are the two ends of the taper and they are what `t` means."""
+    assert inbetween.trail_span(0.0, 10.0, 0.0) == (-0.5, 10.5)
+    assert inbetween.trail_span(0.0, 10.0, 1.0) == (4.5, 5.5)
+
+
+def test_a_span_that_does_not_straddle_zero_tapers_toward_its_own_centre():
+    """The whole of #150 in one assertion.
+
+    This is the L's foot: a line whose own span sits between 8.5 and 11.5, well away from
+    the subject's box centre. The taper must converge on 10, the middle of that span. The
+    rule it replaced measured distance from the box centre instead, so a part of the shape
+    that happened to sit far from the middle of the bounding box lost its trail no matter
+    how wide it was.
+    """
+    low, high = inbetween.trail_span(8.5, 11.5, 1.0)
+
+    assert (low + high) / 2 == 10.0, "converges on the line's own centre"
+    assert not inbetween.keeps_in_trail(0.0, 8.5, 11.5, 1.0), (
+        "the subject's box centre is not in this line's span and must not attract it"
+    )
+
+
+@pytest.mark.parametrize("t", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_a_one_pixel_line_keeps_its_trail_for_the_whole_length(t):
+    """A feature one pixel wide is already as thin as a taper can make it, so it must
+    survive to the tip. The half pixel of slack is what guarantees that: without it an
+    even span would taper to nothing and the trail would end in a gap rather than a
+    point."""
+    assert inbetween.keeps_in_trail(7.0, 7.0, 7.0, t)
+
+
+def test_the_taper_never_widens_as_it_recedes():
+    """Monotone by construction, and worth pinning: a reach that grew with `t` would read
+    as a trumpet rather than a smear, and the error would look like a wrong sign in one
+    place rather than like a broken shape."""
+    reaches = [
+        inbetween.trail_span(0.0, 20.0, t / 10.0)[1]
+        - inbetween.trail_span(0.0, 20.0, t / 10.0)[0]
+        for t in range(11)
+    ]
+
+    assert reaches == sorted(reaches, reverse=True)
+    assert reaches[0] > reaches[-1], "and it actually narrows"

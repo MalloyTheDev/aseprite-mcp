@@ -1,9 +1,9 @@
-"""Shared manifest schema for workflow tools — ``workflow_manifest.v1``.
+"""Shared manifest schema for workflow tools: ``workflow_manifest.v1``.
 
 Workflow tools (see ``workflow.py``) return a standardized manifest so the
 asset-production layer can grow without every tool inventing its own result shape.
 This module is pure-Python (no Aseprite, no MCP registration) and uses only stdlib
-typing + small builder helpers — intentionally not a framework.
+typing + small builder helpers, intentionally not a framework.
 
 Shape (always-present keys: ok, schema_version, kind, created_files,
 suggested_next_actions, warnings; the rest are included only when relevant):

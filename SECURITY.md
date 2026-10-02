@@ -3,20 +3,20 @@
 ## Supported versions
 
 Security fixes target the latest released `0.8.x` line and `main`. Older tags are not
-patched — upgrade to the newest release.
+patched; upgrade to the newest release.
 
 ## Threat model
 
 `aseprite-mcp` hands an AI agent (or any MCP client) two capabilities:
 
-1. a **file capability** — it reads and writes image/sprite files, and
+1. a **file capability**: it reads and writes image/sprite files, and
 2. the ability to **run a local Aseprite binary** with generated Lua scripts.
 
 The agent's instructions are treated as **untrusted input**. The design goal is that a
 misbehaving or prompt-injected agent cannot escape the workspace, clobber arbitrary files,
 inject code into the Aseprite process, or exhaust the host with a single oversized call.
 It explicitly does **not** sandbox the Aseprite binary itself or the contents you place in
-the workspace — see *Out of scope* below.
+the workspace; see *Out of scope* below.
 
 One consequence is worth stating outright rather than leaving to be assembled from those
 two exclusions: **image parsing happens in Aseprite, not here.** Opening, importing or
@@ -78,7 +78,7 @@ a file you do not trust into the workspace as handing it to that parser.
   `export_layers`, `export_tags`, `export_frames`, `export_onion_skin`, `import_image`.)
 - **No shell, no Lua injection.** Aseprite is invoked with list-form arguments (never a
   shell string). Every user value is passed into generated Lua through an **escaped `ARG`
-  table** — user input is never concatenated into Lua source. The `to_lua` escaping is
+  table**: user input is never concatenated into Lua source. The `to_lua` escaping is
   covered by Hypothesis property tests asserting strings can't break out of their literal.
 - **Size limits (DoS guard, v0.7.0+).** Batch op-lists and pixel/tile/colour lists are
   capped (`core/limits.py`); exceeding a cap raises `ValidationFailed` before any work

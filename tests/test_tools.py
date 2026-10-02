@@ -1,5 +1,5 @@
 """Integration tests covering the core tool surface. Require a real Aseprite
-install (skipped automatically otherwise — see conftest.py)."""
+install (skipped automatically otherwise; see conftest.py)."""
 
 from aseprite_mcp.tools import (
     cels,

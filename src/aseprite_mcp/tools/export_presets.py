@@ -1,4 +1,4 @@
-"""Engine export presets — one-call exports into game-engine-native resource files.
+"""Engine export presets: one-call exports into game-engine-native resource files.
 
 These compose the sprite-sheet export with an engine adapter in `core/engines/`: run
 Aseprite once to produce a packed sheet (+ JSON rects), then generate the engine resource
@@ -33,7 +33,7 @@ def export_godot_spriteframes(
     """Export a sprite as a Godot 4 ``SpriteFrames`` resource (.tres) + a packed sheet.
 
     Produces three files: a packed PNG sprite sheet, its JSON frame/tag metadata, and a
-    ``SpriteFrames`` .tres that references the sheet via ``AtlasTexture`` regions — one
+    ``SpriteFrames`` .tres that references the sheet via ``AtlasTexture`` regions, one
     Godot animation per Aseprite tag (or a single ``default`` animation if untagged), with
     per-frame timing taken from Aseprite frame durations.
 
@@ -84,7 +84,7 @@ def export_godot_spriteframes(
         suggested_next_actions=[
             f"Copy the .tres and sheet into your Godot project; ensure the sheet imports "
             f"at '{res_path}' (override with texture_res_path if it lives elsewhere).",
-            f"Assign the SpriteFrames to an AnimatedSprite2D — {anim_count} animation(s) ready.",
+            f"Assign the SpriteFrames to an AnimatedSprite2D; {anim_count} animation(s) ready.",
             "Re-run with overwrite=True to regenerate after editing the sprite.",
         ],
     )
@@ -101,7 +101,7 @@ def export_slice_metadata(
     Each slice becomes ``{name, type, id, bounds, pivot, nine_slice, color, data,
     raw_data}``. **Type detection:** a slice's user-data JSON ``type`` wins; otherwise the
     name convention ``<type>:<id>`` (recognized types: hitbox, hurtbox, collision, interact,
-    pivot, origin, attach, spawn, nine_slice — anything else becomes ``"custom"``, never an
+    pivot, origin, attach, spawn, nine_slice; anything else becomes ``"custom"``, never an
     error). ``id`` comes from the data ``id`` or the name's ``:<id>`` suffix. ``nine_slice``
     (Aseprite's 9-patch center) and ``pivot`` are emitted whenever the slice has them. Slice
     user-data that is valid JSON is parsed into ``data``; the raw string is kept in ``raw_data``.

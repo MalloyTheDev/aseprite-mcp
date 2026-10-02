@@ -47,6 +47,32 @@ def _drawn_by_hand(name: str, size: int, frame: int = 1, layer: str | None = Non
     return total
 
 
+def _box_by_hand(name: str, size: int, frame: int = 1, layer: str | None = None):
+    """The content box read the slow way, from the same pixels `_drawn_by_hand` counts.
+
+    The point of having both is that the shortcut must agree with itself: `drawn_pixels`
+    and `content` are two readings of one definition of "drawn", and this is that
+    definition spelled out independently of the prelude that implements it. `get_pixels`
+    reports RGBA whatever the colour mode, so a pixel held in a palette entry whose own
+    alpha is 0 arrives here with alpha 00 and is not content, which is exactly the case
+    the two fields used to answer differently.
+    """
+    xs: list[int] = []
+    ys: list[int] = []
+    for y0 in range(0, size, 64):
+        rows = inspect.get_pixels(name, 0, y0, size, min(64, size - y0),
+                                  frame=frame, layer=layer)["pixels"]
+        for dy, row in enumerate(rows):
+            for x, px in enumerate(row):
+                if px[7:9] != "00":
+                    xs.append(x)
+                    ys.append(y0 + dy)
+    if not xs:
+        return None
+    return {"x": min(xs), "y": min(ys),
+            "width": max(xs) - min(xs) + 1, "height": max(ys) - min(ys) + 1}
+
+
 # ------------------------------------------------------- the buckets, from real edits
 def test_two_identical_frames_say_nothing_changed(request):
     name = _two_frames(request)
@@ -183,6 +209,89 @@ def test_a_transparent_palette_entry_counts_as_undrawn(request):
     reported = inspect.diff_sprites(name, 1, other_frame=2)["a"]["drawn_pixels"]
 
     assert reported == 16, "index 2 is #ffffff00, so that pixel is not drawn"
+
+
+def test_the_content_box_and_the_count_agree_about_a_transparent_palette_entry(request):
+    """One result, one definition of drawn. These two fields used to have two.
+
+    `drawn_pixels` came from the prelude's byte scan, which treats both kinds of indexed
+    transparency as empty, and `content` came from `Image:shrinkBounds`, which honours
+    the transparent index only. So a pixel held in a palette entry whose own alpha is 0
+    was nothing to the count and content to the box, and the result reported both numbers
+    next to each other (#172). Measured before the fix on this sprite: `drawn_pixels: 16`
+    beside a 5x5 box at 2,2, whose last row and column nothing in the sprite can draw.
+    """
+    name = _indexed(request)
+    drawing.draw_pixels(name, [{"x": 6, "y": 6}], "index:2", frame=1)
+
+    side = inspect.diff_sprites(name, 1, other_frame=2)["a"]
+
+    assert side["drawn_pixels"] == _drawn_by_hand(name, 8, frame=1) == 16
+    assert side["content"] == _box_by_hand(name, 8, frame=1)
+    assert side["content"] == {"x": 2, "y": 2, "width": 4, "height": 4}, (
+        "the box grew to cover a pixel the count correctly excluded"
+    )
+
+
+def test_the_sprite_from_the_report_measures_the_same_both_ways(request):
+    """The 8x8 sprite the defect was measured on, built index by index as it was there.
+
+    Transparent index 0, index 1 an opaque brown, index 2 a palette entry that is itself
+    fully transparent; art at 2,2 to 3,3 in index 1 and one pixel at 6,6 in index 2.
+    `shrinkBounds` answered 5x5 at 2,2 for that, beside a count of 4.
+    """
+    name = f"diff/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 8, 8, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", "#6b4a2fff", "#ffffff00"])
+    frames.add_frame(name)
+    drawing.draw_rectangle(name, 2, 2, 2, 2, "index:1", filled=True, frame=1)
+    drawing.draw_pixels(name, [{"x": 6, "y": 6}], "index:2", frame=1)
+
+    side = inspect.diff_sprites(name, 1, other_frame=2)["a"]
+
+    assert side["drawn_pixels"] == 4
+    assert side["content"] == {"x": 2, "y": 2, "width": 2, "height": 2}
+
+
+def test_a_side_with_nothing_drawn_has_no_content_box(request):
+    """No box at all rather than a zero-sized rectangle, so an empty frame cannot be
+    read as one holding a pixel at the origin.
+
+    The key is absent rather than null, which is what a nil in the Lua result table
+    becomes and what this reported before the box moved into the prelude. Pinned as it
+    is rather than changed, since the shape of the empty case is not what #172 was about.
+    """
+    name = _two_frames(request)
+    layers.add_layer(name, name="blank")
+
+    side = inspect.diff_sprites(name, 1, other_frame=2, layer="blank")["a"]
+
+    assert side["drawn_pixels"] == 0
+    assert "content" not in side
+    assert _box_by_hand(name, 16, frame=1, layer="blank") is None
+
+
+@pytest.mark.parametrize("mode", ["rgb", "gray"])
+def test_the_content_box_is_unchanged_on_a_sprite_with_one_kind_of_transparency(
+    request, mode
+):
+    """Only indexed sprites had two answers, so only they may change answer.
+
+    On RGB and grayscale `shrinkBounds` and the byte scan agree by construction, and this
+    pins that the box moving into the prelude did not shift it by a pixel: 4x3 at 5,7 on
+    both, measured.
+    """
+    name = f"diff/{request.node.name}{mode}.aseprite"
+    sprite.create_sprite(name, 32, 32, "rgb")
+    drawing.draw_rectangle(name, 5, 7, 4, 3, "#c08040", filled=True, frame=1)
+    if mode != "rgb":
+        sprite.set_color_mode(name, mode)
+    frames.add_frame(name)
+
+    side = inspect.diff_sprites(name, 1, other_frame=2)["a"]
+
+    assert side["content"] == _box_by_hand(name, 32, frame=1)
+    assert side["content"] == {"x": 5, "y": 7, "width": 4, "height": 3}
 
 
 def test_a_change_on_the_last_row_is_found(request):

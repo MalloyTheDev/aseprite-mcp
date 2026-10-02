@@ -1,6 +1,6 @@
 """Text rendering. Renders text with Pillow (built-in bitmap font by default, or
 any TrueType font you point it at), thresholds it to crisp pixels, and plots it
-onto the sprite in a single colour — ideal for pixel-art labels and HUDs."""
+onto the sprite in a single colour, ideal for pixel-art labels and HUDs."""
 
 from __future__ import annotations
 

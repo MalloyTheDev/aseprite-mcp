@@ -1,10 +1,10 @@
-"""Workflow-level tools — agent-friendly asset scaffolding.
+"""Workflow-level tools: agent-friendly asset scaffolding.
 
 These compose the low-level tools into one-call workflows that produce game-ready
 asset scaffolds, and return a structured *manifest* (created files, paths, frames,
 tags, dimensions, and suggested next actions) so an agent can keep going.
 
-They are deterministic scaffolding — no AI/model generation. Build on top of them
+They are deterministic scaffolding: no AI/model generation. Build on top of them
 with the low-level drawing/effects/tilemap tools.
 """
 
@@ -290,10 +290,10 @@ def validate_sprite_for_game_export(
 ) -> dict:
     """Check whether a sprite is game-ready against the criteria you specify.
 
-    Runs a series of checks — does the file open, do dimensions match (exactly or as
+    Runs a series of checks: does the file open, do dimensions match (exactly or as
     a tile multiple), is the colour mode allowed, are frame counts / required animation
     tags present, is the background transparent, is the palette within budget, do
-    expected export files exist, and is sprite-sheet metadata readable — plus soft
+    expected export files exist, and is sprite-sheet metadata readable, plus soft
     warnings for oversized canvases, missing tags, and default/blank layer names.
 
     All criteria are optional; only the ones you pass are enforced. Returns a
@@ -366,7 +366,7 @@ def validate_sprite_for_game_export(
     )
 
     actions = (
-        ["The sprite passed all required checks — ready to export."]
+        ["The sprite passed all required checks, ready to export."]
         if report["passed"]
         else [f"Fix: {e}" for e in report["errors"]]
     )

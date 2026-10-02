@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from aseprite_mcp.core import inbetween
 from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.core.runner import AsepriteError
 from aseprite_mcp.tools import (
@@ -781,15 +782,30 @@ def test_a_transform_that_lands_off_the_canvas_is_refused_atomically(request):
 
 
 def test_a_tween_too_big_to_run_is_refused_with_the_sample_count(request):
+    """The cap is driven by the source cel's drawn *bounds*, not by how much of that box
+    is painted, so two specks at opposite corners buy the same refusal as a full canvas.
+
+    This used to fill 2048x2048 and copy the cel three times, which is 4.2 million
+    `img_set` calls to produce a bounding box, and the tween is refused before it reads a
+    single source pixel anyway. The Aseprite tier is the slowest part of the gate at
+    roughly eleven minutes, and a test that spends a chunk of that on setup it does not
+    need is a test that makes every future run worse.
+    """
     name = f"a/{request.node.name}.aseprite"
     sprite.create_sprite(name, 2048, 2048)
-    drawing.draw_rectangle(name, 0, 0, 2048, 2048, "#b04a5a", filled=True)
+    drawing.draw_rectangle(name, 0, 0, 2, 2, "#b04a5a", filled=True)
+    drawing.draw_rectangle(name, 2046, 2046, 2, 2, "#b04a5a", filled=True)
     for _ in range(3):
         frames.add_frame(name)
     for f in (2, 3, 4):
         cels.copy_cel(name, "Layer 1", 1, f)
-    with pytest.raises(AsepriteError, match="maximum is"):
+
+    with pytest.raises(AsepriteError, match="maximum is") as err:
         animation.tween_cels(name, "Layer 1", [1, 2, 3, 4], scale_to=1.6)
+
+    # The number in the refusal, not just the fact of one: that is what pins the box to
+    # the full canvas and so proves the cheaper fixture still reaches the same cap.
+    assert "would resample" in str(err.value)
 
 
 # --------------------------------------------------- refused before Aseprite is launched
@@ -1191,3 +1207,107 @@ def test_a_ramp_of_palette_indices_is_refused_with_the_reason():
     with pytest.raises(ValidationFailed, match="palette index"):
         animation.smear_frame("unused.aseprite", "Layer 1", 2,
                               ramp=["index:1", "index:2"])
+
+
+# ------------------------------------- the Lua transcriptions agree with Python (#149)
+# `anchor_point` and the sample budget exist twice: as the authority in
+# `core/inbetween.py`, where the pure tier can test them without an editor, and as a
+# transcription inside _TWEEN_LUA, because the bounds are the editor's to measure and this
+# tool is one Aseprite launch by design. A dual implementation is only safe while
+# something holds the two together. These are that something.
+@pytest.mark.parametrize("mode", list(inbetween.ANCHORS))
+def test_the_lua_anchor_agrees_with_the_python_one(request, mode):
+    """Driven through a real tween on a deliberately off-centre, even-sided box, which is
+    where an implementation measuring box edges rather than pixel centres diverges by half
+    a pixel."""
+    name = f"a/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 48, 48)
+    drawing.draw_rectangle(name, 7, 11, 8, 14, "#b04a5a", filled=True)
+    frames.add_frame(name)
+
+    result = animation.tween_cels(name, "Layer 1", [1, 2], scale_to=1.2, anchor=mode)
+
+    expected_x, expected_y = inbetween.anchor_point(result["source_bounds"], mode)
+    assert (result["anchor"]["x"], result["anchor"]["y"]) == (expected_x, expected_y)
+
+
+def test_the_lua_sample_budget_agrees_with_the_python_one(request):
+    """The cap's number, recomputed from outside the editor and compared rather than
+    trusted. `source_bounds` is in the result for exactly this: it is the one input only
+    Aseprite could supply, so with it in hand the rest of the arithmetic is reproducible.
+    """
+    name = f"a/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 64, 64)
+    drawing.draw_ellipse(name, 20, 24, 9, 13, "#b04a5a", filled=True)
+    for _ in range(3):
+        frames.add_frame(name)
+
+    result = animation.tween_cels(
+        name, "Layer 1", [1, 2, 3, 4], scale_to=1.7, rotate_to=30.0, anchor="bottom",
+        ease="ease_out")
+
+    plan = inbetween.plan_tween(
+        4, scale_from=1.0, scale_to=1.7, scale_y_from=1.0, scale_y_to=1.7,
+        rotate_from=0.0, rotate_to=30.0, opacity_from=255, opacity_to=255,
+        ease="ease_out")
+    budget = inbetween.tween_sample_budget(
+        result["source_bounds"], plan["steps"],
+        anchor="bottom", canvas_width=64, canvas_height=64)
+
+    assert result["samples"] == budget["samples"]
+    assert result["samples"] > 0, "a budget of zero would make the comparison vacuous"
+
+
+def test_a_concave_subject_tapers_each_part_against_its_own_width(request):
+    """#150: the taper used to be measured against one figure for the whole subject, taken
+    from its content box, so it was really measuring distance from the box's centre line.
+
+    An L is the case that separates the two. Here it is a 4px wide bar with a 16px wide
+    foot, moved straight down, so the perpendicular axis is horizontal and each row's own
+    span is what the trail should narrow toward. Measured before the fix and after, on
+    this exact fixture:
+
+        column:   8  9 10 11 | 12 13 14 15 16 17 18 19 20 21 22 23
+        before:   0  1  2  2 |  3  4  5  6  6  5  4  3  2  2  1  0
+        after:    2  6  6  2 |  3  4  5  6  6  5  4  3  2  2  1  0
+
+    Before, one lens centred on the box (x 15.5), with the thin bar out on its flank
+    getting almost nothing. After, two lenses, each centred on its own part. The foot is
+    unchanged, which is the sign the fix is targeted: the foot is the widest part, so its
+    own span already was the box's span.
+
+    The assertion is the invariant rather than those numbers: every part of the subject,
+    thin or wide, reaches the full trail length along its own centre line.
+    """
+    name = f"a/{request.node.name}.aseprite"
+    width, height = 32, 44
+    sprite.create_sprite(name, width, height)
+    for frame, top in ((1, 4), (2, 14)):
+        if frame == 2:
+            frames.add_frame(name)
+            drawing.clear_layer(name, frame=2)
+        drawing.draw_rectangle(name, 8, top, 4, 14, RAMP[2], filled=True, frame=frame)
+        drawing.draw_rectangle(name, 8, top + 14, 16, 4, RAMP[2], filled=True, frame=frame)
+
+    def painted() -> set:
+        rows = inspect.get_pixels(name, 0, 0, width, height, frame=2)["pixels"]
+        return {(x, y) for y in range(height) for x in range(width)
+                if rows[y][x] != "#00000000"}
+
+    before = painted()
+    result = animation.smear_frame(name, layer="Layer 1", frame=2, from_frame=1,
+                                   mode="stretch", strength=0.6, ramp=RAMP)
+    trail = painted() - before
+
+    def deepest(columns: range) -> int:
+        return max(len([1 for y in range(height) if (x, y) in trail]) for x in columns)
+
+    bar = deepest(range(8, 12))        # the 4px wide bar
+    foot = deepest(range(12, 24))      # the 16px wide foot, beyond the bar
+    copies = result["copies"]
+
+    assert foot == copies, "the widest part reaches the full trail length"
+    assert bar == copies, (
+        f"the thin bar only reaches {bar} of {copies} copies, so it is still being "
+        "tapered against something wider than itself"
+    )

@@ -1,4 +1,4 @@
-"""Output-path helpers — resolve through the workspace sandbox with no-clobber protection.
+"""Output-path helpers: resolve through the workspace sandbox with no-clobber protection.
 
 Output-writing tools are **no-clobber by default**: `ensure_output_path` refuses to write
 over an existing file unless `overwrite=True`. Sandbox/escape violations still raise

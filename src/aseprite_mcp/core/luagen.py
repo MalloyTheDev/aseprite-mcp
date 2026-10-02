@@ -388,41 +388,124 @@ local function img_solid(spr, img, x, y)
   return a > 0
 end
 
--- How many pixels of `img` would show, read straight out of the byte buffer.
+-- What "nothing is drawn here" looks like as a raw byte of Image.bytes, for this
+-- sprite's colour mode. Returns the stride between pixels, the 1-based offset within a
+-- pixel of the byte that decides visibility, and the set of values of that byte which
+-- mean empty.
 --
--- Every pixel's alpha sits at a fixed stride in Image.bytes, so counting what is drawn
--- needs no getPixel and no px_to_rgba per pixel. Measured on this machine: 0.088us per
--- pixel against 0.58us for the getPixel loop, so about 6.6x, which is the difference
--- between a 33Mpx verification scan costing 3 seconds and costing 20. Reading a block at
--- a time is the trick the frame hash uses: string.byte one index at a time is the slow
--- part, not the loop.
---
--- Shared rather than copied because two tools already need exactly this number and get
--- it wrong in different ways if they each write it: `diff_sprites` reports it per side,
--- and `set_color_mode` compares it across a conversion to refuse one that would make
--- drawn pixels disappear. Note what it does *not* give you: a bounding box (shrinkBounds
--- answers that, and disagrees with this about indexed transparency, see below) or
--- per-pixel colour. `trim_sprite` and `extract_palette` need those, so they still scan.
-local function visible_count(spr, img)
+-- One function rather than a copy per measurement, because every measurement below has
+-- to answer this question the same way and two of them did not. `visible_count` excluded
+-- a pixel held in a fully transparent palette entry; `Image:shrinkBounds`, which
+-- `diff_sprites` used for the content box, counted it as content. The result reported
+-- both numbers side by side, so one diff said "4 drawn pixels" beside a 5x5 box whose
+-- corner nothing in the sprite could draw (#172). Sharing the definition is what makes
+-- that disagreement unrepresentable rather than merely fixed.
+local function clear_bytes(spr)
   local cm = spr.colorMode
-  local stride, first, clear = 4, 4, { [0] = true }
   if cm == ColorMode.GRAY then
-    stride, first = 2, 2
+    -- graya: value, alpha.
+    return 2, 2, { [0] = true }
   elseif cm == ColorMode.INDEXED then
-    stride, first = 1, 1
     -- Indexed transparency is two separate things and both have to count: the sprite's
     -- transparent index, and any palette entry that is itself fully transparent. Testing
-    -- only the first is the bug this server has already been bitten by once. It is also
-    -- where Image:shrinkBounds parts company with us: it honours the transparent index
-    -- only, so a pixel held in a transparent palette entry counts as content to it and
-    -- as nothing here.
-    clear = { [spr.transparentColor] = true }
+    -- only the first is the bug this server has already been bitten by once (#138). It
+    -- is also where Image:shrinkBounds parts company with us: it honours the transparent
+    -- index only, so a pixel held in a transparent palette entry counts as content to it
+    -- and as nothing here.
+    local clear = { [spr.transparentColor] = true }
     local pal = spr.palettes[1]
     for ix = 0, #pal - 1 do
       if pal:getColor(ix).alpha == 0 then clear[ix] = true end
     end
+    return 1, 1, clear
+  end
+  -- rgba: r, g, b, alpha.
+  return 4, 4, { [0] = true }
+end
+
+-- How many pixels of `img` would show, and the box that holds them, from one pass over
+-- the byte buffer. The box is nil when nothing is drawn.
+--
+-- Every pixel's alpha sits at a fixed stride in Image.bytes, so measuring what is drawn
+-- needs no getPixel and no px_to_rgba per pixel. Measured on this machine over a
+-- 1024x1024 frame: 0.110us per pixel against 0.566us for the equivalent getPixel loop,
+-- so about 5.2x. Reading a block at a time is the trick the frame hash uses: string.byte
+-- one index at a time is the slow part, not the loop.
+--
+-- `shrinkBounds` is native and answers the box question in 0.0009us per pixel, which is
+-- 120x cheaper than this, so the trade is real and it is worth being clear about what is
+-- bought. Not speed: it honours the transparent index only, so what is paid for here is
+-- the count and the box agreeing about one sprite.
+local function visible_extent(spr, img)
+  local stride, first, clear = clear_bytes(spr)
+  local w, h = img.width, img.height
+  local s = img.bytes
+  local n = 0
+  local minx, miny, maxx, maxy
+
+  if #s ~= w * h * stride then
+    -- Not the layout assumed above. Measure the slow, certain way rather than a wrong
+    -- way: a box computed off a misread buffer is a confident wrong answer, and a
+    -- confident wrong answer is what this whole helper exists to stop producing.
+    for y = 0, h - 1 do
+      for x = 0, w - 1 do
+        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y))
+        if alpha > 0 then
+          n = n + 1
+          if minx == nil or x < minx then minx = x end
+          if maxx == nil or x > maxx then maxx = x end
+          if miny == nil then miny = y end
+          maxy = y
+        end
+      end
+    end
+  else
+    -- 512 is a multiple of every stride above, so `first` stays aligned block to block.
+    -- It is a byte count rather than a pixel count on purpose: string.byte returns one
+    -- value per byte, and asking it for a few thousand at once is how you find Lua's
+    -- result limit.
+    --
+    -- x and y are carried along rather than divided back out of the byte index: the
+    -- deciding bytes are visited in raster order, so two increments and a compare per
+    -- pixel beat a division, and that is most of why the box costs only about a quarter
+    -- more than the bare count.
+    local len, i = #s, 1
+    local block = 512
+    local x, y = 0, 0
+    while i <= len do
+      local j = math.min(i + block - 1, len)
+      local t = table.pack(string.byte(s, i, j))
+      for k = first, t.n, stride do
+        if not clear[t[k]] then
+          n = n + 1
+          if minx == nil or x < minx then minx = x end
+          if maxx == nil or x > maxx then maxx = x end
+          -- y never decreases, so the first hit fixes the top edge and the last one
+          -- fixes the bottom. Neither needs a comparison.
+          if miny == nil then miny = y end
+          maxy = y
+        end
+        x = x + 1
+        if x >= w then x = 0; y = y + 1 end
+      end
+      i = j + 1
+    end
   end
 
+  if minx == nil then return 0, nil end
+  return n, { x = minx, y = miny, width = maxx - minx + 1, height = maxy - miny + 1 }
+end
+
+-- Drawn pixels only, in the tightest loop that answers it.
+--
+-- Kept separate from `visible_extent` rather than discarding its box, because the one
+-- caller that measures whole sprites rather than one frame is `set_color_mode`'s
+-- verification, which is bounded at 33Mpx: paying the box's extra quarter there would
+-- cost most of a second to compute a rectangle nothing reads. Both go through
+-- `clear_bytes`, so they cannot drift about what empty means, which is the part that
+-- was actually wrong.
+local function visible_count(spr, img)
+  local stride, first, clear = clear_bytes(spr)
   local s = img.bytes
   if #s ~= img.width * img.height * stride then
     -- Not the layout assumed above. Count the slow, certain way rather than a wrong way.
@@ -436,10 +519,6 @@ local function visible_count(spr, img)
     return n
   end
 
-  -- 512 is a multiple of every stride above, so `first` stays aligned block to block.
-  -- It is a byte count rather than a pixel count on purpose: string.byte returns one
-  -- value per byte, and asking it for a few thousand at once is how you find Lua's
-  -- result limit.
   local n, len, i = 0, #s, 1
   local block = 512
   while i <= len do

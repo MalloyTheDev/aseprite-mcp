@@ -41,7 +41,7 @@ uv run pytest --run-aseprite  # full: unit + Aseprite integration + golden-outpu
 - **Pure-Python tests** (`tests/test_unit.py`, plus `test_properties.py`,
   `test_limits.py`, `test_output_paths.py`, `test_oplib.py`, `test_manifest.py`, …) cover
   colour parsing, Python→Lua serialization, the path sandbox, size limits, and the batch
-  registry — including Hypothesis property tests. They always run — this is what CI
+  registry, including Hypothesis property tests. They always run; this is what CI
   exercises on every push.
 - **Integration & golden tests** drive a real Aseprite install and run only with
   `--run-aseprite` (and require Aseprite to be found). Golden tests assert exact
@@ -127,25 +127,34 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
                               runner parses sentinel → dict
 ```
 
-- [`src/aseprite_mcp/core/luagen.py`](src/aseprite_mcp/core/luagen.py) — the Python→Lua
+- [`src/aseprite_mcp/core/luagen.py`](src/aseprite_mcp/core/luagen.py): the Python→Lua
   value serializer (`to_lua`) and the shared Lua **PRELUDE** (JSON encoder, colour/pixel
   helpers, deterministic drawing primitives, AA/pixel-perfect helpers, `sprite_info`).
-- [`src/aseprite_mcp/core/runner.py`](src/aseprite_mcp/core/runner.py) — `run_lua()` and
+- [`src/aseprite_mcp/core/runner.py`](src/aseprite_mcp/core/runner.py): `run_lua()` and
   `run_cli()`; parses the result/error sentinels.
-- [`src/aseprite_mcp/core/config.py`](src/aseprite_mcp/core/config.py) — locating Aseprite,
+- [`src/aseprite_mcp/core/config.py`](src/aseprite_mcp/core/config.py): locating Aseprite,
   the workspace, path resolution.
-- [`src/aseprite_mcp/core/`](src/aseprite_mcp/core/) — reusable, Aseprite-/MCP-free logic
+- [`src/aseprite_mcp/core/`](src/aseprite_mcp/core/): reusable, Aseprite-/MCP-free logic
   (also `errors`, `models`, `manifest`, `oplib`, `validation`, `limits`, `paths`); importable
   without the FastMCP app. Backwards-compatible top-level shims (`luagen`/`runner`/`config`/
   `errors`) are preserved.
-- [`src/aseprite_mcp/tools/`](src/aseprite_mcp/tools/) — one module per domain (the
+- [`src/aseprite_mcp/tools/`](src/aseprite_mcp/tools/): one module per domain (the
   `@mcp.tool()` layer).
 
 ## Adding a tool
 
+> **Check the idea against [`docs/HEADLESS.md`](docs/HEADLESS.md) first.** Every tool is
+> one `aseprite -b --script` run, and the scripting API does not advertise what that
+> costs: `Dialog` is a constructor that builds `nil`, `app.transform` does not exist,
+> `Rotate{target="mask"}` and the UI commands return success and do nothing, two
+> `app.useTool` calls take the process down with no file written, and `app.preferences`
+> writes land in the GUI configuration of the person running the server. That file has
+> the full list, which workaround each constraint forced, and the code that implements it,
+> so a tool that cannot work is ruled out in one pass rather than after it is written.
+
 1. Pick (or create) the right module in `src/aseprite_mcp/tools/`.
 2. Write the function, decorate with `@mcp.tool()`, and add a clear docstring (it
-   becomes the tool description the model sees — document every argument).
+   becomes the tool description the model sees, so document every argument).
 3. Build a Lua **body** that uses the prelude helpers (`open_sprite`, `find_layer`,
    `to_pixel`, `get_draw_image`/`commit_image`, `sprite_info`, …), set the `RESULT`
    table, and call `run_lua(body, args)`. For drawing-style edits, reuse the
@@ -181,7 +190,9 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
 - Accept colours as flexible strings and parse with `tools/common.parse_color`.
 - Resolve user paths with `tools/common.resolve_path` (relative → workspace).
 - Pass paths to Lua via `tools/common.lua_path` (forward slashes).
-- Keep operations deterministic and headless — no GUI/persistent-state assumptions.
+- Keep operations deterministic and headless: no GUI/persistent-state assumptions. What
+  is actually unavailable, silently inert or outright fatal under `-b`, and what each
+  constraint forced instead, is in [`docs/HEADLESS.md`](docs/HEADLESS.md).
 - Raise **typed errors** from `errors.py` at boundaries: `AsepriteNotFoundError` /
   `WorkspaceError` (config & path sandbox), `LuaToolError` (a Lua body failed),
   `AsepriteCLIError` / `ExportError` (CLI/export), `AsepriteTimeoutError` (timeout).
@@ -190,7 +201,7 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
   catches every aseprite-mcp error).
 - **Workflow tools** (high-level scaffolding in `tools/workflow.py`) must return a
   `workflow_manifest.v1` object built with the helpers in `core/manifest.py`
-  (`workflow_manifest`, `file_entry`, `export_entry`, `sprite_summary`) — don't hand-roll
+  (`workflow_manifest`, `file_entry`, `export_entry`, `sprite_summary`); don't hand-roll
   a bespoke result dict. Add the `kind`/roles to `core/manifest.py` if you need new ones.
 
 ## Pull requests

@@ -1,4 +1,4 @@
-"""Pure-Python tests for the workflow manifest schema — no Aseprite (always run)."""
+"""Pure-Python tests for the workflow manifest schema: no Aseprite (always run)."""
 
 import json
 

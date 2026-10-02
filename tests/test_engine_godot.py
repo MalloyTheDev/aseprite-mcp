@@ -1,4 +1,4 @@
-"""Pure-Python tests for the Godot 4 SpriteFrames .tres builder — no Aseprite."""
+"""Pure-Python tests for the Godot 4 SpriteFrames .tres builder: no Aseprite."""
 
 import pytest
 

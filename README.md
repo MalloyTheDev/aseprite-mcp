@@ -33,7 +33,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **147 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **152 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -96,7 +96,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 147 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 152 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -442,9 +442,11 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | Tool | Description |
 | --- | --- |
 | `get_cel` | Inspect a cel (exists, position, bounds, opacity). |
+| `set_properties` · `get_properties` | Read / write custom properties on a sprite, layer, cel, tag, slice or tile, stored inside the `.aseprite` file so game metadata travels with the art instead of in a sidecar. |
 | `set_cel_position` · `set_cel_opacity` | Move / fade a cel. |
 | `copy_cel` · `delete_cel` | Copy a cel between frames / delete it. |
 | `link_cels` · `unlink_cels` | Share one image across frames (a held pose: editing any of them edits all, and the file stores it once) / give a frame its own copy back. |
+| `set_cel_z_index` | Reorder one cel against its layer's neighbours, for a limb that is in front on one frame and behind on the next, without restructuring the layer stack. |
 
 ### Animation tags
 | Tool | Description |
@@ -556,6 +558,7 @@ and every result that touched pixels reports `selection_applied`.
 | `set_transparent_color` | Set the transparent index (indexed sprites). |
 | `extract_palette` | Collect the unique colours used in a sprite/image. |
 | `sort_palette` | Sort by hue/luminance/saturation/value (remaps indexed pixels). |
+| `quantize_palette` | Derive a palette from the artwork itself, reduced to at most N colours. |
 | `generate_ramp` | Build a hue-shifted shading ramp from a base colour. |
 | `ramp_between` | Build a ramp from its two ends, the cool shadow and the warm highlight, interpolated in Oklab so the middle is a blend rather than a hue rotation. |
 | `ramp_from_art` | Recover the ramp a sprite is already painted with, ordered dark to light, with the share of the art each step covers. |
@@ -568,6 +571,7 @@ and every result that touched pixels reports `selection_applied`.
 | `export_gif` | Export the animation as an animated GIF. |
 | `export_tag_gif` | Export only a named tag's frames as a GIF. |
 | `export_spritesheet` | Pack frames into a sheet (+ JSON metadata; layer/tag filters & splits). |
+| `export_spritesheet_packed` | Pack frames with extrude (the one-pixel border that stops texture bleeding in a game engine), merged duplicates and trim. |
 | `export_frames` | Export each frame to its own file (`{frame}` pattern). |
 | `export_layer` · `export_layers` | Export one layer / each layer to separate files. |
 | `export_tags` | Export each animation tag's frames to separate files. |
@@ -724,6 +728,9 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
   `.msk` sidecar beside the sprite and reload it on the next call, so it scopes later edits
   and `deselect` is a real step rather than a formality. A future **live-GUI mode** can
   layer on top of this without changing the tool API.
+  [`docs/HEADLESS.md`](docs/HEADLESS.md) records what else batch mode takes away, which
+  parts of the Aseprite API are unusable or unsafe under it, and why several tools are
+  shaped the way they are.
 - Use a `.aseprite`/`.ase` extension to keep layers, frames, and tags editable. Saving to
   `.png`/`.gif` flattens.
 - `get_pixels` is capped at 4096 px (e.g. 64×64) per call; read in tiles for larger areas.

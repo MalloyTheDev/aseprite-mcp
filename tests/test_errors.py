@@ -1,4 +1,4 @@
-"""Pure-Python tests for the typed error hierarchy — no Aseprite (always run)."""
+"""Pure-Python tests for the typed error hierarchy: no Aseprite (always run)."""
 
 import json
 import subprocess
