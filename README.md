@@ -724,6 +724,9 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
   `.msk` sidecar beside the sprite and reload it on the next call, so it scopes later edits
   and `deselect` is a real step rather than a formality. A future **live-GUI mode** can
   layer on top of this without changing the tool API.
+  [`docs/HEADLESS.md`](docs/HEADLESS.md) records what else batch mode takes away, which
+  parts of the Aseprite API are unusable or unsafe under it, and why several tools are
+  shaped the way they are.
 - Use a `.aseprite`/`.ase` extension to keep layers, frames, and tags editable. Saving to
   `.png`/`.gif` flattens.
 - `get_pixels` is capped at 4096 px (e.g. 64×64) per call; read in tiles for larger areas.

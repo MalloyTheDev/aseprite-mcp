@@ -143,6 +143,15 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
 
 ## Adding a tool
 
+> **Check the idea against [`docs/HEADLESS.md`](docs/HEADLESS.md) first.** Every tool is
+> one `aseprite -b --script` run, and the scripting API does not advertise what that
+> costs: `Dialog` is a constructor that builds `nil`, `app.transform` does not exist,
+> `Rotate{target="mask"}` and the UI commands return success and do nothing, two
+> `app.useTool` calls take the process down with no file written, and `app.preferences`
+> writes land in the GUI configuration of the person running the server. That file has
+> the full list, which workaround each constraint forced, and the code that implements it,
+> so a tool that cannot work is ruled out in one pass rather than after it is written.
+
 1. Pick (or create) the right module in `src/aseprite_mcp/tools/`.
 2. Write the function, decorate with `@mcp.tool()`, and add a clear docstring (it
    becomes the tool description the model sees, so document every argument).
@@ -181,7 +190,9 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
 - Accept colours as flexible strings and parse with `tools/common.parse_color`.
 - Resolve user paths with `tools/common.resolve_path` (relative → workspace).
 - Pass paths to Lua via `tools/common.lua_path` (forward slashes).
-- Keep operations deterministic and headless: no GUI/persistent-state assumptions.
+- Keep operations deterministic and headless: no GUI/persistent-state assumptions. What
+  is actually unavailable, silently inert or outright fatal under `-b`, and what each
+  constraint forced instead, is in [`docs/HEADLESS.md`](docs/HEADLESS.md).
 - Raise **typed errors** from `errors.py` at boundaries: `AsepriteNotFoundError` /
   `WorkspaceError` (config & path sandbox), `LuaToolError` (a Lua body failed),
   `AsepriteCLIError` / `ExportError` (CLI/export), `AsepriteTimeoutError` (timeout).
