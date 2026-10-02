@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import json
 import os
 import subprocess
@@ -26,8 +27,9 @@ from .luagen import assemble_script, error_prefix, new_nonce, result_prefix
 # cap plus at most one of these.
 _READ_CHUNK = 64 * 1024
 
-# Serializes every Aseprite invocation in this process.
-#
+# --------------------------------------------------------------------------- #
+# Serializing Aseprite invocations                                            #
+# --------------------------------------------------------------------------- #
 # An Aseprite run is a read-modify-write on a sprite file: it opens the document,
 # edits it, and saves over the original. Two runs touching one file therefore race on
 # the whole file, and the loser does not merely lose its own edit. Measured over eight
@@ -39,17 +41,180 @@ _READ_CHUNK = 64 * 1024
 # FastMCP dispatches sync tools through anyio's worker threads, and all but one tool
 # here is sync, so overlap needs nothing more than a client that batches calls.
 #
-# This is deliberately one global lock rather than a per-path one. Locking per path
-# would keep unrelated files parallel, but it has to derive the path from tool arguments,
-# and a tool whose argument key is not recognised would silently get no lock at all,
-# which reintroduces exactly this bug in a form that looks fixed. Sequential callers,
-# the common case, never contend for this lock; concurrent callers on different files
-# pay serialization they can measure, which is the right way round. Refining it is
-# tracked as a follow-up rather than guessed at here.
+# What gets serialized is a *claim*: either a set of sprite paths, or the whole editor
+# when the paths are not known. Two runs overlap only when both claims are path sets and
+# those sets are disjoint. This used to be a single process-wide lock, which is the same
+# machinery with every claim being the whole editor; narrowing it keeps a client that
+# batches calls across unrelated sprites parallel, where an Aseprite launch is about
+# 0.3s and the global lock turned six of them into a queue (#66).
 #
-# Reentrant so a tool that internally calls another tool's helper on the same thread
-# cannot deadlock against itself.
-_ASEPRITE_LOCK = threading.RLock()
+# The two ways of being wrong here are not symmetrical, and the design leans on that.
+# Claiming more than a run touches costs serialization, which is exactly what the global
+# lock already cost. Claiming less corrupts files. So every unknown resolves to the whole
+# editor; `_claim_keys` is where that happens and names each case.
+#
+# Reentrant, in the sense that a thread already inside a claim does not wait for itself:
+# a tool that reached the runner twice on one thread was safe under the RLock and stays
+# safe here. One shape of that is worth naming rather than leaving implied. A thread that
+# nests a claim on a path *another* thread holds waits while still holding its own, and
+# two threads doing that in opposite orders would deadlock. Nothing can reach it today:
+# `_run_bounded` is the only place a claim is taken, and nothing it calls re-enters the
+# runner, so no thread is ever inside two claims. Whoever first makes a run nest inside
+# another run has to answer this, and the answer is an ordering rule, not a wider claim.
+
+# Guards the claim table, and nothing else. It is held for bookkeeping only, never across
+# an Aseprite run: the exclusion between runs comes from the claims, not from holding
+# this, which is why a narrowed run can proceed while another one is in flight.
+_CLAIMS_LOCK = threading.RLock()
+_CLAIMS_FREED = threading.Condition(_CLAIMS_LOCK)
+
+# One (owning thread, claim) entry per invocation in flight. `None` as the claim means
+# the whole editor. A list rather than a dict keyed on the thread, so a thread that
+# re-enters holds two entries instead of overwriting the first and releasing a claim that
+# is still in use.
+_CLAIMS: list[tuple[int, frozenset[str] | None]] = []
+
+# How many paths one call may record before the recording is abandoned. A call that hands
+# Aseprite more paths than this is not what the narrowing is for, and abandoning the
+# recording costs only the global claim. The cap is here so that nothing can grow this
+# set without bound.
+_MAX_RECORDED_PATHS = 256
+
+# How many nodes of an argument structure `_claim_keys` will visit before giving up. The
+# largest payload any tool accepts is a 65,536-entry pixel list, which is about 262,000
+# nodes and measured 77ms to walk against the 290ms `to_lua` already spends serializing
+# the same thing. The budget sits well clear of that; it exists so an argument structure
+# that is cyclic or absurdly deep ends in the global claim rather than in a hang.
+_MAX_ARG_NODES = 2_000_000
+
+# Paths the current call has handed to Aseprite, recorded by `tools.common.lua_path`.
+#
+# A ContextVar rather than a thread-local because FastMCP dispatches sync tools through
+# anyio's pooled worker threads: a thread-local would survive into the next call that
+# reused the thread. anyio copies the context in per call, so what is set here is dropped
+# when the call returns. Measured on this interpreter: three sequential tool-shaped calls
+# landing on one pooled worker each saw only their own value.
+_RECORDED_PATHS: contextvars.ContextVar[set[str] | None] = contextvars.ContextVar(
+    "aseprite_recorded_paths", default=None
+)
+
+
+def record_path(path: str) -> None:
+    """Note a path the current call is about to hand to Aseprite.
+
+    Called from `tools.common.lua_path`, the one seam every path reaching a Lua script
+    passes through. Recording there rather than reading the tool's arguments is the whole
+    point: ten different argument names are in use for paths (`src`, `source`, `dst`,
+    `target`, `path`, `palfile`, `p`, `output`, `image`, `from_image`), so a runner that
+    sniffed argument keys would claim nothing at all for a tool whose key it did not
+    know, and a run that claims nothing looks exactly like a run that is correctly
+    parallel.
+
+    Nothing clears this, and nothing needs to: a leftover entry cannot be mistaken for a
+    live one, because `_claim_keys` only claims a recorded path that is also an argument
+    of the run in front of it.
+    """
+    seen = _RECORDED_PATHS.get()
+    if seen is None:
+        # A fresh set per context. The ContextVar's default is None rather than an empty
+        # set because a mutable default is one object shared by every call in the
+        # process, which is the leak the ContextVar is here to avoid.
+        seen = set()
+        _RECORDED_PATHS.set(seen)
+    elif len(seen) >= _MAX_RECORDED_PATHS:
+        # Dropping the recording only widens the next claim to the whole editor.
+        seen.clear()
+    seen.add(path)
+
+
+def _claim_keys(args: dict | None) -> frozenset[str] | None:
+    """The paths a run may be narrowed to, or None meaning the whole editor.
+
+    This function is the safety argument, so it is worth stating in full:
+
+      * A path reaches a Lua script only as a value inside `args`. No tool body embeds
+        one, since not one of them is an f-string, so walking `args` sees every path the
+        run names.
+      * The one path a body builds for itself is the `.msk` selection sidecar, which the
+        prelude derives from `ARG.src` by replacing the extension. It is covered without
+        being seen: any two runs that could race on one sidecar both name the sprite it
+        belongs to, so both claim that path.
+      * `lua_path` is the only producer of those values and records what it returns, so a
+        value that is not in the recording is one this function cannot account for.
+      * Every path `lua_path` returns has been through `config.resolve`, so it is
+        absolute and forward-slashed. A path-shaped value is therefore exactly one
+        containing "/", and an unaccounted one of those means the whole editor.
+
+    Four things make it decline to narrow, and all four are the safe direction: nothing
+    was recorded, a value could not be accounted for, the walk ran out of budget, or no
+    path was named at all. A recording left over from an earlier call on the same pooled
+    thread is not one of them, because such a path is claimed only when this run also
+    names it, and a path this run names is a path this run may touch.
+    """
+    recorded = _RECORDED_PATHS.get()
+    if not recorded:
+        return None
+
+    keys: set[str] = set()
+    stack: list = [args]
+    budget = _MAX_ARG_NODES
+    while stack:
+        budget -= 1
+        if budget < 0:
+            return None
+        node = stack.pop()
+        if isinstance(node, str):
+            if node in recorded:
+                # normcase, because two spellings differing only in case name one file on
+                # Windows and two claims that fail to intersect is precisely the overlap
+                # this exists to prevent.
+                keys.add(os.path.normcase(node))
+            elif "/" in node:
+                return None
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                stack.append(key)
+                stack.append(value)
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
+    # An empty set would claim nothing and overlap with everything, so a run that named
+    # no path at all takes the whole editor instead.
+    return frozenset(keys) or None
+
+
+def _conflicts(keys: frozenset[str] | None, mine: int) -> bool:
+    """Would a claim of `keys` overlap a claim another thread holds right now?
+
+    Called with `_CLAIMS_LOCK` held. This thread's own entries are skipped: waiting for
+    them would be waiting for ourselves, which is the deadlock the RLock used to rule
+    out.
+    """
+    for owner, held in _CLAIMS:
+        if owner == mine:
+            continue
+        if keys is None or held is None or keys & held:
+            return True
+    return False
+
+
+@contextlib.contextmanager
+def _claim(keys: frozenset[str] | None):
+    """Hold `keys` (or the whole editor, for None) for the duration of the block."""
+    mine = threading.get_ident()
+    entry = (mine, keys)
+    with _CLAIMS_FREED:
+        while _conflicts(keys, mine):
+            _CLAIMS_FREED.wait()
+        _CLAIMS.append(entry)
+    try:
+        yield
+    finally:
+        with _CLAIMS_FREED:
+            _CLAIMS.remove(entry)
+            # notify_all rather than notify: waiters are queued on different paths, so
+            # the single thread a targeted wake chose may well be one this release does
+            # not unblock, leaving the rest asleep behind a claim that is already gone.
+            _CLAIMS_FREED.notify_all()
 
 
 def _drain_tail(stream, limit: int, box: dict) -> None:
@@ -97,7 +262,11 @@ def _drain_tail(stream, limit: int, box: dict) -> None:
 
 
 def _run_bounded(
-    argv: list[str], timeout: float, limit: int = MAX_PROCESS_OUTPUT_CHARS
+    argv: list[str],
+    timeout: float,
+    limit: int = MAX_PROCESS_OUTPUT_CHARS,
+    *,
+    keys: frozenset[str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run `argv`, retaining at most `limit` characters of each output stream.
 
@@ -109,11 +278,14 @@ def _run_bounded(
     reading one pipe to EOF before the other deadlocks as soon as the child fills the
     one that is not being read.
 
-    Held under `_ASEPRITE_LOCK` for its whole duration, so one Aseprite process touches
-    the sprite files at a time. Waiting for the lock is deliberately outside `timeout`:
-    the timeout bounds how long Aseprite may run, not how long a queue may be.
+    `keys` claims the sprite paths this run touches for its whole duration, so one
+    Aseprite process at a time touches any given file. It defaults to None, the whole
+    editor, so a caller that has not thought about which files it reaches gets the old
+    process-wide behaviour rather than no exclusion. Waiting for the claim is deliberately
+    outside `timeout`: the timeout bounds how long Aseprite may run, not how long a queue
+    may be.
     """
-    with _ASEPRITE_LOCK:
+    with _claim(keys):
         try:
             proc = subprocess.Popen(
                 argv,
@@ -171,12 +343,18 @@ def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -
     nonce = new_nonce()
     script = assemble_script(body, args, nonce=nonce)
     exe = config.find_aseprite()
+    # Worked out before the script file exists, so the claim covers the whole window in
+    # which this run can touch a sprite. The script's own temp path is unique per run and
+    # needs no claim.
+    keys = _claim_keys(args)
 
     fd, path = tempfile.mkstemp(suffix=".lua", prefix="asemcp_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(script)
-        proc = _run_bounded([exe, "-b", "--script", path], timeout or config.timeout())
+        proc = _run_bounded(
+            [exe, "-b", "--script", path], timeout or config.timeout(), keys=keys
+        )
     except subprocess.TimeoutExpired as exc:
         raise AsepriteTimeoutError(
             f"Aseprite timed out after {exc.timeout:.0f}s. Increase ASEPRITE_MCP_TIMEOUT "
@@ -280,10 +458,18 @@ def _decode_error(payload: str) -> str:
 
 
 def run_cli(cli_args: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:
-    """Run a raw Aseprite CLI command (used for exports / rendering)."""
+    """Run a raw Aseprite CLI command (used for exports / rendering).
+
+    Always claims the whole editor rather than a path set. Nothing on this route reaches
+    Lua, so none of its paths go through `lua_path` and there is no recording to narrow
+    against; picking them out of `cli_args` instead would be the argument-key mistake in
+    a different costume, since that list interleaves paths with flags and the values of
+    flags, and a misread entry claims the wrong file. An export is also not where a
+    batching client spends its time: the Lua tools are.
+    """
     exe = config.find_aseprite()
     try:
-        proc = _run_bounded([exe, "-b", *cli_args], timeout or config.timeout())
+        proc = _run_bounded([exe, "-b", *cli_args], timeout or config.timeout(), keys=None)
     except subprocess.TimeoutExpired as exc:
         raise AsepriteTimeoutError(f"Aseprite CLI timed out after {exc.timeout:.0f}s.") from exc
 
