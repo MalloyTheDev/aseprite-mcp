@@ -2062,7 +2062,9 @@ layer has nothing where the shadow would land the call is refused rather than dr
 a shadow onto nothing.
 
 Args:
-    layer: The layer casting the shadow. Its cel is never modified.
+    layer: The layer casting the shadow. Its cel is never modified. A background
+        layer is refused: it is opaque and covers the canvas, so it has no silhouette
+        to cast. `convert_background_to_layer` first if the subject is one.
     ramp: Colours darkest first, normally the *ground's* ramp rather than the
         subject's, since the shadow is a darkening of the surface it lies on.
         Required, and deliberately so: a shadow built out of alpha instead is
@@ -2078,7 +2080,10 @@ Args:
         because a floor running through the subject is not a floor.
     ground_layer: The layer holding the surface. When given, the shadow is clipped to
         that layer's pixels and the call is refused if there is nothing there to
-        catch it.
+        catch it. Consulted for its pixels, not for whether the picture shows them: a
+        hidden layer, or one at a low opacity, still holds the pixels the clip asks
+        about, so the shadow is drawn and the result reports what the floor actually
+        is (see below) rather than the call being refused over it.
     softness: Pixels of penumbra around the core, each one ramp step lighter. 0 is a
         hard-edged shadow, 1 or 2 is the usual soft contact.
     opacity: The shadow *layer's* opacity, 0 to 255. Left at 255 the shadow's pixels
@@ -2092,6 +2097,12 @@ Args:
 Returns the ellipse it used as `shadow_ellipse` (`[cx, cy, rx, ry]`), the
 `contact_row` it measured, and `shadow_pixels`. A shadow that landed entirely off the
 canvas is refused rather than reported as a success that drew nothing.
+
+With a `ground_layer` the result also says what that floor is: `ground_layer_visible`,
+`ground_layer_opacity`, and `ground_layer_hidden` naming the layer and any group whose
+flag is off, which is present only when something is. A floor the picture does not
+show, or shows faintly, is reported in `warnings` as well, because a crisp shadow on
+an invisible surface is usually a layer named by mistake rather than an intent.
 
 `clipped_pixels` is routinely large next to `shadow_pixels` when `ground_layer` is a
 thin floor, and that is arithmetic rather than a fault: the ellipse is centred on the
@@ -2269,9 +2280,36 @@ colour can appear**: the result uses a subset of the colours already there, and 
 a ramp stays on it. Transparent pixels are left alone, so the silhouette does not
 change.
 
+A stray with no opaque neighbour at all has no colour to take, so by default it is
+skipped: inventing one would be drawing rather than cleaning. That is the right answer
+inside the art and the wrong one for the commonest dirt an effects pass leaves, which
+is a lone pixel *outside* the art on empty canvas. `erase_isolated` is for that.
+
 Args:
     protect: Colours never to replace. A one-pixel eye highlight or a specular dot is
-        a stray by this definition and is meant to be there, so name its colour.
+        a stray by this definition and is meant to be there, so name its colour. Also
+        keeps a cluster `erase_isolated` would otherwise erase, if the colour is in it.
+    erase_isolated: Erase a cluster that stands clear of everything else instead of
+        skipping it. **Opt-in, because this changes the silhouette**, which is the one
+        thing the tool otherwise never does: a one-pixel spark, a floating highlight,
+        the dot of an "i" drawn as its own element and a dither sparser than a
+        checkerboard are all clusters by this rule and are all meant to be there. What
+        it erases is reported as `erased`, apart from `replaced`, for the same reason.
+    min_cluster: How many pixels a detached cluster may have and still count as dirt.
+        1, the default, is a lone pixel, which is all "isolated" means by itself; 2
+        catches the two-pixel speck these passes usually leave, where neither pixel is
+        isolated because each has the other for company. Capped low, and the refusal
+        names the cap: past a handful of pixels a thing standing clear of the artwork
+        is a mark somebody drew. Only means anything with `erase_isolated`, and is
+        refused without it rather than ignored.
+
+Erasure is decided over clusters of **opaque** pixels, connected in all eight
+directions, that have nothing but transparency around them. That is what makes it safe
+at any `min_cluster`: the artwork is connected to itself, so it is never a cluster, and
+only something standing clear of it can go. It is also why the two halves of this tool
+barely meet: a cluster touches no other opaque pixel, so nothing else's replacement can
+be reading a colour off one. Where they do meet, erasing wins, since recolouring dirt
+on its way out is work with no result.
 
 A pixel whose only same-colour neighbour is **diagonal** is part of a dither pattern,
 not dirt, and is left alone. `assess_sprite` counts isolation orthogonally, which is
@@ -2283,7 +2321,9 @@ neighbourhoods, introduces colours that were not in the palette, and on a measur
 test left *more* stray pixels than it found. This changes only the pixels that are
 strays, and only to colours already next to them.
 
-Returns how many were replaced, so a second call can be skipped when it says 0.
+Returns how many were replaced, so a second call can be skipped when it says 0. With
+`erase_isolated` it also returns `erased` and `erased_clusters`, which are absent
+otherwise: a count of work nobody asked for reads as a finding.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2291,6 +2331,8 @@ Returns how many were replaced, so a second call can be skipped when it says 0.
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 | `protect` | array<string> | no | _none_ |
+| `erase_isolated` | boolean | no | False |
+| `min_cluster` | integer | no | 1 |
 
 
 ### `replace_color`

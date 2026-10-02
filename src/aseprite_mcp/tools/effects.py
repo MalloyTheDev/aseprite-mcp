@@ -25,10 +25,17 @@ from ..core.limits import (
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path, run_ramp_lua
-from .drawing import _draw
+from .drawing import _CLOSE, _OPEN, _draw
 from .shading import _FIELD_LUA
 
 _GRAD_TYPES = {"linear", "radial"}
+
+# The largest detached cluster `remove_stray_pixels` will call dirt. Dirt arrives in ones
+# and twos; by eight pixels a thing standing clear of the artwork is a mark somebody drew,
+# and erasing it changes the silhouette, which is the one thing that tool otherwise never
+# does. The cap also bounds the work: each cluster is walked until it passes this size, so a
+# higher ceiling would cost a multiple of the single pass over every pixel of the art.
+_MAX_STRAY_CLUSTER = 8
 
 
 @mcp.tool()
@@ -317,6 +324,68 @@ end
 """
 
 
+def _ground_layer_notes(result: dict) -> list[str]:
+    """What to say about a ground layer that the finished picture does not show.
+
+    `ground_layer` is consulted for its drawn pixels and nothing else, which is the right
+    "onto what" question: a shadow is a property of the surface under it, and a surface is
+    where its pixels are. A hidden layer has those pixels too, though, and so does one at
+    a tenth opacity, so the shadow landed crisply on a floor that is not in the picture and
+    nothing in the result mentioned it (#146).
+
+    Reported rather than refused, which is the choice worth stating. The clip is still
+    answerable and the geometry is still right; hiding the floor while working on the
+    subject, or keeping it faint as an underpainting, are ordinary things to do; and the
+    shadow goes on a new layer of its own, so nothing is spent by proceeding. A refusal
+    would break those calls to say something a sentence says better, and it would need a
+    `force` to climb back out of. What was actually missing was the sentence.
+
+    The measurements come from the editor, which is the only thing that knows them; the
+    judgement is here so CI can test it with no editor installed.
+    """
+    name = result.get("ground_layer")
+    if name is None:
+        return []
+
+    notes: list[str] = []
+    hidden = result.get("ground_layer_hidden") or []
+    if hidden:
+        # Aseprite's visibility is per layer, so a floor inside a hidden group reports
+        # itself visible while none of it reaches the render. The note has to name what is
+        # actually switched off, because that is what the caller has to go and change.
+        groups = [entry for entry in hidden if entry != name]
+        listed = " and ".join(f"'{entry}'" for entry in groups)
+        plural = "groups" if len(groups) > 1 else "group"
+        if groups and name in hidden:
+            what = f"'{name}' is hidden, and so is the {plural} {listed} it sits in"
+        elif groups:
+            what = (f"'{name}' sits in the hidden {plural} {listed}, and its own flag "
+                    "is on")
+        else:
+            what = f"'{name}' is hidden"
+        notes.append(
+            f"ground_layer {what}, so this shadow was clipped to a surface the render "
+            "does not show. Its pixels are there, which is all the clip asks about, and "
+            "none of them reach the picture. Make it visible with set_layer_properties, "
+            "or name the layer that already is."
+        )
+
+    opacity = result.get("ground_layer_opacity")
+    if opacity == 0:
+        notes.append(
+            f"ground_layer '{name}' is at opacity 0, which is a hidden layer by another "
+            "route: the shadow is fully solid over a surface that shows nothing of itself."
+        )
+    elif isinstance(opacity, int | float) and opacity < 255:
+        notes.append(
+            f"ground_layer '{name}' is at opacity {opacity} of 255, so the shadow reads as "
+            "more solid than the floor it lies on. Match a faint floor with a lighter ramp "
+            "step rather than by lowering the shadow layer's opacity, which blends its "
+            "pixels with what is under them and takes the composite off the ramp."
+        )
+    return notes
+
+
 @mcp.tool()
 def cast_shadow(
     filename: str,
@@ -354,7 +423,9 @@ def cast_shadow(
     a shadow onto nothing.
 
     Args:
-        layer: The layer casting the shadow. Its cel is never modified.
+        layer: The layer casting the shadow. Its cel is never modified. A background
+            layer is refused: it is opaque and covers the canvas, so it has no silhouette
+            to cast. `convert_background_to_layer` first if the subject is one.
         ramp: Colours darkest first, normally the *ground's* ramp rather than the
             subject's, since the shadow is a darkening of the surface it lies on.
             Required, and deliberately so: a shadow built out of alpha instead is
@@ -370,7 +441,10 @@ def cast_shadow(
             because a floor running through the subject is not a floor.
         ground_layer: The layer holding the surface. When given, the shadow is clipped to
             that layer's pixels and the call is refused if there is nothing there to
-            catch it.
+            catch it. Consulted for its pixels, not for whether the picture shows them: a
+            hidden layer, or one at a low opacity, still holds the pixels the clip asks
+            about, so the shadow is drawn and the result reports what the floor actually
+            is (see below) rather than the call being refused over it.
         softness: Pixels of penumbra around the core, each one ramp step lighter. 0 is a
             hard-edged shadow, 1 or 2 is the usual soft contact.
         opacity: The shadow *layer's* opacity, 0 to 255. Left at 255 the shadow's pixels
@@ -384,6 +458,12 @@ def cast_shadow(
     Returns the ellipse it used as `shadow_ellipse` (`[cx, cy, rx, ry]`), the
     `contact_row` it measured, and `shadow_pixels`. A shadow that landed entirely off the
     canvas is refused rather than reported as a success that drew nothing.
+
+    With a `ground_layer` the result also says what that floor is: `ground_layer_visible`,
+    `ground_layer_opacity`, and `ground_layer_hidden` naming the layer and any group whose
+    flag is off, which is present only when something is. A floor the picture does not
+    show, or shows faintly, is reported in `warnings` as well, because a crisp shadow on
+    an invisible surface is usually a layer named by mistake rather than an intent.
 
     `clipped_pixels` is routinely large next to `shadow_pixels` when `ground_layer` is a
     thin floor, and that is arithmetic rather than a fault: the ellipse is centred on the
@@ -465,6 +545,19 @@ def cast_shadow(
       error("Cannot cast a shadow from a group layer: " .. subject.name ..
             ". Name one of the layers inside it.", 0)
     end
+    -- Said here rather than letting the projection fail further down, because what comes
+    -- out of there is a sentence about light_height, and light_height was never the
+    -- problem. A background is opaque and covers the canvas, so the drawn box below is
+    -- the whole canvas: on a square sprite that produced a confident success, an ellipse
+    -- cast from the canvas's own outline, and on a taller one it overflowed the canvas
+    -- check and sent the caller off to tune a light that was fine (#146).
+    if subject.isBackground then
+      error("Layer '" .. subject.name .. "' is this sprite's background, so it cannot " ..
+            "cast a shadow: a background is opaque and fills the canvas, which leaves " ..
+            "it no silhouette to cast. convert_background_to_layer turns it back into " ..
+            "an ordinary layer, after which only the pixels drawn on it count and the " ..
+            "shadow has a shape to come from.", 0)
+    end
     local framenum = require_frame(spr, ARG.frame, "frame")
     require_free_layer_name(spr, ARG.new_layer)
 
@@ -536,6 +629,7 @@ def cast_shadow(
     -- The ground, when one was named. Read before anything is drawn so the refusal below
     -- happens before a layer is created.
     local ground_mask = nil
+    local ground_name, ground_opacity, ground_hidden = nil, nil, nil
     if ARG.ground_layer ~= nil then
       local gl = find_layer(spr, ARG.ground_layer)
       if gl.isGroup then
@@ -550,6 +644,22 @@ def cast_shadow(
               "'), so the shadow would be clipped to the shape casting it. Name the " ..
               "layer holding the ground instead.", 0)
       end
+      -- What the render shows of this floor, measured rather than judged: the sentences
+      -- are built in Python, where CI can read them. `isVisible` is one layer's own flag,
+      -- so a floor inside a hidden group reports itself visible while nothing of it
+      -- reaches the picture; walking up collects every flag that is off, nearest first.
+      -- `parent` leads to the sprite, which is not a layer and has none of these fields,
+      -- so that is where the walk stops.
+      ground_name = gl.name
+      ground_opacity = gl.opacity
+      ground_hidden = {}
+      if not gl.isVisible then ground_hidden[#ground_hidden + 1] = gl.name end
+      local node = gl.parent
+      while node ~= nil and node ~= spr do
+        if not node.isVisible then ground_hidden[#ground_hidden + 1] = node.name end
+        node = node.parent
+      end
+
       local gimg = get_draw_image(spr, gl, framenum)
       ground_mask = {}
       for y = 0, H - 1 do
@@ -622,8 +732,25 @@ def cast_shadow(
                shadow_pixels = painted, clipped_pixels = clipped,
                ellipse_points = points,
                softness = ARG.softness, opacity = ARG.opacity }
+    if ground_name ~= nil then
+      RESULT.ground_layer = ground_name
+      RESULT.ground_layer_visible = (#ground_hidden == 0)
+      RESULT.ground_layer_opacity = ground_opacity
+      -- Absent rather than empty, so the key appearing at all means there is something
+      -- switched off to go and look at.
+      if #ground_hidden > 0 then RESULT.ground_layer_hidden = ground_hidden end
+    end
     """
-    return run_ramp_lua(body, args)
+    result = run_ramp_lua(body, args)
+    if isinstance(result, dict):
+        notes = _ground_layer_notes(result)
+        if notes:
+            # Appended rather than assigned, for the same reason run_ramp_lua appends its
+            # own: an indexed sprite may already have put a ramp reading here, and
+            # dropping that to report this would trade one finding for another.
+            existing = result.get("warnings")
+            result["warnings"] = [*existing, *notes] if isinstance(existing, list) else notes
+    return result
 
 
 @mcp.tool()
@@ -1036,12 +1163,26 @@ def fill_checkerboard(
     return _draw(args, snippet)
 
 
+# `replaced` reaches the result through the drawing harness, which carries exactly one
+# counter for every tool that uses it. Erasing is a second count and a different promise,
+# so it is attached here, after that harness has built RESULT, rather than by widening a
+# block every drawing tool shares for the sake of one of them.
+_STRAY_TAIL = """
+if _stray_erased ~= nil then
+  RESULT.erased = _stray_erased
+  RESULT.erased_clusters = _stray_erased_clusters
+end
+"""
+
+
 @mcp.tool()
 def remove_stray_pixels(
     filename: str,
     layer: str | None = None,
     frame: int = 1,
     protect: list[str] | None = None,
+    erase_isolated: bool = False,
+    min_cluster: int = 1,
 ) -> dict:
     """Replace pixels that have no neighbour of their own colour with the colour around them.
 
@@ -1055,9 +1196,36 @@ def remove_stray_pixels(
     a ramp stays on it. Transparent pixels are left alone, so the silhouette does not
     change.
 
+    A stray with no opaque neighbour at all has no colour to take, so by default it is
+    skipped: inventing one would be drawing rather than cleaning. That is the right answer
+    inside the art and the wrong one for the commonest dirt an effects pass leaves, which
+    is a lone pixel *outside* the art on empty canvas. `erase_isolated` is for that.
+
     Args:
         protect: Colours never to replace. A one-pixel eye highlight or a specular dot is
-            a stray by this definition and is meant to be there, so name its colour.
+            a stray by this definition and is meant to be there, so name its colour. Also
+            keeps a cluster `erase_isolated` would otherwise erase, if the colour is in it.
+        erase_isolated: Erase a cluster that stands clear of everything else instead of
+            skipping it. **Opt-in, because this changes the silhouette**, which is the one
+            thing the tool otherwise never does: a one-pixel spark, a floating highlight,
+            the dot of an "i" drawn as its own element and a dither sparser than a
+            checkerboard are all clusters by this rule and are all meant to be there. What
+            it erases is reported as `erased`, apart from `replaced`, for the same reason.
+        min_cluster: How many pixels a detached cluster may have and still count as dirt.
+            1, the default, is a lone pixel, which is all "isolated" means by itself; 2
+            catches the two-pixel speck these passes usually leave, where neither pixel is
+            isolated because each has the other for company. Capped low, and the refusal
+            names the cap: past a handful of pixels a thing standing clear of the artwork
+            is a mark somebody drew. Only means anything with `erase_isolated`, and is
+            refused without it rather than ignored.
+
+    Erasure is decided over clusters of **opaque** pixels, connected in all eight
+    directions, that have nothing but transparency around them. That is what makes it safe
+    at any `min_cluster`: the artwork is connected to itself, so it is never a cluster, and
+    only something standing clear of it can go. It is also why the two halves of this tool
+    barely meet: a cluster touches no other opaque pixel, so nothing else's replacement can
+    be reading a colour off one. Where they do meet, erasing wins, since recolouring dirt
+    on its way out is work with no result.
 
     A pixel whose only same-colour neighbour is **diagonal** is part of a dither pattern,
     not dirt, and is left alone. `assess_sprite` counts isolation orthogonally, which is
@@ -1069,28 +1237,127 @@ def remove_stray_pixels(
     test left *more* stray pixels than it found. This changes only the pixels that are
     strays, and only to colours already next to them.
 
-    Returns how many were replaced, so a second call can be skipped when it says 0.
+    Returns how many were replaced, so a second call can be skipped when it says 0. With
+    `erase_isolated` it also returns `erased` and `erased_clusters`, which are absent
+    otherwise: a count of work nobody asked for reads as a finding.
     """
+    min_cluster = check_count(
+        "min_cluster", min_cluster, _MAX_STRAY_CLUSTER, minimum=1,
+        remedy="A detached cluster that big is a mark rather than a speck, and erasing it "
+               "is a silhouette change this tool should not be making on your behalf: "
+               "draw_pixels with 'transparent' is the honest way to remove a shape.",
+    )
+    if min_cluster > 1 and not erase_isolated:
+        # Refused rather than ignored. It has nothing to act on: the replacement rule
+        # works a pixel at a time, and the cluster is only ever the unit of erasing.
+        raise ValidationFailed(
+            f"min_cluster {min_cluster} only means something together with "
+            "erase_isolated=True, which is what works in clusters; replacing a stray reads "
+            "the colours next to one pixel and has no cluster to size. Pass "
+            "erase_isolated=True as well, or leave min_cluster at 1."
+        )
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer,
         "frame": int(frame),
         "protect": [parse_color(c) for c in (protect or [])],
+        "erase_isolated": bool(erase_isolated),
+        "min_cluster": min_cluster,
     }
     snippet = """
     local protected = {}
     for _, colour in ipairs(ARG.protect) do
       protected[to_pixel(spr, colour)] = true
     end
+    local w, h = img.width, img.height
+
+    -- What to erase is decided first, over the untouched pixels, because the replacement
+    -- pass below has to know which pixels are on their way out.
+    --
+    -- A cluster is a run of OPAQUE pixels joined to each other in any of the eight
+    -- directions and to nothing else: every neighbour of the whole run is transparent.
+    -- That is what dirt outside the art is, and it is what keeps this off the artwork at
+    -- any min_cluster, since the artwork is joined to itself and so is never a cluster.
+    local erase, erased, clusters = {}, 0, 0
+    if ARG.erase_isolated then
+      -- The pixels joined to (x0,y0), or nil once there are more of them than dirt has.
+      -- It pops at most min_cluster + 1 pixels before giving up, so a wrong guess costs a
+      -- handful of reads and its own tables never hold more than a handful of entries,
+      -- whatever the canvas is: the only thing in this pass that grows with the sprite is
+      -- the list of pixels actually being erased.
+      local function cluster_at(x0, y0)
+        local seen, stack, members = { [y0 * w + x0] = true }, { { x0, y0 } }, {}
+        while #stack > 0 do
+          local p = table.remove(stack)
+          members[#members + 1] = p
+          if #members > ARG.min_cluster then return nil end
+          for dy = -1, 1 do
+            for dx = -1, 1 do
+              local nx, ny = p[1] + dx, p[2] + dy
+              if not (dx == 0 and dy == 0) and img_solid(spr, img, nx, ny) then
+                local key = ny * w + nx
+                if not seen[key] then
+                  seen[key] = true
+                  stack[#stack + 1] = { nx, ny }
+                end
+              end
+            end
+          end
+        end
+        return members
+      end
+
+      for y = 0, h - 1 do
+        for x = 0, w - 1 do
+          local key = y * w + x
+          if img_solid(spr, img, x, y) and erase[key] == nil then
+            -- Counted before any walking. Every opaque neighbour of a pixel in a cluster is
+            -- in that same cluster, so a pixel in a cluster of n has at most n - 1 of them,
+            -- and a pixel with more cannot be in one at all. That keeps the walk off the
+            -- inside of the artwork, where it would otherwise start again at every pixel,
+            -- and it costs no record of where it has already been: a full-canvas table of
+            -- that is the memory this avoids, on a sprite of up to sixteen million pixels.
+            local around = 0
+            for dy = -1, 1 do
+              for dx = -1, 1 do
+                if not (dx == 0 and dy == 0) and img_solid(spr, img, x + dx, y + dy) then
+                  around = around + 1
+                end
+              end
+            end
+            local members = nil
+            if around < ARG.min_cluster then members = cluster_at(x, y) end
+            if members ~= nil then
+              -- A protected colour anywhere in the cluster keeps all of it: a spark drawn
+              -- clear of the art is a cluster by this rule and is meant to be there, and
+              -- erasing the pixel beside it would leave half of whatever it was.
+              local keep = false
+              for _, p in ipairs(members) do
+                if protected[img:getPixel(p[1], p[2])] then keep = true end
+              end
+              if not keep then
+                clusters = clusters + 1
+                for _, p in ipairs(members) do
+                  erase[p[2] * w + p[1]] = p
+                  erased = erased + 1
+                end
+              end
+            end
+          end
+        end
+      end
+    end
 
     -- Read first, write after: a stray replaced mid-pass would become a neighbour that
     -- rescues the next one, and the result would depend on scan order.
-    local w, h = img.width, img.height
     local replacements, count = {}, 0
     for y = 0, h - 1 do
       for x = 0, w - 1 do
         local here = img:getPixel(x, y)
-        if img_solid(spr, img, x, y) and not protected[here] then
+        -- A pixel being erased is not also a pixel to repaint. It can only ever be one of
+        -- its own cluster's members, because a cluster has no opaque neighbour outside itself,
+        -- so skipping these cannot change what any surviving pixel is replaced with.
+        if img_solid(spr, img, x, y) and not protected[here] and erase[y * w + x] == nil then
           local tally, best, best_n, alone = {}, nil, 0, true
           for dy = -1, 1 do
             for dx = -1, 1 do
@@ -1120,6 +1387,17 @@ def remove_stray_pixels(
     for _, item in ipairs(replacements) do
       img_set(img, item.x, item.y, item.px)
     end
+    -- rgba_to_px with no alpha is the transparent pixel in every colour mode, including
+    -- the sprite's transparent index on indexed art, so this erases rather than writing
+    -- a black that happens to look like a hole in RGB.
+    local blank = rgba_to_px(spr, 0, 0, 0, 0)
+    for _, p in pairs(erase) do
+      img_set(img, p[1], p[2], blank)
+    end
     _stray_replaced = count
+    if ARG.erase_isolated then
+      _stray_erased = erased
+      _stray_erased_clusters = clusters
+    end
     """
-    return _draw(args, snippet)
+    return run_lua(_OPEN + snippet + _CLOSE + _STRAY_TAIL, args)

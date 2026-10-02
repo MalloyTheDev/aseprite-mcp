@@ -5,6 +5,10 @@ the assertion that matters in here is `palette_conformance`: a glow of interpola
 colours or a shadow made by multiplying alpha would look plausible in a preview and score
 below 1.0 here. The geometry claims are checked for direction rather than for exact
 sizes, since the sizes are the arithmetic that `test_lighting.py` already pins.
+
+`remove_stray_pixels`'s opt-in erasing mode is pinned here too. It is the one mode of
+that tool which changes the silhouette, so what it is held to is the opposite assertion
+from conformance: how many pixels the sprite still has afterwards, and which ones.
 """
 
 from __future__ import annotations
@@ -509,3 +513,366 @@ def test_glow_rejects_arguments_that_cannot_mean_anything(request):
         effects.glow(name, GROUND, tolerance=-1)
     with pytest.raises(ValidationFailed, match="new_layer"):
         effects.glow(name, GROUND, new_layer=" ")
+
+
+# ------------------------------------------------- a background cannot cast a shadow
+def _background_ball(request, suffix: str = "", height: int = SIZE) -> str:
+    """A ball on the sprite's Background layer, which is opaque and fills the canvas."""
+    name = f"fx/{request.node.name}{suffix}.aseprite"
+    sprite.create_sprite(name, SIZE, height)
+    drawing.draw_ellipse(name, BALL_CX, BALL_CY, BALL_R, BALL_R, BODY[3], filled=True)
+    sprite.convert_layer_to_background(name, "Layer 1")
+    return name
+
+
+def test_a_background_subject_is_refused_for_having_no_silhouette(request):
+    """A background fills the canvas, so the measured box is the canvas and the
+    projection degenerates. What came out of this before was a confident success: an
+    ellipse centred on the bottom row, cast from the whole canvas as a silhouette."""
+    name = _background_ball(request)
+
+    with pytest.raises(AsepriteError, match="cannot cast a shadow") as exc:
+        effects.cast_shadow(name, "Background", GROUND)
+
+    message = str(exc.value)
+    assert "silhouette" in message
+    assert "convert_background_to_layer" in message
+
+
+def test_the_background_refusal_comes_before_the_light_height_message(request):
+    """On a taller canvas the degenerate projection overflowed the canvas check instead,
+    and the message named light_height: a parameter that was never the problem."""
+    name = _background_ball(request, "_tall", height=90)
+
+    with pytest.raises(AsepriteError) as exc:
+        effects.cast_shadow(name, "Background", GROUND)
+
+    assert "cannot cast a shadow" in str(exc.value)
+    assert "light_height" not in str(exc.value), "the wrong parameter was being named"
+
+
+def test_a_background_is_still_a_perfectly_good_ground(request):
+    """The refusal is about the subject. An opaque background is exactly what a floor is,
+    so clipping a shadow to one has to keep working."""
+    name = f"fx/{request.node.name}.aseprite"
+    sprite.create_sprite(name, SIZE, SIZE)
+    layers.rename_layer(name, "Layer 1", "floor")
+    layers.add_layer(name, "ball")
+    drawing.draw_ellipse(name, BALL_CX, BALL_CY, BALL_R, BALL_R, BODY[3], filled=True,
+                         layer="ball")
+    sprite.convert_layer_to_background(name, "floor")
+
+    result = effects.cast_shadow(name, "ball", GROUND, ground_layer="Background")
+
+    assert result["shadow_pixels"] > 0
+    assert result["clipped_pixels"] == 0, "a background covers the canvas"
+
+
+# ------------------------------------------- what the render actually shows of a floor
+def _grouped_scene(request) -> str:
+    """The same ball and floor, with the floor inside a group that can be hidden."""
+    name = f"fx/{request.node.name}.aseprite"
+    sprite.create_sprite(name, SIZE, SIZE)
+    layers.rename_layer(name, "Layer 1", "ball")
+    layers.add_group_layer(name, "scenery")
+    layers.add_layer(name, "floor", group="scenery")
+    drawing.draw_rectangle(name, 0, 28, SIZE, SIZE - 28, GROUND[2], filled=True,
+                           layer="floor")
+    drawing.draw_ellipse(name, BALL_CX, BALL_CY, BALL_R, BALL_R, BODY[3], filled=True,
+                         layer="ball")
+    return name
+
+
+def test_a_hidden_ground_layer_is_reported_rather_than_refused(request):
+    """Drawn pixels are drawn pixels, so the clip is still answerable and the shadow is
+    still drawn; what was missing was any sign that the floor is not on screen."""
+    name = _scene(request)
+    layers.set_layer_properties(name, "floor", visible=False)
+
+    result = effects.cast_shadow(name, "ball", GROUND, ground_layer="floor")
+
+    assert result["shadow_pixels"] > 0
+    assert result["ground_layer"] == "floor"
+    assert result["ground_layer_visible"] is False
+    notes = " ".join(result["warnings"])
+    assert "floor" in notes and "hidden" in notes, notes
+
+
+def test_a_ground_layer_inside_a_hidden_group_is_reported_too(request):
+    """Aseprite reports isVisible per layer, so this floor's own flag is on while nothing
+    of it reaches the render. The note has to name the group, which is what to unhide."""
+    name = _grouped_scene(request)
+    layers.set_layer_properties(name, "scenery", visible=False)
+
+    result = effects.cast_shadow(name, "ball", GROUND, ground_layer="floor")
+
+    assert result["shadow_pixels"] > 0
+    assert result["ground_layer_visible"] is False
+    assert result["ground_layer_hidden"] == ["scenery"]
+    assert "scenery" in " ".join(result["warnings"])
+
+
+def test_a_part_transparent_ground_layer_names_its_opacity(request):
+    name = _scene(request)
+    layers.set_layer_properties(name, "floor", opacity=64)
+
+    result = effects.cast_shadow(name, "ball", GROUND, ground_layer="floor")
+
+    assert result["ground_layer_visible"] is True
+    assert result["ground_layer_opacity"] == 64
+    assert "64" in " ".join(result["warnings"])
+
+
+def test_a_visible_opaque_ground_layer_is_worth_saying_nothing_about(request):
+    """The reporting has to be quiet in the ordinary case, or it is noise."""
+    name = _scene(request)
+
+    result = effects.cast_shadow(name, "ball", GROUND, ground_layer="floor")
+
+    assert result["ground_layer_visible"] is True
+    assert result["ground_layer_opacity"] == 255
+    assert "ground_layer_hidden" not in result
+    assert "warnings" not in result
+
+
+def test_no_ground_layer_named_means_nothing_is_reported_about_one(request):
+    """The keys are a measurement of the layer that was consulted, so with none named
+    there is nothing to measure and nothing to say."""
+    result = effects.cast_shadow(_bare_ball(request), "Layer 1", GROUND)
+
+    assert "ground_layer" not in result
+    assert "ground_layer_visible" not in result
+    assert "warnings" not in result
+
+
+@pytest.mark.pure
+def test_a_floor_the_render_shows_in_full_earns_no_note():
+    assert effects._ground_layer_notes({
+        "ground_layer": "floor", "ground_layer_visible": True,
+        "ground_layer_opacity": 255,
+    }) == []
+
+
+@pytest.mark.pure
+def test_nothing_is_said_when_no_ground_layer_was_consulted():
+    assert effects._ground_layer_notes({"ok": True, "shadow_pixels": 12}) == []
+
+
+@pytest.mark.pure
+def test_a_hidden_floor_note_names_the_layer_and_what_to_do():
+    notes = effects._ground_layer_notes({
+        "ground_layer": "floor", "ground_layer_visible": False,
+        "ground_layer_opacity": 255, "ground_layer_hidden": ["floor"],
+    })
+    assert len(notes) == 1
+    assert "'floor' is hidden" in notes[0]
+    assert "set_layer_properties" in notes[0]
+
+
+@pytest.mark.pure
+def test_a_floor_hidden_by_its_group_blames_the_group():
+    notes = effects._ground_layer_notes({
+        "ground_layer": "floor", "ground_layer_visible": False,
+        "ground_layer_opacity": 255, "ground_layer_hidden": ["scenery"],
+    })
+    assert len(notes) == 1
+    assert "group 'scenery'" in notes[0]
+    assert "own flag is on" in notes[0], "unhiding the layer itself would not help"
+
+
+@pytest.mark.pure
+def test_a_floor_hidden_twice_over_says_so_once():
+    notes = effects._ground_layer_notes({
+        "ground_layer": "floor", "ground_layer_visible": False,
+        "ground_layer_opacity": 255, "ground_layer_hidden": ["floor", "scenery"],
+    })
+    assert len(notes) == 1
+    assert "'floor'" in notes[0] and "'scenery'" in notes[0]
+
+
+@pytest.mark.pure
+def test_an_opacity_of_zero_reads_as_hidden_rather_than_as_faint():
+    notes = effects._ground_layer_notes({
+        "ground_layer": "floor", "ground_layer_visible": True,
+        "ground_layer_opacity": 0,
+    })
+    assert len(notes) == 1
+    assert "opacity 0" in notes[0]
+    assert "nothing" in notes[0]
+
+
+@pytest.mark.pure
+def test_a_faint_floor_note_quotes_the_opacity_it_found():
+    notes = effects._ground_layer_notes({
+        "ground_layer": "floor", "ground_layer_visible": True,
+        "ground_layer_opacity": 95,
+    })
+    assert len(notes) == 1
+    assert "95" in notes[0]
+
+
+# -------------------------------------------- remove_stray_pixels: the erasing mode
+DIRT = "#ff00ff"
+ART = "#6b4a2f"
+BLOCK = 16 * 16
+
+
+def _dirty_block(request, suffix: str = "", dirt: list[dict] | None = None) -> str:
+    """A block of art with dirt floating outside it on empty canvas.
+
+    The default dirt is the issue's own example: two lone pixels, each with nothing but
+    transparency around it, which is what an effects pass leaves outside the shape.
+    """
+    name = f"fx/{request.node.name}{suffix}.aseprite"
+    sprite.create_sprite(name, 32, 32)
+    drawing.draw_rectangle(name, 8, 8, 16, 16, ART, filled=True)
+    drawing.draw_pixels(name, dirt or [{"x": 2, "y": 2}, {"x": 29, "y": 3}], DIRT)
+    return name
+
+
+def _drawn(name: str) -> int:
+    return inspect.assess_sprite(name)["metrics"]["drawn_pixels"]
+
+
+def test_dirt_on_empty_canvas_is_left_alone_by_default(request):
+    """The default cannot change: not changing the silhouette is the tool's promise."""
+    name = _dirty_block(request)
+
+    result = effects.remove_stray_pixels(name)
+
+    assert result["replaced"] == 0
+    assert "erased" not in result, "a count for work nobody asked for is misleading"
+    assert _drawn(name) == BLOCK + 2
+
+
+def test_erase_isolated_takes_the_dirt_and_counts_it_apart_from_replaced(request):
+    """The two counts are different promises: one keeps the silhouette, one changes it."""
+    name = _dirty_block(request)
+
+    result = effects.remove_stray_pixels(name, erase_isolated=True)
+
+    assert result["erased"] == 2
+    assert result["erased_clusters"] == 2
+    assert result["replaced"] == 0, "neither pixel had a colour to take"
+    assert _drawn(name) == BLOCK
+    assert inspect.assess_sprite(name)["metrics"]["isolated_pixels"] == 0
+
+
+def test_erasing_leaves_the_art_to_the_replacement_rule(request):
+    """Inside the shape the old answer is still the right one: a stray takes the colour
+    around it, because the replacement comes from the ramp already next to it."""
+    name = _dirty_block(request)
+    drawing.draw_pixels(name, [{"x": 12, "y": 12}], BODY[4])
+
+    result = effects.remove_stray_pixels(name, erase_isolated=True)
+
+    assert result["replaced"] == 1
+    assert result["erased"] == 2
+    assert _drawn(name) == BLOCK, "the block kept every pixel it had"
+    assert inspect.get_pixels(name, 12, 12, 1, 1)["pixels"][0][0].lower() \
+        .startswith(ART), "the interior stray was repainted, not erased"
+
+
+def test_a_protected_colour_is_not_erased_either(request):
+    """A one-pixel spark floating clear of the art is isolated by this definition and is
+    meant to be there, so naming its colour has to stop the erasing too."""
+    name = _dirty_block(request)
+
+    result = effects.remove_stray_pixels(name, erase_isolated=True, protect=[DIRT])
+
+    assert result["erased"] == 0
+    assert _drawn(name) == BLOCK + 2
+
+
+def test_a_two_pixel_speck_needs_min_cluster(request):
+    """Neither pixel of a pair is isolated by the single-pixel rule: each has the other
+    for company, which is why dirt in twos survived both the old tool and the new flag."""
+    name = _dirty_block(request, dirt=[{"x": 2, "y": 2}, {"x": 3, "y": 2}])
+
+    assert effects.remove_stray_pixels(name, erase_isolated=True)["erased"] == 0
+    assert _drawn(name) == BLOCK + 2
+
+    result = effects.remove_stray_pixels(name, erase_isolated=True, min_cluster=2)
+
+    assert result["erased"] == 2
+    assert result["erased_clusters"] == 1, "one speck, not two pixels of dirt"
+    assert _drawn(name) == BLOCK
+
+
+def test_a_cluster_one_pixel_bigger_than_the_setting_survives(request):
+    """The bound is exact, so a three-pixel mark is art at min_cluster=2 and dirt at 3."""
+    mark = [{"x": 2, "y": 2}, {"x": 3, "y": 2}, {"x": 2, "y": 3}]
+    small = _dirty_block(request, "_2", dirt=mark)
+    large = _dirty_block(request, "_3", dirt=mark)
+
+    assert effects.remove_stray_pixels(small, erase_isolated=True, min_cluster=2)["erased"] == 0
+    assert effects.remove_stray_pixels(large, erase_isolated=True, min_cluster=3)["erased"] == 3
+
+
+def test_the_artwork_is_never_a_cluster_however_high_min_cluster_goes(request):
+    """What makes this safe: a cluster is what has nothing but transparency around it, and
+    the art is connected to itself. Only the detached dirt can go."""
+    name = _dirty_block(request)
+
+    result = effects.remove_stray_pixels(name, erase_isolated=True, min_cluster=8)
+
+    assert result["erased"] == 2
+    assert _drawn(name) == BLOCK
+
+
+def test_a_two_colour_speck_is_erased_rather_than_having_its_colours_traded(request):
+    """Each pixel of a two-colour speck is a stray whose only opaque neighbour is the
+    other one, so the replacement rule can only swap them: the same dirt in a different
+    order, and not even the same twice, since a second pass swaps it back."""
+    name = _dirty_block(request, dirt=[{"x": 2, "y": 2}])
+    drawing.draw_pixels(name, [{"x": 3, "y": 2}], "#39d7c0")
+
+    result = effects.remove_stray_pixels(name, erase_isolated=True, min_cluster=2)
+
+    assert result["erased"] == 2
+    assert result["replaced"] == 0, "the speck went instead of being recoloured"
+    assert _drawn(name) == BLOCK
+
+
+def test_erasing_the_same_dirt_twice_finds_none_the_second_time(request):
+    """A cluster has no opaque neighbour by definition, so taking one away cannot isolate
+    anything that was not isolated before."""
+    name = _dirty_block(request)
+
+    first = effects.remove_stray_pixels(name, erase_isolated=True, min_cluster=2)
+    second = effects.remove_stray_pixels(name, erase_isolated=True, min_cluster=2)
+
+    assert first["erased"] == 2
+    assert second["erased"] == 0
+    assert _drawn(name) == BLOCK
+
+
+def test_a_sparse_dither_is_eaten_by_this_which_is_why_it_is_opt_in(request):
+    """The case that keeps this off by default. A dither sparser than a checkerboard is
+    disconnected, so every pixel of it is isolated and the whole pattern is dirt by this
+    rule. The default leaves it, and `protect` names its colour when the flag is on."""
+    name = f"fx/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 16, 16)
+    spots = [{"x": x, "y": y} for y in range(2, 14, 2) for x in range(2, 14, 2)]
+    drawing.draw_pixels(name, spots, DIRT)
+
+    assert effects.remove_stray_pixels(name)["replaced"] == 0
+    assert _drawn(name) == len(spots)
+
+    assert effects.remove_stray_pixels(name, erase_isolated=True)["erased"] == len(spots)
+    assert _drawn(name) == 0
+
+
+@pytest.mark.pure
+def test_min_cluster_without_erase_isolated_is_refused():
+    """It has nothing to act on: the replacement rule is per pixel, not per cluster."""
+    with pytest.raises(ValidationFailed, match="erase_isolated"):
+        effects.remove_stray_pixels("unused.aseprite", min_cluster=2)
+
+
+@pytest.mark.pure
+def test_a_min_cluster_that_cannot_mean_anything_is_refused():
+    with pytest.raises(ValidationFailed, match="min_cluster"):
+        effects.remove_stray_pixels("unused.aseprite", erase_isolated=True, min_cluster=0)
+    with pytest.raises(ValidationFailed, match="min_cluster"):
+        effects.remove_stray_pixels("unused.aseprite", erase_isolated=True, min_cluster=99)
