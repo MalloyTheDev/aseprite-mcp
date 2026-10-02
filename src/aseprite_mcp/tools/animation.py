@@ -567,6 +567,15 @@ _TWEEN_LUA = (
 -- caller never has to work out where a contact edge is. `bottom` is the last drawn row
 -- rather than one past it: that row then maps to itself exactly, which is the difference
 -- between a squash that lands on the ground and one that lands near it.
+-- A transcription of `inbetween.anchor_point`, which is the authority. It lives in Python
+-- so the pure tier can test every mode, including the degenerate one-pixel box, on CI
+-- where there is no editor; it is copied here because the bounds are the editor's to
+-- measure and this tool is one Aseprite launch by design, so there is no read pass in
+-- which Python could decide first.
+--
+-- `test_the_lua_anchor_agrees_with_the_python_one` holds the two together, which is the
+-- only thing that makes a dual implementation safe. Change one, change both, or the test
+-- will say so.
 local function anchor_point(b, mode)
   local cx = b.x + (b.width - 1) / 2.0
   local cy = b.y + (b.height - 1) / 2.0
@@ -608,6 +617,12 @@ local ax, ay = anchor_point(sb, ARG.anchor)
 -- The source scan below is in the budget rather than on top of it: on a 4096x4096 canvas
 -- that one pass is already 16 million reads, so a cap that ignored it would not bound the
 -- call it is there to bound.
+--
+-- A transcription of `inbetween.tween_sample_budget`, for the same reason as
+-- anchor_point above, and held to it by
+-- `test_the_lua_sample_budget_agrees_with_the_python_one`. The result reports `samples`
+-- and `source_bounds`, which is what lets that test recompute this number from outside
+-- and compare rather than trust.
 local boxes, samples = {}, sb.width * sb.height
 for i, step in ipairs(ARG.steps) do
   local xs, ys = {}, {}
