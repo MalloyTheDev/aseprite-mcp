@@ -6,14 +6,16 @@
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-server-purple.svg)](https://modelcontextprotocol.io)
 
 <p align="center">
-  <img src="docs/assets/showcase/throw.gif" height="112" alt="A shaded ball thrown along an arc, its shadow tracking along the ground">
-  &nbsp;
-  <img src="docs/assets/showcase/item_sheet.png" height="112" alt="A heart, a coin, a potion and a sword, each shaded on its own colour ramp">
-  &nbsp;
-  <img src="docs/assets/showcase/walk8.gif" height="112" alt="A small creature turning through eight compass facings">
+  <img src="docs/assets/showcase/dungeon.gif" width="560" alt="A torch-lit dungeon wall with a chest on the flagstones, the flame flickering and its light falling off across the room">
 </p>
 <p align="center">
-  <img src="docs/assets/showcase/shading_stages.png" width="560" alt="One disc taken from flat colour, to shaded by light direction, to outlined and dithered">
+  <img src="docs/assets/showcase/item_sheet.png" height="112" alt="Five RPG items: a longsword, a kite shield, a great helm, a bronze key and a spell scroll, each shaded on its own ramps">
+  &nbsp;
+  <img src="docs/assets/showcase/walk8.gif" height="112" alt="A small creature turning through eight compass facings">
+  &nbsp;
+  <img src="docs/assets/showcase/zorder.gif" height="112" alt="A sword swung past a round shield, passing behind it and then in front, with the layers never reordered">
+  &nbsp;
+  <img src="docs/assets/showcase/throw.gif" height="112" alt="A shaded ball thrown along an arc, its shadow tracking along the ground">
 </p>
 <p align="center">
   <sub>Drawn, shaded, animated, timed and then <strong>measured</strong>: entirely through MCP
@@ -92,7 +94,7 @@ Aseprite GUI.
 
 | | |
 | --- | --- |
-| [Showcase](#showcase) | What the tools produce, with the numbers behind it |
+| [Showcase](#showcase) | What the tools produce, with the numbers behind it: a lit scene, an equipment sheet, per-cel ordering, palette reduction |
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
@@ -159,10 +161,211 @@ An agent cannot watch a GIF play. It can read that the spacing is symmetric abou
 apex, that the ball slows as it rises and speeds as it falls, and that the extremes are
 held two and a half times as long as the passing frames.
 
+### Reorder one cel, not the layer stack
+
+<p align="center">
+  <img src="docs/assets/showcase/zorder_pair.png" width="500" alt="Two frames of the same sprite: the shield interrupts the blade, then the blade runs across the shield">
+</p>
+<p align="center">
+  <sub>The same two layers in the same order, on two frames. Only the cel's z-index differs.</sub>
+</p>
+
+```python
+set_cel_z_index("swing.aseprite", "sword", frame=2, z=0)   # blade behind the shield
+set_cel_z_index("swing.aseprite", "sword", frame=3, z=2)   # blade in front, same layer
+```
+
+A blade that crosses a shield is behind it on the approach and in front of it on the
+follow-through, and a layer stack cannot say that: a layer's position applies to every
+frame at once. Moving the layer changes the other frames; duplicating the sword onto a
+second layer means hiding one of the two per frame and keeping two drawings in step
+forever.
+
+`z` is an offset on the layer's own stack position, so `0` means "wherever this layer
+sits" and a cel one layer down needs only `z=1` to draw in front of the one above it. The
+result reports the frame's competing cels back to front, because a number alone does not
+tell you the arm moved:
+
+```
+frame 2  z=0  renders: sword then shield   pixel (45,20) is #5c7a3a, the shield's oak
+frame 3  z=2  renders: shield then sword   pixel (45,20) is #eef1f5, the blade's steel
+```
+
+That pixel is the whole claim, and [the generator asserts
+it](scripts/showcase/zorder.py): a z-index that round-tripped through the file while
+changing nothing about the render would produce an identical-looking strip. The blade is
+drawn long enough to show its tip on the far side, because "behind" only reads as
+occlusion when you can see both ends of the thing being occluded. Note also that
+`z` is refused outside -32768 to 32767, because the editor accepts a larger number in
+memory and then stores it in a 16-bit field, so saving and reopening turned 32768 into
+-32768.
+
+### Turn a blend into pixel art
+
+<p align="center">
+  <img src="docs/assets/showcase/quantize_stages.png" width="620" alt="A dusk scene three times: smoothly rendered, then reduced to thirteen colours, then to five">
+</p>
+<p align="center">
+  <sub>117 colours, then 13, then 5. The banding is the palette doing its work, not a filter over the top.</sub>
+</p>
+
+```python
+quantize_palette("dusk.aseprite", max_colors=14)            # derive a palette from the art
+set_color_mode("dusk.aseprite", "indexed", palette_source="keep")   # then map the art onto it
+```
+
+`extract_palette` reports the colours an image already uses and `set_color_mode` maps art
+onto a palette that exists; `quantize_palette` is the step in between, deriving a small
+palette *from* the artwork.
+
+It is two calls on purpose, and the first one touches no pixels. Quantizing derives the
+palette and says so:
+
+```
+max_colors=14   palette holds 14, art has 117, 8 of them exactly
+    warning: 109 of the 117 colours in the art are not in the derived palette and will be
+             approximated by their nearest entry when the sprite is converted to indexed.
+converted to indexed   3888 drawn pixels, verified=True, now 13 colours
+```
+
+`verified=True` is the conversion confirming it did not lose a single drawn pixel, which
+is the one thing a mode change must never do quietly. `max_colors` is also a ceiling with
+a cliff in it: a budget equal to the number of colours in the art is where the reduction
+collapses, and four colours at `max_colors=4` come back as one averaged grey while
+`max_colors=5` returns all four. The result says which happened rather than reporting a
+clean reduction either way.
+
+### Light a room, not a sprite
+
+<p align="center">
+  <img src="docs/assets/showcase/dungeon.png" width="620" alt="A torch-lit dungeon: a sconce on a stone wall, a bound chest on the flagstones throwing a shadow away from the flame, and the far side of the room in shadow">
+</p>
+<p align="center">
+  <sub>112 by 72 pixels, five ramps, four frames. Every pixel is a ramp entry: nothing here
+  is alpha, a blur, or a blend.</sub>
+</p>
+
+Three things in that picture are worth more than the picture.
+
+**Thirty-five blocks, one shading call.** `shade_region_by_light` builds a distance field
+over everything matching one base colour, and a field over a mask with thirty-five
+disconnected parts describes each part on its own. The mortar joints are what make the mask
+thirty-five components instead of one slab, so the whole wall takes its form from a single
+call:
+
+```python
+shade_region_by_light("dungeon.aseprite", STONE, base_color=STONE[8],
+                      light_angle=155, bulge=0.75, tolerance=1.0, layer="wall")
+```
+
+An earlier version of this section claimed that and left out what it cost. The claim is only
+worth anything if the blocks come out *different*, and with every block 17 pixels wide they
+did not: a distance field over two components of the same size is the same field twice, so
+same-sized blocks are shaded identically and differ only in how far the falloff pushed them.
+Measured by normalising value away, so two blocks count as the same when their pixels rank
+the same whatever their brightness, 8 of 24 sampled blocks came back **pixel for pixel
+identical at 6 tones**, all in the dim zone where `shift_along_ramp` had clamped their darks
+together. The far wall was one tile repeated.
+
+Two changes fixed it, and the generator now asserts both. Block widths cycle through
+`(17, 11, 23, 14, 20)` with a per-course phase, so the fields differ; and the ramps are
+thirteen steps rather than nine, so a darkened block still has somewhere to go:
+
+```
+wall: 35 blocks, 31 distinct shading patterns, 28 of them unique, every block at 4 tones or more
+```
+
+**The falloff is zones down a ramp.** No tool here lights a scene from a point, and faking
+one by blending would land every pixel between palette entries. `shift_along_ramp` moves a
+rectangle one or two steps down the surface's own ramp instead, which is how a pixel artist
+builds a falloff. The trick is hiding the seams, and that is why it is a rectangle per
+course rather than one band across the room: the only cut that does not show is one along a
+joint, and because the courses are staggered no single column is a joint on all of them.
+
+```
+falloff (one rectangle per course per zone)
+  wall   45 blocks, 12 runs darkened, 6 blocks off-value
+  floor  22 blocks,  8 runs darkened, 4 blocks off-value
+
+floor row 56: step 8 at x=20, step 3 at x=95
+```
+
+That last line is [asserted by the generator](scripts/showcase/dungeon.py), because a
+falloff nobody measured is a falloff you have to take on trust. At one step a zone the
+assertion still passed and the room still looked evenly lit, which is a measurement being
+satisfied by something no reader can see. The reverse cost more: that same assertion went
+on passing while the far wall was a repeating tile, because nothing was measuring *that*.
+An assertion covers the failure it was written for and no other, which is why there are now
+three of them on this one picture.
+
+**The flicker is four frames with four durations.** `set_all_frame_durations` would give an
+even pulse, and an even pulse reads as a machine rather than as fire. The flame also leans a
+different way and stands a different height on each frame, and the generator asserts all
+four silhouettes differ:
+
+```
+flame     rows  lean   ms  halo
+  frame 1   14  +0.00   90  115 pixels in 3 rings
+  frame 2   12  +0.18   70  103 pixels in 3 rings
+  frame 3   15  -0.14  110  122 pixels in 3 rings
+  frame 4   12  +0.10   80  116 pixels in 3 rings
+```
+
+**The torchlight is the wall, brightened.** This is the part that took the longest to get
+right, and the answer turned out not to be a tool. Three drafts used `glow`, whose rings are
+ramp steps rather than alpha, and all three read as a sticker. `glow` grows its rings
+outward from the *subject's silhouette*, so a tall narrow flame gives a tall narrow egg with
+a hard elliptical boundary, and it paints at full opacity, so inside it the mortar joints
+and the block shading vanish into a smooth oval. Light brightens a surface. It does not
+erase it.
+
+So the pool is the masonry moved **up its own ramp**, by however many steps the distance
+from the flame allows:
+
+```python
+lift = round(POOL_GAIN * (1.0 - reach / POOL_RADIUS) ** 2)
+target = min(step + lift, len(STONE) - 1)
+```
+
+Every pixel on that wall is already an exact ramp entry, so finding its step is a table
+lookup and lifting it is arithmetic on an integer. One `get_pixels` over the pool's bounding
+box, one `draw_pixels` back:
+
+```
+light pool: lifted 1503 wall pixels up their own ramp, 0 off-ramp and left alone
+```
+
+The joints lift too, which is exactly why the masonry survives inside the light. `glow` is
+still there, at `radius=3`, for the heat right at the flame, which is the job it is good at.
+
+The sconce casts onto the wall it is bolted to, with `light_angle=90` and a high
+`light_height` so the shadow falls straight down and short. It had none for three drafts,
+which is the single commonest reason a lit object reads as pasted on.
+
+**The floor recedes.** Its courses grow taller and its stones grow wider down the frame,
+because flat equal courses read as a second wall lying down:
+
+```
+floor: course heights [5, 6, 7, 8], stone widths [17, 21, 26, 31], down the frame
+```
+
+Where it meets the wall there is a shorter, darker skirting course and then three rows of
+flagstone stepped down their own ramp, rather than the four flat full-width rows an earlier
+version put there. That did stop two surfaces of grey blocks reading as one wall, the way a
+letterbox bar stops a bad crop.
+
+The chest's shadow is `cast_shadow` with `ground_layer="floor"`, which clips it to the
+flagstones so it cannot run off the floor and hang in the air, and it uses the floor's ramp
+rather than the chest's, because a shadow is a darkening of what it lies on. The chest's own
+contact shadow had to move: `contact_shadow` takes the occluder's colour, and run after the
+brass pass that had already repainted the straps, only 3 pixels of the chest were still the
+colour it was given. It runs before that pass now and reports 102 darkened wood pixels,
+which the generator asserts is not zero.
+
 ### Scaffold a whole asset in one call
 
 <p align="center">
-  <img src="docs/assets/showcase/item_sheet.png" width="520" alt="Pixel-art item sheet: a heart, a coin, a potion and a sword, each shaded on its own ramp">
+  <img src="docs/assets/showcase/item_sheet.png" width="620" alt="Pixel-art equipment sheet: a longsword, a kite shield, a great helm, a bronze key and a spell scroll, each shaded on its own ramps">
 </p>
 <p align="center">
   <img src="docs/assets/showcase/walk8_sheet.png" width="640" alt="Eight-direction sheet: one creature facing each compass point, one frame and animation tag per direction">
@@ -171,14 +374,48 @@ held two and a half times as long as the passing frames.
   <sub><code>create_rpg_item_sheet</code> lays out a named slice per item and
   <code>make_8_direction_walk_template</code> generates the frames <strong>and one
   animation tag per direction</strong>; both are then drawn into with the drawing and
-  shading tools. Each item carries its own ramp, so the potion's glass, liquid and cork
-  are shaded independently.</sub>
+  shading tools. Each part carries its own ramp, so the sword's steel, brass, leather and
+  gem are shaded independently, and the generator
+  <a href="scripts/showcase/items.py">asserts per cell</a> that no colour from one item
+  reached another.</sub>
 </p>
 
 ```text
 validate_sprite_for_game_export -> passed  (width, height, color_mode, min_frames, required_tags)
 export_game_asset_bundle        -> hero.png, hero.gif, hero_sheet.png (+JSON), hero_idle.gif, manifest.json
+
+sword   17 colours, from 4 ramps and nothing else
+shield  19 colours, from 3 ramps and nothing else
+helm    12 colours, from 2 ramps and nothing else
+key      9 colours, from 1 ramp and nothing else
+scroll  14 colours, from 3 ramps and nothing else
+
+sword: blade is rows 0 to 26, 68% of its height
+centres: sword=19.5  shield=19.0  helm=19.0  key=19.5  scroll=18.5   spread 1.0
 ```
+
+Those checks earn their keep, and each of them was added after the thing it checks had
+already gone wrong.
+
+The colour census: `base_color` scopes a shading pass by colour *distance*, and at the
+default tolerance of 24 every step of a gold ramp is within reach of a step of a brass one,
+so a pass meant for one item also matched art in a different cell and reshaded it. Nothing
+looked wrong, and three rounds went into redrawing the wrong thing before the colours were
+counted. That is now
+[issue #183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183).
+
+The blade's share: a draft of this sword was 54% blade at a 1 to 2.3 aspect, which is a
+spearhead, and at inventory size it read as a crystal shard on a stick. 54% is not something
+anybody notices as a number, which is the whole reason for printing it.
+
+The centre line: five items at five different heights read as five sprites from five games.
+
+A fourth check, not shown here, asserts each glint's pixels are inside the part named for
+it. Two of the four used to be wrong: scoped to a whole 40px cell, `specular_highlight`
+built its normals from the entire compound object, and the sword's glint landed on its
+leather grip while the blade had none. It is worth knowing that check has a hole in it
+too, because the key passed it while still being wrong: it proves a glint is on the right
+part, not on the right *side* of it.
 
 <details>
 <summary>More examples</summary>
