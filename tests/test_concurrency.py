@@ -179,6 +179,32 @@ def test_an_unaccounted_path_in_the_arguments_widens_the_claim(overlap):
     )
 
 
+def test_a_backslash_path_the_runner_cannot_account_for_widens_the_claim(overlap):
+    r"""The same rule, for the spelling a Windows path actually has on disk.
+
+    Testing only for "/" made the safety argument circular: a path reaching Lua is
+    forward-slashed *because* it came through `lua_path`, so a slash-only test recognises
+    exactly the paths that are already recorded. A tool that passed a raw
+    `str(resolved_path)` instead would hand over `F:\ws\b.aseprite`, which is neither
+    recorded nor, under that test, path-shaped, and the claim would narrow around a file
+    the run was about to write.
+
+    Nothing in the server does that today: every site that stringifies a path feeds
+    `run_cli`, which claims the whole editor. An audit over a full `--run-aseprite` tier
+    logged no narrowed claim that omitted a path-shaped value of either spelling, so this
+    costs nothing measurable. It is here so the property is enforced rather than merely
+    conventional.
+    """
+    _in_parallel(
+        partial(_lua_naming, "F:/ws/a.aseprite", unrecorded=r"F:\ws\b.aseprite"),
+        partial(_lua_naming, "F:/ws/b.aseprite"),
+    )
+
+    assert overlap.peak == 1, (
+        "a run carrying an unrecorded backslash path still narrowed its claim"
+    )
+
+
 def test_two_runs_sharing_one_of_their_paths_do_not_overlap(overlap):
     """A claim is a set and conflict is intersection, not equality.
 

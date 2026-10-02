@@ -142,8 +142,24 @@ def _claim_keys(args: dict | None) -> frozenset[str] | None:
       * `lua_path` is the only producer of those values and records what it returns, so a
         value that is not in the recording is one this function cannot account for.
       * Every path `lua_path` returns has been through `config.resolve`, so it is
-        absolute and forward-slashed. A path-shaped value is therefore exactly one
-        containing "/", and an unaccounted one of those means the whole editor.
+        absolute and forward-slashed. An unaccounted value containing a separator of
+        either kind therefore means the whole editor.
+
+    The backslash half of that test is not redundant, and it is the difference between a
+    safety property and a convention. A path reaching Lua is forward-slashed only because
+    it came through `lua_path`, so testing for "/" alone makes the whole argument circular:
+    it detects exactly the paths that are already recorded. A tool that passed a raw
+    `str(resolved_path)` instead would hand Windows a backslash string that is neither
+    recorded nor, under a "/"-only test, path-shaped, and the claim would narrow around a
+    file it was about to write. Nothing does that today (every such site is on the
+    `run_cli` route, which claims the whole editor), and an audit over the full
+    --run-aseprite tier logged no narrowed claim that omitted a path-shaped value of
+    either spelling, so this costs nothing measurable. It means the argument no longer
+    depends on a convention that only CONTRIBUTING.md enforces.
+
+    A false positive, a layer name or a text string carrying a backslash, costs the whole
+    editor for that call, which is the safe direction and is what every other declining
+    case here already does.
 
     Four things make it decline to narrow, and all four are the safe direction: nothing
     was recorded, a value could not be accounted for, the walk ran out of budget, or no
@@ -169,7 +185,7 @@ def _claim_keys(args: dict | None) -> frozenset[str] | None:
                 # Windows and two claims that fail to intersect is precisely the overlap
                 # this exists to prevent.
                 keys.add(os.path.normcase(node))
-            elif "/" in node:
+            elif "/" in node or "\\" in node:
                 return None
         elif isinstance(node, dict):
             for key, value in node.items():

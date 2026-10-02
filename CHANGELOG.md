@@ -6,6 +6,154 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Per-object metadata and a packed sheet exporter**, four capabilities the editor has
+  had since 1.3 (#95, #94).
+
+  `set_cel_z_index` reorders one cel against its layer's neighbours, which is the answer
+  to a limb that is in front of the body on one frame and behind it on the next without
+  restructuring the layer stack. `z` is an offset on the layer's own stack position and
+  ties go to the larger value; the result reports the frame's competing cels back to
+  front, because a number alone does not tell a caller that the arm moved. It is refused
+  outside -32768 to 32767: the editor accepts a larger number in memory and then stores
+  it in a 16-bit field, so saving and reopening turned 32768 into -32768 and 100000 into
+  -31072. `get_cel` now reports `z_index` too.
+
+  `set_properties` and `get_properties` reach the custom-property store that a sprite,
+  layer, cel, tag, slice or tile carries inside the .aseprite file, with namespaces. Game
+  metadata (a hitbox on a slice, an anchor on a layer, the damage frames of a tag) now
+  travels with the art instead of in a sidecar the next edit desynchronises. Values keep
+  their type. A selector the chosen target does not use is refused rather than ignored,
+  since the write would otherwise land on a different object than the one named.
+  Measured, and pinned both ways: a property lives on the record linked cels share, so a
+  write to a held pose reaches every frame of it, while a z-index does not.
+
+  `quantize_palette` derives a palette from the art and reduces it to a budget, the step
+  between a picture and pixel art that `extract_palette` and `set_color_mode` leave open.
+  `max_colors` is a ceiling with a cliff in it: four colours at `max_colors=4` come back
+  as one averaged grey while `max_colors=5` returns all four, so the result reports what
+  the art holds against what the palette can draw and warns when they disagree. It
+  refuses an indexed sprite, where replacing the palette changes what every pixel means
+  without touching one; measured, that corrupted the art and could leave pixels pointing
+  past the end of the palette.
+
+  `export_spritesheet_packed` exports through the editor's own command, a sibling of the
+  proven CLI-based `export_spritesheet` rather than a replacement. It adds extrude (the
+  one-pixel border duplication that fixes texture bleeding in a game engine),
+  merge-duplicates, trim, padding, and a data file carrying the layer, tag and slice
+  sections. A packed sheet merges duplicates whether or not the flag is set, and the
+  result says so. An output extension the editor cannot encode writes nothing, raises
+  nothing and returns success, so the written file is verified afterwards.
+
+- **`docs/HEADLESS.md`**, a reference for designing a tool against `aseprite -b --script`,
+  organised so an idea can be ruled out in one pass (#96). It covers the two `app.useTool`
+  calls that take the process down, the calls that return success and do nothing, what is
+  absent under `-b`, `app.preferences` and why nothing may write to it, and the region
+  transforms reachable only as manual pixel work. Each constraint points at the code it
+  forced, so the file explains why ramp shading is palette index arithmetic, why gradients
+  are projected per pixel, and why `app.useTool` is never called anywhere in this server.
+
+  Claims re-checked against Aseprite 1.3.18.6 are marked as such, and two were wrong:
+  `Dialog` is not absent but a constructor that evaluates to `nil`, which a truthiness
+  guard will not catch, and `app.site` is present and populated with only `app.site.editor`
+  missing. The crashes and anything needing an `app.preferences` write were deliberately
+  not reproduced, and the file says which claims those are and why.
+
+- **`remove_stray_pixels` takes `erase_isolated`**, which erases a stray with no opaque
+  neighbour instead of skipping it (#139). That stray is the dirt an effects pass leaves
+  outside the art, which had no colour to take and so was the one kind of mess the tool
+  could not clean, while `diff_sprites` was already reading it as scattered noise and
+  naming this tool. Reported as `erased` and `erased_clusters`, apart from `replaced`,
+  because erasing changes the silhouette, which is the one thing the tool otherwise never
+  does; opt-in for the same reason, since a spark or a floating highlight is an isolated
+  pixel that is meant to be there. `min_cluster` extends it to the two-pixel speck, where
+  neither pixel is isolated because each has the other for company. Erasure is defined
+  over clusters joined to each other and to nothing else, so it cannot reach the artwork
+  at any setting.
+
+### Changed
+- **The Aseprite invocation lock is per sprite path rather than process-wide** (#66).
+  Calls on different sprites run in parallel; calls on one sprite stay serialized, as do
+  all CLI exports. Six parallel edits to six sprites measured 1.44s before and 0.44s
+  after, with six parallel edits to one sprite still serialized.
+
+  Paths are learned at `tools/common.lua_path`, the one seam every path headed for Lua
+  passes through, rather than by reading argument names: ten different names are in use
+  for paths, and a runner that sniffed them would claim nothing for a tool whose name it
+  did not know, which looks exactly like a run that is correctly parallel. Anything the
+  runner cannot account for still claims the whole editor, so the narrowing can only ever
+  over-lock.
+
+  Both spellings of a path separator count as unaccountable, not just the forward slash.
+  Testing for "/" alone made the argument circular, since a path reaching Lua is
+  forward-slashed only because it came through `lua_path`: a tool passing a raw
+  `str(resolved_path)` would hand over a backslash string that was neither recorded nor
+  path-shaped, and the claim would narrow around a file it was about to write. Nothing
+  does that today, and an audit over a full integration run logged no narrowed claim that
+  omitted a path-shaped value of either spelling, so the check costs nothing measurable
+  and the property is enforced rather than conventional.
+
+- **`trim_sprite` shares one measurement with `diff_sprites`** instead of scanning every
+  pixel with `getPixel` (#172). Its answer is identical, pinned on the sprite from the
+  issue before the change, and the scan is 5.2x cheaper over a 1024x1024 frame.
+
+- **The tween's anchor and sample cap live where CI can test them** (#149). Both are
+  arithmetic over the source cel's drawn bounds and both existed only in Lua, so a
+  regression in either kept CI green and would have surfaced only in a `--run-aseprite`
+  run, the tier CI does not run. The bounds are the editor's to measure and `tween_cels`
+  is one Aseprite launch by design, so the authority now lives in `core/inbetween.py`
+  with pure tests, the Lua carries a transcription, and a test holds the two together: a
+  one-pixel error planted in the Lua anchor fails both of them.
+
+- **The README tool catalogue is tested** (#155). Every name in a catalogue or workflow
+  row is a registered tool, every registered tool has exactly one row, no row names
+  nothing, and every tool count in the prose matches the registry; failures name the
+  offending tool and the README line. The catalogue was already in sync, so this is a
+  regression guard for the structural drift that a previous pass had to fix with a
+  throwaway script. It replaces two weaker checks, one of which accepted a tool name
+  anywhere in the document including prose, the other of which verified only the headline
+  count and not the contents map that carries the same number.
+
+- **The em dash check looks at files nobody has staged yet.** It listed tracked files
+  only, so a new document carrying the character passed locally and would have failed
+  only on CI, which is the one situation the check exists for.
+
+### Fixed
+- **`diff_sprites` measured `drawn_pixels` and `content` by two different definitions of
+  indexed transparency** (#172). The count treated both the sprite's transparent index and
+  any palette entry whose own alpha is 0 as empty; the content box came from
+  `Image:shrinkBounds`, which honours the transparent index only. On an 8x8 indexed sprite
+  holding one pixel in a transparent palette entry that read `drawn_pixels: 4` beside a
+  5x5 box whose corner nothing in the sprite could draw. Both now come from one prelude
+  measurement, so they cannot disagree rather than merely agreeing today. RGB and
+  grayscale results are unchanged.
+
+- **`cast_shadow` on a background subject drew a confident wrong shadow.** A background is
+  opaque and fills the canvas, so the measured subject box was the canvas itself. The issue
+  reported this as a confusing `light_height` error, and that is the better case: measured
+  on a 40x40 sprite with defaults the tool *succeeded*, casting an ellipse from the
+  canvas's own outline and reporting `ok: true`. It is now refused with the reason a
+  background cannot cast a shadow, naming `convert_background_to_layer` (#146).
+
+- **`cast_shadow` says what the floor it clipped to actually is** (#146). A `ground_layer`
+  is still consulted for its drawn pixels alone, which is the right question for a clip, so
+  a hidden floor or one at a tenth opacity still catches a shadow; what is new is that the
+  result carries `ground_layer`, `ground_layer_visible`, `ground_layer_opacity` and
+  `ground_layer_hidden`, and `warnings` names whatever is switched off. Aseprite's
+  visibility is per layer, so a floor inside a hidden group reported itself visible while
+  nothing of it reached the picture; the check walks the enclosing groups for that reason.
+
+- **A smear tapered against its subject's bounding box rather than its own width** (#150).
+  The rule measured distance from the box's centre line, so a part of the shape far from
+  the middle of the box lost its trail however wide it was. Measured on an L of a 4px bar
+  and a 16px foot, moved down, the trail depth per column went from `0 1 2 2 | 3 4 5 6 6 5
+  4 3 2 2 1 0` to `2 6 6 2 | 3 4 5 6 6 5 4 3 2 2 1 0`: one lens centred on the box before,
+  two lenses after, each centred on its own part. The foot is identical in both, which is
+  the sign the change is targeted rather than sweeping. A line's span is its lowest and
+  highest opaque pixel, so a ring's trail still draws through its own hole, which is
+  measured as unchanged rather than claimed.
+
+
 ### Changed
 - **Removed every em dash from tracked content, and added the test that keeps it that
   way.** The project does not use U+2014, new work had respected that for a long time,

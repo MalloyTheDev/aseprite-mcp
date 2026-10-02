@@ -108,6 +108,12 @@ MAX_SPECULAR_PIXELS = 64
 # bound: a glow wider than a sprite is tall has stopped being a halo and become a
 # background fill, which fill_gradient does better.
 MAX_GLOW_RADIUS = 32
+# The largest detached cluster `remove_stray_pixels` will call dirt. Dirt arrives in ones
+# and twos; by eight pixels a thing standing clear of the artwork is a mark somebody drew,
+# and erasing it changes the silhouette, which is the one thing that tool otherwise never
+# does. The cap also bounds the work: each cluster is walked until it passes this size, so a
+# higher ceiling would cost a multiple of the single pass over every pixel of the art.
+MAX_STRAY_CLUSTER = 8
 # Pixels of penumbra around a cast shadow's core. Each one is another whole ellipse
 # rasterised and another ramp step consumed, and a shadow whose soft edge is wider than
 # the hard core reads as a gradient rather than as a shadow.
