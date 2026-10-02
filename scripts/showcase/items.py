@@ -58,10 +58,16 @@ BRONZE = ramp("#8a6a3a", hue=-20.0, sat=-18.0, light=0.78)
 BRASS = ramp("#e0a33c", hue=-22.0)
 GOLD = ramp("#f2b632", hue=-24.0)
 WOOD = ramp("#7a4e2c", hue=-18.0, light=0.62)
-GEM = ramp("#4fd8a4", hue=-24.0)
 PAINT = ramp("#2f6fb5", hue=-26.0, light=0.84)
-PARCH = ramp("#cbb382", hue=-16.0, light=0.68)
-RIBBON = ramp("#bf3147", hue=-28.0, light=0.80)
+# Wide enough that `PARCH[0]` is dark enough to pass for ink. The draft wrote on its
+# parchment in `PARCH[1]`, which against `PARCH[5]` is a yellow-brown on a yellow-white and
+# at this size reads as mould rather than as writing.
+PARCH = ramp("#cbb382", hue=-16.0, light=0.90)
+# A deep red, not the pink this was. There is one accent colour on this sheet and it is
+# used twice, on the scroll's ribbon and on the cord binding the sword's grip, because a
+# hue that turns up once reads as an accident. The mint green of an earlier pommel gem was
+# exactly that accident and the gem is gone.
+RIBBON = ramp("#8f3b32", hue=-26.0, light=0.80)
 
 
 def rows(ox, spans):
@@ -98,28 +104,38 @@ def band(points, keep):
 # ======================================================================= 1. longsword
 # A long blade with a seven-row taper. The guard overlaps its last two rows, so the blade
 # comes out of the guard rather than balancing on it.
+# Narrower and much longer than the draft, which gave 22 rows of 9px blade to 18 rows of
+# hilt. 54% blade at a 1 to 2.3 aspect is a spearhead, and at inventory size it read as a
+# crystal shard on a stick. 27 rows to 11 is 71%, which is roughly what a longsword is, and
+# the hilt is as compact as three readable parts can be in a 40px cell.
 BLADE = {
-    2: [(0, 0)], 3: [(-1, 1)], 4: [(-1, 1)], 5: [(-2, 2)], 6: [(-2, 2)],
-    7: [(-3, 3)], 8: [(-3, 3)],
-    **{y: [(-4, 4)] for y in range(9, 24)},
+    1: [(0, 0)], 2: [(-1, 1)], 3: [(-1, 1)], 4: [(-2, 2)], 5: [(-2, 2)], 6: [(-2, 2)],
+    **{y: [(-3, 3)] for y in range(7, 28)},
 }
-FULLER = {y: [(-1, 1)] for y in range(10, 22)}
+# The blade's cross section, by column, because a blade is a prism and not a dome.
+# `shade_region_by_light` describes a rounded form, and on the draft's blade it produced a
+# soft left-to-right gradient with no edge anywhere in it. These are ramp steps for dx -3
+# to 3: a bright lit edge, a lit bevel, a dark groove down the middle, a shadowed bevel and
+# a rim light catching the far edge. The groove is darker than the bevels either side,
+# which is what makes a fuller read as cut into the steel rather than drawn on it.
+BLADE_SECTION = {-3: 8, -2: 6, -1: 7, 0: 3, 1: 4, 2: 2, 3: 5}
+BLADE_FULL_FROM = 7
+# The taper is too narrow to carry seven columns, so it takes a two-tone split instead.
+TAPER_LIT, TAPER_DARK = 7, 4
 # Quillons: two pixels standing clear of the bar at each end, which is what turns a
 # crossbar into a guard.
 GUARD = {
-    22: [(-12, -11), (11, 12)],
-    23: [(-12, 12)], 24: [(-12, 12)], 25: [(-12, 12)], 26: [(-12, 12)],
-    27: [(-12, -11), (11, 12)],
+    27: [(-11, -10), (10, 11)],
+    28: [(-11, 11)], 29: [(-11, 11)], 30: [(-11, 11)],
+    31: [(-11, -10), (10, 11)],
 }
 # The bar's own bottom row, darkened by hand. A guard is a slab seen edge on, and the
 # dome the shading pass describes has no reason to put a hard edge where the slab ends.
-GUARD_EDGE = {26: [(-10, 10)]}
-GRIP = {y: [(-3, 3)] for y in range(28, 34)}
-# Two wraps, not three: at six rows a third band left the grip reading as one dark bar.
-WRAP = {29: [(-3, 3)], 32: [(-3, 3)]}
-POMMEL = {34: [(-3, 3)], 35: [(-4, 4)], 36: [(-5, 5)], 37: [(-4, 4)], 38: [(-3, 3)]}
-POMMEL_GEM = {35: [(-1, 1)], 36: [(-2, 2)], 37: [(-1, 1)]}
-POMMEL_GLINT = {36: [(-1, -1)]}
+GUARD_EDGE = {30: [(-9, 9)]}
+GRIP = {y: [(-2, 2)] for y in range(31, 36)}
+# The cord binding the grip, in the sheet's one accent colour.
+WRAP = {32: [(-2, 2)], 34: [(-2, 2)]}
+POMMEL = {36: [(-3, 3)], 37: [(-4, 4)], 38: [(-3, 3)]}
 
 # ======================================================================= 2. kite shield
 # A heater: a wide flat top, sides that fall straight and then draw in two pixels at a
@@ -138,52 +154,92 @@ CROSS_H = {13: [(-13, 13)], 14: [(-13, 13)], 15: [(-13, 13)]}
 RIVETS = {6: [(0, 0)], 13: [(-11, -11), (11, 11)], 31: [(0, 0)]}
 
 # ======================================================================= 3. great helm
+# Two rows lower than the draft, which centred the helm on row 17 while everything else on
+# the sheet centred on 19. Five items at five different heights read as five sprites from
+# five games.
 HELM = {
-    6: [(-6, 6)], 7: [(-8, 8)], 8: [(-9, 9)], 9: [(-10, 10)], 10: [(-10, 10)],
-    **{y: [(-11, 11)] for y in range(11, 23)},
-    23: [(-10, 10)], 24: [(-10, 10)], 25: [(-9, 9)], 26: [(-9, 9)],
-    27: [(-10, 10)], 28: [(-11, 11)], 29: [(-11, 11)], 30: [(-10, 10)],
-    31: [(-8, 8)], 32: [(-5, 5)],
+    8: [(-6, 6)], 9: [(-8, 8)], 10: [(-9, 9)], 11: [(-10, 10)], 12: [(-10, 10)],
+    **{y: [(-11, 11)] for y in range(13, 25)},
+    25: [(-10, 10)], 26: [(-10, 10)], 27: [(-9, 9)], 28: [(-9, 9)],
+    29: [(-10, 10)], 30: [(-11, 11)], 31: [(-11, 11)], 32: [(-10, 10)],
+    33: [(-8, 8)], 34: [(-5, 5)],
 }
-VISOR = {15: [(-8, 8)], 16: [(-8, 8)]}
-# Breath holes, single pixels on purpose: they are strays by `remove_stray_pixels`'s own
-# definition, which is exactly what `protect` is for.
-BREATHS = {21: [(-6, -6), (-3, -3), (0, 0), (3, 3), (6, 6)]}
-# A comb, not a spike: the draft that was three pixels wide read as a stick poking out of
-# the dome. It stops at the visor, because a crest that crosses the slit stops being a
-# crest and becomes a stripe painted on a face.
-CREST = {2: [(-1, 1)], 3: [(-2, 2)],
-         **{y: [(-2, 2)] for y in range(4, 15)}}
+VISOR = {17: [(-8, 8)], 18: [(-8, 8)]}
+# Two breath slits, not holes. Five single pixels ruled straight across read as a dotted
+# line; the same five stepped to follow the dome read as scattered dirt, which was worse. A
+# slit is what the visor already is, and a second and third of them below it is what makes
+# a dome of grey steel unmistakably a helm.
+BREATHS = {23: [(-6, 2)], 26: [(-4, 3)]}
+# A comb, and one that comes to a point. Three pixels wide read as a stick poking out of
+# the dome; five pixels wide with a flat bottom edge read as a gold brick resting on it.
+# Tapering at both ends is what makes it a crest sitting *in* the helm.
+CREST = {
+    4: [(-1, 1)], 5: [(-1, 1)],
+    **{y: [(-2, 2)] for y in range(6, 12)},
+    12: [(-1, 1)], 13: [(-1, 1)], 14: [(0, 0)],
+}
 
 # ======================================================================= 4. iron key
 # A solid lozenge bow rather than a ring. A ring's band is three pixels wide at this size,
 # which is one more refusal and one more hand-lit part than the sheet needs to make its
 # point, and the hole is punched after the shading pass instead.
 BOW = {
-    3: [(-2, 2)], 4: [(-4, 4)], 5: [(-5, 5)], 6: [(-6, 6)],
-    7: [(-7, 7)], 8: [(-7, 7)], 9: [(-7, 7)], 10: [(-7, 7)],
-    11: [(-6, 6)], 12: [(-5, 5)], 13: [(-4, 4)], 14: [(-2, 2)],
+    4: [(-2, 2)], 5: [(-4, 4)], 6: [(-5, 5)], 7: [(-6, 6)],
+    8: [(-7, 7)], 9: [(-7, 7)], 10: [(-7, 7)], 11: [(-7, 7)],
+    12: [(-6, 6)], 13: [(-5, 5)], 14: [(-4, 4)], 15: [(-2, 2)],
 }
-BOW_HOLE = {7: [(-1, 1)], 8: [(-2, 2)], 9: [(-1, 1)]}
+BOW_HOLE = {8: [(-1, 1)], 9: [(-2, 2)], 10: [(-1, 1)]}
 # The shank is three pixels across, so it is lit as what it is: a rod, bright on the side
 # the key comes from and dark opposite. A distance field cannot say that about three
 # pixels, and `shade_region_by_light` is right to refuse rather than guess.
-SHANK_LIT = {y: [(-1, -1)] for y in range(15, 35)}
-SHANK_MID = {y: [(0, 0)] for y in range(15, 35)}
-SHANK_DARK = {y: [(1, 1)] for y in range(15, 35)}
-WARDS = {27: [(2, 7)], 28: [(2, 7)], 29: [(2, 7)],
-         31: [(2, 5)], 32: [(2, 5)], 33: [(2, 5)]}
+SHANK_LIT = {y: [(-1, -1)] for y in range(16, 36)}
+SHANK_MID = {y: [(0, 0)] for y in range(16, 36)}
+SHANK_DARK = {y: [(1, 1)] for y in range(16, 36)}
+WARDS = {28: [(2, 7)], 29: [(2, 7)], 30: [(2, 7)],
+         32: [(2, 5)], 33: [(2, 5)], 34: [(2, 5)]}
 
 # ======================================================================= 5. spell scroll
-TOP_ROLL = {y: [(-12, 12)] for y in range(6, 11)}
-PARCHMENT = {y: [(-9, 9)] for y in range(11, 30)}
-END_ROLL = {y: [(-12, 12)] for y in range(30, 35)}
+# One roll at the top with the sheet hanging open below it, curling back on itself at the
+# bottom. The draft was a roll at each end of a rectangle, which gave the only item on this
+# sheet with no silhouette: every other one is recognisable from its outline alone and that
+# one was a window frame.
+TOP_ROLL = {4: [(-11, 11)], **{y: [(-13, 13)] for y in range(5, 8)}, 8: [(-11, 11)]}
+# The roll is a cylinder, so it is banded by row rather than shaded as a form: a row number
+# to a `WOOD` step, brightest a third of the way down, which is where the light hits a
+# cylinder and never at its top edge.
+ROLL_BANDS = {4: 3, 5: 6, 6: 7, 7: 4, 8: 2}
+ROLL_CAPS = {y: [(-13, -12), (12, 13)] for y in range(5, 8)}
+# Pinched where the ribbon binds it and flaring below, which is what a tied scroll does and
+# what finally gives this item an outline. Two drafts of it were a rectangle in a square
+# cell: every other item on this sheet is recognisable from its silhouette alone, and the
+# scroll was a window frame.
+PARCHMENT = {
+    9: [(-10, 10)], 10: [(-11, 11)], 11: [(-11, 11)], 12: [(-11, 11)],
+    13: [(-10, 10)], 14: [(-10, 10)],
+    15: [(-9, 9)], 16: [(-9, 9)], 17: [(-9, 9)], 18: [(-9, 9)],
+    19: [(-10, 10)], 20: [(-10, 10)], 21: [(-11, 11)], 22: [(-11, 11)],
+    **{y: [(-12, 12)] for y in range(23, 28)},
+    28: [(-11, 11)], 29: [(-10, 10)], 30: [(-8, 8)],
+}
+# The sheet rolling back on itself, wider than the sheet above it so the curl reads as a
+# lip rather than as a fold line.
+CURL = {31: [(-9, 9)], 32: [(-10, 10)], 33: [(-8, 8)]}
 # Writing, as the dashes it would be at this size. Four pixels of text is text; a glyph
-# four pixels wide is a smudge pretending to be one.
-WRITING = {13: [(-6, 2)], 15: [(-6, 4)], 17: [(-6, -1)],
-           25: [(-6, 3)], 27: [(-6, 0)]}
-RIBBON_BAND = {y: [(-9, 9)] for y in range(19, 24)}
-KNOT = {18: [(-2, 2)], 19: [(-3, 3)], 23: [(-3, 3)], 24: [(-2, 2)]}
+# four pixels wide is a smudge pretending to be one. In `PARCH[0]`, which is five steps
+# from the paper, rather than the one step the draft used.
+WRITING = {11: [(-8, 4)], 13: [(-8, 6)],
+           21: [(-8, 2)], 23: [(-9, 5)], 25: [(-9, 1)], 27: [(-9, 6)]}
+# Four flat bands and a hanging end. The draft gave the ribbon to
+# `shade_region_by_light`, and a 19 by 5 band cannot carry a diagonal terminator: it came
+# out as a smear with a torn top and bottom edge.
+# At the pinch, and a pixel wider than the sheet there, so it reads as wrapped around it
+# rather than painted on it.
+RIBBON_BAND = {y: [(-10, 10)] for y in range(15, 19)}
+RIBBON_STEPS = {15: 6, 16: 4, 17: 4, 18: 2}
+# The tail hangs *outside* the sheet's edge, which is the other half of giving this item a
+# silhouette: an outline that is only ever the paper cannot be read as a tied scroll.
+RIBBON_TAIL = {19: [(11, 13)], 20: [(11, 13)], 21: [(12, 14)], 22: [(12, 14)],
+               23: [(13, 15)], 24: [(13, 15)], 25: [(13, 15)]}
 
 
 # --------------------------------------------------------------------------- the finish
@@ -281,7 +337,6 @@ SWORD, SHIELD_X, HELM_X, KEY, SCROLL = (CELL * i for i in range(COUNT))
 blade = rows(SWORD, BLADE)
 guard = rows(SWORD, GUARD) | rows(SWORD, POMMEL)
 grip = rows(SWORD, GRIP)
-gem = rows(SWORD, POMMEL_GEM)
 
 shield = rows(SHIELD_X, SHIELD)
 shield_face = erode(shield, 2)
@@ -295,72 +350,103 @@ bow = rows(KEY, BOW)
 shank = rows(KEY, SHANK_LIT) | rows(KEY, SHANK_MID) | rows(KEY, SHANK_DARK)
 wards = rows(KEY, WARDS)
 
-rolls = rows(SCROLL, TOP_ROLL) | rows(SCROLL, END_ROLL)
+roll = rows(SCROLL, TOP_ROLL)
 parchment = rows(SCROLL, PARCHMENT)
-ribbon = rows(SCROLL, RIBBON_BAND) | rows(SCROLL, KNOT)
+curl = rows(SCROLL, CURL)
+ribbon = rows(SCROLL, RIBBON_BAND) | rows(SCROLL, RIBBON_TAIL)
 
 # 1. flat, every part in its own exact base colour so one shading pass can find it
 flat(blade, STEEL[5])
 flat(guard, BRASS[4])
-flat(grip | rolls, WOOD[4])
-flat(gem, GEM[4])
+flat(grip, WOOD[4])
+flat(roll, WOOD[5])
 flat(shield_rim, STEEL[4])
 flat(shield_face, PAINT[4])
 flat(helm, STEEL[3])
 flat(bow, BRONZE[5])
 flat(shank | wards, BRONZE[4])
-flat(parchment, PARCH[4])
+flat(parchment | curl, PARCH[4])
 flat(ribbon, RIBBON[4])
 
 # 2. form, before any detail
-form(STEEL[5], STEEL, rim=0.24)
 form(STEEL[3], STEEL, rim=0.16, light_z=0.5)
 form(BRASS[4], BRASS, bulge=0.8)
 form(WOOD[4], WOOD, bulge=0.8)
-form(PAINT[4], PAINT, rim=0.18, bulge=0.7)
-form(PARCH[4], PARCH, rim=0.14, bulge=0.6)
+# `PAINT[:8]`, not the whole ramp. With the top step available, a 27px flat face at this
+# rim put its whole upper edge on `PAINT[8]`, so a blue shield had a white stripe along the
+# top and lost its hue exactly where the eye goes first.
+form(PAINT[4], PAINT[:8], rim=0.10, bulge=0.7)
 form(BRONZE[5], BRONZE, rim=0.22)
-form(RIBBON[4], RIBBON, bulge=0.8)
-# What the tool refuses, and is right to: a 2px shield rim, a 3px key shank, a 6px ward
-# and a 5px pommel gem have no interior, so there is no form for a distance field to find.
-# The rim and the gem wrap, so they are lit by the direction their edges face; the wards
-# are slabs, so the top row and the bottom row is the whole of what they have to say.
+# What the tool refuses, and is right to: a 2px shield rim, a 3px key shank and a 6px ward
+# have no interior, so there is no form for a distance field to find. The rim wraps, so it
+# is lit by the direction its edges face; the wards are slabs, so the top row and the
+# bottom row is the whole of what they have to say.
 edge_lit(shield_rim, STEEL)
-edge_lit(gem, GEM)
 hand_lit(wards, BRONZE)
 flat(rows(KEY, SHANK_LIT), BRONZE[6])
 flat(rows(KEY, SHANK_MID), BRONZE[4])
 flat(rows(KEY, SHANK_DARK), BRONZE[2])
 
 # 3. the detail that makes each item read as that item
-flat(rows(SWORD, FULLER), STEEL[8])
-flat(rows(SWORD, WRAP), WOOD[1])
+# The blade, by column rather than by form. Everything below `BLADE_FULL_FROM` gets the
+# seven-column section; the taper above it is only one to five pixels across, so it takes a
+# two-tone split instead and keeps a bright tip.
+for dx, step in BLADE_SECTION.items():
+    flat({(x, y) for x, y in blade if x == SWORD + 20 + dx and y >= BLADE_FULL_FROM},
+         STEEL[step])
+taper = {(x, y) for x, y in blade if y < BLADE_FULL_FROM}
+flat({(x, y) for x, y in taper if x <= SWORD + 20}, STEEL[TAPER_LIT])
+flat({(x, y) for x, y in taper if x > SWORD + 20}, STEEL[TAPER_DARK])
+# The grip's lit edge, so five rows of dark leather between a bright guard and a bright
+# pommel read as a grip rather than as a gap.
+flat({(x, y) for x, y in grip if x == SWORD + 18}, WOOD[7])
+flat(rows(SWORD, WRAP), RIBBON[2])
 flat(rows(SWORD, GUARD_EDGE), BRASS[1])
-flat(rows(SWORD, POMMEL_GLINT), GEM[8])
 raised(cross, GOLD)
 flat(rows(SHIELD_X, RIVETS) & shield_rim, STEEL[8])
 flat(rows(HELM_X, VISOR), STEEL[0])
-flat(rows(HELM_X, BREATHS), STEEL[1])
+flat(rows(HELM_X, BREATHS), STEEL[0])
 raised(crest, GOLD)
-flat(rows(SCROLL, WRITING), PARCH[1])
+# The roll banded by row, its end caps a step down so it reads as a cylinder with ends.
+for y, step in ROLL_BANDS.items():
+    flat(band(roll, {y}), WOOD[step])
+flat(rows(SCROLL, ROLL_CAPS) & roll, WOOD[2])
+# Paper is flat, so it gets four column bands and not a form. Given to
+# `shade_region_by_light`, the pinched silhouette splits the distance field into two lobes
+# and the sheet came out with a blotch of darker tan across its lower right that read as a
+# water stain. Same reasoning as the blade's columns: the tool describes a rounded form,
+# and neither a sheet of paper nor a sword blade is one.
+PAPER_BANDS = ((-7, 7), (-1, 6), (5, 5), (13, 4))
+for edge, step in PAPER_BANDS:
+    flat({(x, y) for x, y in parchment if x - SCROLL - 20 <= edge}, PARCH[step])
+# The curl, lighter than the sheet above it: it is the back of the paper catching the light.
+flat(curl, PARCH[7])
+flat(band(curl, {min(y for _, y in curl)}), PARCH[2])
+flat(rows(SCROLL, WRITING) & parchment, PARCH[0])
+# The ribbon in flat bands, plus its tail.
+for y, step in RIBBON_STEPS.items():
+    flat(band(ribbon, {y}), RIBBON[step])
+flat(rows(SCROLL, RIBBON_TAIL), RIBBON[3])
 
 # 4. a dithered terminator where a hard band boundary would read as a step. The steps are
 #    1-based here, so 4 and 5 are `ramp[3]` and `ramp[4]`, which is where the terminator
 #    lands at this ambient. Tolerance tight again, for the reason `form` gives.
 #
-#    Not on STEEL. That pass landed on the helm, which is the largest smooth region on the
-#    sheet, and a four-pixel checkerboard straight across a 23px face was the loudest thing
-#    here: it read as damage rather than as a widened transition. A dither has to be small
-#    against the form it is widening, and on the helm it was a third of the surface.
-for band_ramp in (PAINT, PARCH):
+#    Only on PAINT, which is the one surface here wide enough to carry it. On STEEL the
+#    pass landed on the helm, the largest smooth region on the sheet, and a four-pixel
+#    checkerboard across a 23px face was the loudest thing here: it read as damage rather
+#    than as a widened transition. On PARCH it put a row of tan teeth across the middle of
+#    the sheet, which read as a corrupted texture. A dither has to be small against the
+#    form it is widening, and on both of those it was a third of the surface.
+for band_ramp in (PAINT,):
     shading.dither_band(NAME, band_ramp, from_step=4, to_step=5, pattern="bayer4",
                         width=2, tolerance=1.0)
 
 # 5. clean the band boundaries, protecting the one-pixel details that are strays by the
 #    tool's own definition and are meant to be there
-effects.remove_stray_pixels(NAME, protect=[STEEL[8], STEEL[1], STEEL[0], GOLD[2],
-                                           GOLD[7], GEM[8], GEM[6], GEM[2], WOOD[1],
-                                           PARCH[1], BRASS[1]])
+effects.remove_stray_pixels(NAME, protect=[STEEL[8], STEEL[1], STEEL[0], STEEL[6],
+                                           GOLD[2], GOLD[7], WOOD[2], WOOD[7],
+                                           PARCH[0], PARCH[2], RIBBON[2], BRASS[1]])
 
 # 6. the glints, last, so nothing overpaints them. Scoped by a selection rather than by a
 #    base colour: that makes the region one whole item, which is the form a glint belongs
@@ -378,7 +464,7 @@ effects.remove_stray_pixels(NAME, protect=[STEEL[8], STEEL[1], STEEL[0], GOLD[2]
 #    128 degrees is the shadow side. A rectangle that holds one part and no other is enough
 #    to say which part should shine.
 GLINTS = (
-    ("blade", (SWORD, 0, CELL, 22), STEEL, "#ffffff", 2),
+    ("blade", (SWORD, 0, CELL, 27), STEEL, "#ffffff", 2),
     ("shield", (SHIELD_X, 0, CELL, SIZE), PAINT, "#ffffff", 3),
     ("helm", (HELM_X, 0, CELL, SIZE), STEEL, "#ffffff", 3),
     ("bow", (KEY, 0, CELL, 15), BRONZE, "#fff6e4", 2),
@@ -419,7 +505,7 @@ effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=8, where="outside")
 # a coin's mark to fix a problem that was never in the mark. The sheet looked plausible the
 # whole time, which is the reason a showcase needs measuring and not only looking at.
 MATERIALS = {
-    SWORD: ("sword", STEEL, BRASS, WOOD, GEM),
+    SWORD: ("sword", STEEL, BRASS, WOOD, RIBBON),
     SHIELD_X: ("shield", STEEL, PAINT, GOLD),
     HELM_X: ("helm", STEEL, GOLD),
     KEY: ("key", BRONZE),
@@ -434,6 +520,29 @@ for ox, (item, *band_ramps) in MATERIALS.items():
     assert not used - allowed, f"{item} holds another material: {sorted(used - allowed)}"
     print(f"  {item:<7} {len(used):>2} colours, from {len(band_ramps)} "
           f"ramp{'s' if len(band_ramps) > 1 else ''} and nothing else")
+
+# Two more things the eye cannot check, both of them a criterion a review set.
+#
+# The sword has to be mostly blade. The draft was 54% and read as a spearhead, and 54% is
+# not something anybody notices as a number.
+tops = {}
+for ox, (item, *_r) in MATERIALS.items():
+    grid = inspect.get_pixels(NAME, ox, 0, CELL, SIZE)["pixels"]
+    used_rows = [y for y, row in enumerate(grid) if any(not px.endswith("00") for px in row)]
+    tops[item] = (min(used_rows), max(used_rows))
+guard_top = min(y for _, y in rows(SWORD, GUARD))
+sword_top, sword_bottom = tops["sword"]
+share = (guard_top - sword_top) / (sword_bottom - sword_top + 1)
+print()
+print(f"sword: blade is rows {sword_top} to {guard_top - 1}, {share:.0%} of its height")
+assert share >= 0.65, f"the blade is {share:.0%} of the sword, which is a spearhead"
+
+# And the five have to agree on a centre line, or the row reads as five unrelated sprites.
+centres = {item: (lo + hi) / 2 for item, (lo, hi) in tops.items()}
+spread = max(centres.values()) - min(centres.values())
+print("centres: " + "  ".join(f"{i}={c:.1f}" for i, c in centres.items())
+      + f"   spread {spread:.1f}")
+assert spread <= 2.0, f"the items' centres span {spread:.1f} rows"
 
 export.export_png(NAME, "items.png", scale=5, overwrite=True)
 print("\nwrote items.png")

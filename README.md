@@ -247,25 +247,33 @@ clean reduction either way.
 
 Three things in that picture are worth more than the picture.
 
-**Forty blocks, one shading call.** `shade_region_by_light` builds a distance field over
-everything matching one base colour, and a field over a mask with forty disconnected parts
-describes each part on its own. The mortar joints are what make the mask forty components
-instead of one slab, so the whole wall takes its form from a single call:
+**Thirty-five blocks, one shading call.** `shade_region_by_light` builds a distance field
+over everything matching one base colour, and a field over a mask with thirty-five
+disconnected parts describes each part on its own. The mortar joints are what make the mask
+thirty-five components instead of one slab, so the whole wall takes its form from a single
+call:
 
 ```python
-shade_region_by_light("dungeon.aseprite", STONE, base_color=STONE[5],
+shade_region_by_light("dungeon.aseprite", STONE, base_color=STONE[8],
                       light_angle=155, bulge=0.75, tolerance=1.0, layer="wall")
 ```
 
-With a caveat this README had earlier without it. Near the torch that works: a block there
-carries 12 to 19 tones and no two are shaded alike. In the dim zone it does not. Sampling
-24 blocks and normalising value away, so two blocks count as the same when their pixels
-rank the same whatever their brightness, 8 of them come back **pixel for pixel identical at
-6 tones**, all in the far zone. `shift_along_ramp` clamps at the ends, so pushing a block
-three steps down a nine-step ramp collapses its darks together and a block that has
-flattened is the same as any other block that has flattened. The far wall is one tile
-repeated, and that is [issue
-#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193) rather than a feature.
+An earlier version of this section claimed that and left out what it cost. The claim is only
+worth anything if the blocks come out *different*, and with every block 17 pixels wide they
+did not: a distance field over two components of the same size is the same field twice, so
+same-sized blocks are shaded identically and differ only in how far the falloff pushed them.
+Measured by normalising value away, so two blocks count as the same when their pixels rank
+the same whatever their brightness, 8 of 24 sampled blocks came back **pixel for pixel
+identical at 6 tones**, all in the dim zone where `shift_along_ramp` had clamped their darks
+together. The far wall was one tile repeated.
+
+Two changes fixed it, and the generator now asserts both. Block widths cycle through
+`(17, 11, 23, 14, 20)` with a per-course phase, so the fields differ; and the ramps are
+thirteen steps rather than nine, so a darkened block still has somewhere to go:
+
+```
+wall: 35 blocks, 31 distinct shading patterns, 28 of them unique, every block at 4 tones or more
+```
 
 **The falloff is zones down a ramp.** No tool here lights a scene from a point, and faking
 one by blending would land every pixel between palette entries. `shift_along_ramp` moves a
@@ -276,18 +284,19 @@ joint, and because the courses are staggered no single column is a joint on all 
 
 ```
 falloff (one rectangle per course per zone)
-  wall   42 blocks, 12 runs darkened, 6 blocks off-value
-  floor  22 blocks,  8 runs darkened, 5 blocks off-value
+  wall   45 blocks, 12 runs darkened, 6 blocks off-value
+  floor  22 blocks,  8 runs darkened, 4 blocks off-value
 
-floor row 52: step 5 at x=20, step 1 at x=95
+floor row 56: step 8 at x=20, step 3 at x=95
 ```
 
 That last line is [asserted by the generator](scripts/showcase/dungeon.py), because a
 falloff nobody measured is a falloff you have to take on trust. At one step a zone the
 assertion still passed and the room still looked evenly lit, which is a measurement being
-satisfied by something no reader can see. The reverse is also true and cost more: the
-assertion passes today as well, and the far wall is still a repeating tile, because nothing
-was measuring *that*. An assertion only covers the failure it was written for.
+satisfied by something no reader can see. The reverse cost more: that same assertion went
+on passing while the far wall was a repeating tile, because nothing was measuring *that*.
+An assertion covers the failure it was written for and no other, which is why there are now
+three of them on this one picture.
 
 **The flicker is four frames with four durations.** `set_all_frame_durations` would give an
 even pulse, and an even pulse reads as a machine rather than as fire. The flame also leans a
@@ -296,19 +305,54 @@ four silhouettes differ:
 
 ```
 flame     rows  lean   ms  halo
-  frame 1   14  +0.00   90  371 pixels in 7 rings
-  frame 2   12  +0.18   70  349 pixels in 7 rings
-  frame 3   15  -0.14  110  388 pixels in 7 rings
-  frame 4   12  +0.10   80  368 pixels in 7 rings
+  frame 1   14  +0.00   90  115 pixels in 3 rings
+  frame 2   12  +0.18   70  103 pixels in 3 rings
+  frame 3   15  -0.14  110  122 pixels in 3 rings
+  frame 4   12  +0.10   80  116 pixels in 3 rings
 ```
 
-The halo is `glow`, whose rings are ramp steps rather than alpha. Its ramp comes from
-`ramp_between`, which returns both ends exactly, and choosing the dark end took three
-attempts worth recording. Interpolating from the stone's own blue-grey passes through
-neutral and reads as a ball of fog stuck on the wall; starting from a dark ember makes the
-outer rings darker than the wall they lie on, and a glow that darkens what it touches reads
-as a shadow. The end that works is a warm grey a step lighter than the lit stone, because
-the outside of a pool of light is the wall with light on it.
+**The torchlight is the wall, brightened.** This is the part that took the longest to get
+right, and the answer turned out not to be a tool. Three drafts used `glow`, whose rings are
+ramp steps rather than alpha, and all three read as a sticker. `glow` grows its rings
+outward from the *subject's silhouette*, so a tall narrow flame gives a tall narrow egg with
+a hard elliptical boundary, and it paints at full opacity, so inside it the mortar joints
+and the block shading vanish into a smooth oval. Light brightens a surface. It does not
+erase it.
+
+So the pool is the masonry moved **up its own ramp**, by however many steps the distance
+from the flame allows:
+
+```python
+lift = round(POOL_GAIN * (1.0 - reach / POOL_RADIUS) ** 2)
+target = min(step + lift, len(STONE) - 1)
+```
+
+Every pixel on that wall is already an exact ramp entry, so finding its step is a table
+lookup and lifting it is arithmetic on an integer. One `get_pixels` over the pool's bounding
+box, one `draw_pixels` back:
+
+```
+light pool: lifted 1503 wall pixels up their own ramp, 0 off-ramp and left alone
+```
+
+The joints lift too, which is exactly why the masonry survives inside the light. `glow` is
+still there, at `radius=3`, for the heat right at the flame, which is the job it is good at.
+
+The sconce casts onto the wall it is bolted to, with `light_angle=90` and a high
+`light_height` so the shadow falls straight down and short. It had none for three drafts,
+which is the single commonest reason a lit object reads as pasted on.
+
+**The floor recedes.** Its courses grow taller and its stones grow wider down the frame,
+because flat equal courses read as a second wall lying down:
+
+```
+floor: course heights [5, 6, 7, 8], stone widths [17, 21, 26, 31], down the frame
+```
+
+Where it meets the wall there is a shorter, darker skirting course and then three rows of
+flagstone stepped down their own ramp, rather than the four flat full-width rows an earlier
+version put there. That did stop two surfaces of grey blocks reading as one wall, the way a
+letterbox bar stops a bad crop.
 
 The chest's shadow is `cast_shadow` with `ground_layer="floor"`, which clips it to the
 flagstones so it cannot run off the floor and hang in the air, and it uses the floor's ramp
@@ -340,19 +384,38 @@ which the generator asserts is not zero.
 validate_sprite_for_game_export -> passed  (width, height, color_mode, min_frames, required_tags)
 export_game_asset_bundle        -> hero.png, hero.gif, hero_sheet.png (+JSON), hero_idle.gif, manifest.json
 
-sword   24 colours, from 4 ramps and nothing else
-shield  14 colours, from 3 ramps and nothing else
-helm    13 colours, from 2 ramps and nothing else
+sword   17 colours, from 4 ramps and nothing else
+shield  19 colours, from 3 ramps and nothing else
+helm    12 colours, from 2 ramps and nothing else
 key      9 colours, from 1 ramp and nothing else
-scroll  16 colours, from 3 ramps and nothing else
+scroll  14 colours, from 3 ramps and nothing else
+
+sword: blade is rows 0 to 26, 68% of its height
+centres: sword=19.5  shield=19.0  helm=19.0  key=19.5  scroll=18.5   spread 1.0
 ```
 
-That last check earns its keep. `base_color` scopes a shading pass by colour *distance*, and
-at the default tolerance of 24 every step of a gold ramp is within reach of a step of a
-brass one, so a pass meant for one item also matched art in a different cell and reshaded
-it. Nothing looked wrong, and three rounds went into redrawing the wrong thing before the
-colours were counted. That is now
+Those checks earn their keep, and each of them was added after the thing it checks had
+already gone wrong.
+
+The colour census: `base_color` scopes a shading pass by colour *distance*, and at the
+default tolerance of 24 every step of a gold ramp is within reach of a step of a brass one,
+so a pass meant for one item also matched art in a different cell and reshaded it. Nothing
+looked wrong, and three rounds went into redrawing the wrong thing before the colours were
+counted. That is now
 [issue #183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183).
+
+The blade's share: a draft of this sword was 54% blade at a 1 to 2.3 aspect, which is a
+spearhead, and at inventory size it read as a crystal shard on a stick. 54% is not something
+anybody notices as a number, which is the whole reason for printing it.
+
+The centre line: five items at five different heights read as five sprites from five games.
+
+A fourth check, not shown here, asserts each glint's pixels are inside the part named for
+it. Two of the four used to be wrong: scoped to a whole 40px cell, `specular_highlight`
+built its normals from the entire compound object, and the sword's glint landed on its
+leather grip while the blade had none. It is worth knowing that check has a hole in it
+too, because the key passed it while still being wrong: it proves a glint is on the right
+part, not on the right *side* of it.
 
 <details>
 <summary>More examples</summary>

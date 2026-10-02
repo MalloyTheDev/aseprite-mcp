@@ -88,12 +88,27 @@ went wrong first.
   ([#194](https://github.com/MalloyTheDev/aseprite-mcp/issues/194)).
 - `dungeon.py` probes two points on the same flagstone course and fails if the far one is
   not darker, and it checks that all four flame frames have different silhouettes. At one
-  ramp step a zone the first of those still passed while the room still looked evenly
-  lit, which is a measurement satisfied by something no reader can see; the falloff is two
-  steps a zone now. That probe is also the clearest example here of an assertion covering
-  only the failure it was written for: it passes, and the far wall is still a repeating
-  tile, because nothing measures the *variety* of the blocks
-  ([#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193)).
+  ramp step a zone the first of those still passed while the room still looked evenly lit,
+  which is a measurement satisfied by something no reader can see.
+- `dungeon.py` also measures the **variety** of its masonry, which is the clearest example
+  in this directory of an assertion covering only the failure it was written for. The
+  falloff probe above went on passing while the far wall was a single tile repeated, because
+  nothing was looking at whether the blocks differed. It normalises value away, so two
+  blocks count as the same when their pixels rank the same whatever their brightness, and
+  fails if fewer than three quarters of them are unique or if any block is down to under
+  four tones. Both halves of that were failing
+  ([#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193)): uniform 17px blocks
+  meant identical distance fields, and three steps of falloff down a nine-step ramp clamped
+  the darks together. Widths cycle now, and the ramps are thirteen steps.
+
+- `dungeon.py` asserts its floor's courses grow taller down the frame, which is the one
+  thing that stops a floor reading as a second wall lying down
+  ([#196](https://github.com/MalloyTheDev/aseprite-mcp/issues/196)).
+- `items.py` asserts the sword is at least 65% blade and that the five items' centre lines
+  agree within two rows. A draft was 54% blade at a 1 to 2.3 aspect, which is a spearhead,
+  and 54% is not something anybody notices as a number
+  ([#190](https://github.com/MalloyTheDev/aseprite-mcp/issues/190),
+  [#192](https://github.com/MalloyTheDev/aseprite-mcp/issues/192)).
 
 ## What these scripts are drawn like
 
@@ -109,6 +124,24 @@ refuses to invent a form it cannot see, and one dark outline over everything. Wh
 genuinely is derived, the script says why. `dungeon.py` computes its flame from a profile
 and a lean, on the grounds that a heart has a notch a formula gets wrong and a flame has no
 feature at all a reader could catch being a pixel off.
+
+Three parts of this art are now **deliberately not** shaded by `shade_region_by_light`, and
+each of them says so where it is drawn. The tool describes a rounded form, and these are not
+rounded forms:
+
+- the sword's blade is a prism, shaded as seven columns: a bright lit edge, a lit bevel, a
+  dark groove, a shadowed bevel and a rim light on the far edge. Given to the tool it came
+  out as a soft left-to-right gradient with no edge anywhere in it.
+- the scroll's sheet is flat paper, shaded as four column bands. Given to the tool, the
+  pinched silhouette split the distance field into two lobes and the sheet came out with a
+  blotch across its lower right that read as a water stain.
+- the scroll's roll is a cylinder, banded by row with its brightest band a third of the way
+  down, which is where light hits a cylinder and never at its top edge.
+
+`edge_lit` is the fourth of these and the most reusable: for a part that wraps, like a rim
+or a ring, the vector from the part's centre out to a pixel is near enough that pixel's
+surface normal, and dotting it against the key direction gives a ramp step. That is what a
+rim wants, and it is what `hand_lit` cannot give it.
 
 ## Issues these scripts turned up
 
@@ -127,25 +160,20 @@ merges two materials), [#184](https://github.com/MalloyTheDev/aseprite-mcp/issue
 frame), [#186](https://github.com/MalloyTheDev/aseprite-mcp/issues/186) (`dither_band`
 counts from 1 beside a list that counts from 0).
 
-Against the art in this directory:
-[#187](https://github.com/MalloyTheDev/aseprite-mcp/issues/187) and
-[#188](https://github.com/MalloyTheDev/aseprite-mcp/issues/188) and
-[#194](https://github.com/MalloyTheDev/aseprite-mcp/issues/194) are fixed, along with the
-helm's half of [#189](https://github.com/MalloyTheDev/aseprite-mcp/issues/189). Still open:
-[#189](https://github.com/MalloyTheDev/aseprite-mcp/issues/189) (the shield's blown-out top
-and the scroll's ribbon),
-[#190](https://github.com/MalloyTheDev/aseprite-mcp/issues/190) (the longsword is half
-hilt), [#191](https://github.com/MalloyTheDev/aseprite-mcp/issues/191) (the scroll has no
-silhouette), [#192](https://github.com/MalloyTheDev/aseprite-mcp/issues/192) (the sheet has
-no shared weight or palette family),
-[#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193) (the far wall repeats),
-[#195](https://github.com/MalloyTheDev/aseprite-mcp/issues/195) (the torchlight is a
-sticker) and [#196](https://github.com/MalloyTheDev/aseprite-mcp/issues/196) (the horizon is
-a letterbox bar).
+Against the art in this directory, all ten are now fixed:
+[#187](https://github.com/MalloyTheDev/aseprite-mcp/issues/187) glints on the wrong part,
+[#188](https://github.com/MalloyTheDev/aseprite-mcp/issues/188) rims lit flat,
+[#189](https://github.com/MalloyTheDev/aseprite-mcp/issues/189) one parameter set over five
+surfaces, [#190](https://github.com/MalloyTheDev/aseprite-mcp/issues/190) the sword half
+hilt, [#191](https://github.com/MalloyTheDev/aseprite-mcp/issues/191) the scroll a
+rectangle, [#192](https://github.com/MalloyTheDev/aseprite-mcp/issues/192) no shared weight
+or palette, [#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193) the far wall a
+repeating tile, [#194](https://github.com/MalloyTheDev/aseprite-mcp/issues/194) the chest a
+solid box, [#195](https://github.com/MalloyTheDev/aseprite-mcp/issues/195) the torchlight a
+sticker, [#196](https://github.com/MalloyTheDev/aseprite-mcp/issues/196) the horizon a
+letterbox bar.
 
-What fixed `#188` is worth keeping in mind for any thin part: `hand_lit` lights a part's
-global top row and global bottom row, which is right for a slab and useless for anything
-that wraps. On the shield's rim it lit two pixels and left ninety at the flat fill colour.
-`edge_lit` lights by the direction each pixel's edge faces instead, taken as the vector from
-the part's centre, which is near enough the surface normal on a ring, a rim or a small gem.
+Nine of the ten were invisible at the size the README shows these images at and obvious at
+12x. That is the review worth repeating: **render a crop at native scale on a checkerboard
+and look at it**, rather than judging a 40px sprite from a thumbnail of a 40px sprite.
 

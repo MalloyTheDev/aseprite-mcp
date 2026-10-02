@@ -45,7 +45,23 @@ from aseprite_mcp.tools import (
 
 NAME = "dungeon.aseprite"
 W, H = 112, 72
-WALL_BOTTOM = 46
+# 37 rather than 46, because the wall's courses are 8 rows with a joint between them and
+# the old value cut the bottom one in half, right at the most looked-at line in the picture.
+# A course ends on 1 + 9k, so 37 is where one ends whole.
+WALL_BOTTOM = 37
+# A shorter course of stone at the wall's foot, then the floor. The draft put four dead
+# flat full-width rows here instead. It did stop two surfaces of grey blocks reading as one
+# wall, the way a letterbox bar stops a bad crop.
+SKIRT_TOP, FLOOR_TOP = 38, 43
+# Block widths, cycled with a per-course phase. Uniform 17px blocks were what made the far
+# wall a repeating tile: shade_region_by_light gives every component of the same size the
+# same distance field, so same-sized blocks come out identically shaded and differ only in
+# how far the falloff pushed them. Varying the widths varies the field.
+WALL_WIDTHS = (17, 11, 23, 14, 20)
+# The floor in perspective: each course taller and its stones wider than the one above.
+# Flat equal courses read as a second wall lying down, which is what the horizon bar was
+# added to disguise.
+FLOOR_PLAN = ((5, 17), (6, 21), (7, 26), (8, 31))
 OUTLINE = "#140f1e"
 # Everything in the room is lit by the torch, so the key comes from where the torch is.
 LIGHT = 155.0
@@ -59,8 +75,12 @@ def ramp(base, *, hue=-18.0, sat=-20.0, light=0.80, steps=9):
     return colors
 
 
-STONE = ramp("#6e7183", sat=-26.0, light=0.84)
-FLAGS = ramp("#4e4348", hue=-12.0, sat=-18.0, light=0.74)
+# Thirteen steps, not nine. `shift_along_ramp` clamps at the ends, so pushing a block three
+# steps down a nine-step ramp collapsed its darks together: 8 of 24 sampled blocks came out
+# pixel for pixel identical at 6 tones, all in the dim zone, and the far wall was one tile
+# repeated. A longer ramp leaves a darkened block somewhere to go.
+STONE = ramp("#6e7183", sat=-26.0, light=0.84, steps=13)
+FLAGS = ramp("#665a61", hue=-12.0, sat=-18.0, light=0.74, steps=13)
 CHESTWOOD = ramp("#7a4a28", light=0.66)
 BRASS = ramp("#d99a33", hue=-22.0, sat=-14.0)
 FLAME = ramp("#ff9a1f", hue=22.0, sat=-6.0, light=0.84)
@@ -75,7 +95,7 @@ FLAME = ramp("#ff9a1f", hue=22.0, sat=-6.0, light=0.84)
 # on, and a glow that darkens what it touches reads as a shadow. The end that works is a
 # *warm grey a step lighter than the lit stone*, so the outermost ring is the wall with
 # light on it, which is what the outside of a pool of light actually is.
-HALO = palette.ramp_between("#8d8285", FLAME[7], steps=7)["colors"]
+HALO = palette.ramp_between("#9a8f90", FLAME[7], steps=5)["colors"]
 
 
 def pts(points):
@@ -103,16 +123,36 @@ def flat(points, colour, layer, frame=1):
         drawing.draw_pixels(NAME, pts(points), colour, layer=layer, frame=frame)
 
 
-def courses(top, bottom, block_w, block_h, *, stagger):
-    """Lay a wall or a floor as staggered blocks with a one-pixel joint between them."""
+def course_blocks(y0, height, widths, phase, top, bottom):
+    """One course of blocks of cycling widths, with a one-pixel joint between them."""
+    rects, x, i = [], -widths[phase % len(widths)] - (phase * 5) % 9, phase
+    while x < W:
+        width = widths[i % len(widths)]
+        left, right = max(x, 0), min(x + width, W)
+        upper, lower = max(y0, top), min(y0 + height, bottom + 1)
+        if right > left and lower > upper:
+            rects.append((left, upper, right - left, lower - upper))
+        x += width + 1
+        i += 1
+    return rects
+
+
+def wall_courses(top, bottom, block_h, widths):
+    """Courses of equal height, each a different sequence of block widths."""
     rects = []
     for course, y0 in enumerate(range(top - block_h + 2, bottom + 1, block_h + 1)):
-        shift = stagger if course % 2 else 0
-        for x0 in range(shift - block_w, W + block_w, block_w + 1):
-            left, right = max(x0, 0), min(x0 + block_w, W)
-            upper, lower = max(y0, top), min(y0 + block_h, bottom + 1)
-            if right > left and lower > upper:
-                rects.append((left, upper, right - left, lower - upper))
+        rects += course_blocks(y0, block_h, widths, course, top, bottom)
+    return rects
+
+
+def floor_courses(top, bottom, plan):
+    """Courses that grow taller, of stones that grow wider, going down the frame."""
+    rects, y0 = [], top
+    for course, (height, width) in enumerate(plan):
+        if y0 > bottom:
+            break
+        rects += course_blocks(y0, height, (width,), course, top, bottom)
+        y0 += height + 1
     return rects
 
 
@@ -223,40 +263,45 @@ for name in ("floor", "chest", "flame", "sconce"):
     layers.add_layer(NAME, name)
 
 # 1. masonry, flat. Blocks and joints are two colours on one layer.
-wall_rects = courses(0, WALL_BOTTOM, 17, 8, stagger=9)
-floor_rects = courses(WALL_BOTTOM + 1, H - 1, 23, 7, stagger=12)
-wall_blocks, floor_blocks = points_of(wall_rects), points_of(floor_rects)
-flat(wall_blocks, STONE[5], "wall")
-flat({(x, y) for y in range(WALL_BOTTOM + 1) for x in range(W)} - wall_blocks,
-     STONE[1], "wall")
-flat(floor_blocks, FLAGS[5], "floor")
-flat({(x, y) for y in range(WALL_BOTTOM + 1, H) for x in range(W)} - floor_blocks,
-     FLAGS[1], "floor")
+wall_rects = wall_courses(0, WALL_BOTTOM, 8, WALL_WIDTHS)
+skirt_rects = course_blocks(SKIRT_TOP, FLOOR_TOP - SKIRT_TOP, (11,), 3,
+                            SKIRT_TOP, FLOOR_TOP - 1)
+floor_rects = floor_courses(FLOOR_TOP, H - 1, FLOOR_PLAN)
+wall_blocks = points_of(wall_rects) | points_of(skirt_rects)
+floor_blocks = points_of(floor_rects)
+flat(wall_blocks, STONE[8], "wall")
+flat({(x, y) for y in range(FLOOR_TOP) for x in range(W)} - wall_blocks, STONE[2], "wall")
+flat(floor_blocks, FLAGS[8], "floor")
+flat({(x, y) for y in range(FLOOR_TOP, H) for x in range(W)} - floor_blocks,
+     FLAGS[2], "floor")
 
 # 2. one call per surface, and every block in it comes out as its own dome
-shading.shade_region_by_light(NAME, STONE, base_color=STONE[5], light_angle=LIGHT,
+shading.shade_region_by_light(NAME, STONE, base_color=STONE[8], light_angle=LIGHT,
                               light_z=0.55, ambient=0.34, rim=0.10, bulge=0.75,
                               tolerance=1.0, layer="wall")
-shading.shade_region_by_light(NAME, FLAGS, base_color=FLAGS[5], light_angle=LIGHT,
+shading.shade_region_by_light(NAME, FLAGS, base_color=FLAGS[8], light_angle=LIGHT,
                               light_z=0.40, ambient=0.34, rim=0.08, bulge=0.6,
                               tolerance=1.0, layer="floor")
 
 # 3. rubble, before the falloff, so a pebble in the far corner is as dim as the floor
 for lump in RUBBLE:
-    flat(lump, FLAGS[6], "floor")
-    flat({(x, y + 1) for x, y in lump} & floor_blocks, FLAGS[2], "floor")
+    flat(lump & floor_blocks, FLAGS[10], "floor")
+    flat({(x, y + 1) for x, y in lump} & floor_blocks, FLAGS[3], "floor")
 
 # 4. the falloff
 print("falloff (one rectangle per course per zone)")
-for layer, band_ramp, rects, near, mid in (("wall", STONE, wall_rects, 34, 62),
-                                           ("floor", FLAGS, floor_rects, 46, 74)):
+for layer, band_ramp, rects, near, mid in (
+        ("wall", STONE, wall_rects + skirt_rects, 34, 62),
+        ("floor", FLAGS, floor_rects, 46, 74)):
     runs = falloff_runs(rects, near, mid)
     for step, x, y, w, h in runs:
-        # Two steps a zone, not one: at one step the probe below still passed and the
-        # picture still looked evenly lit, which is a measurement satisfied by something
-        # nobody can see. Capped at three, because four bottomed the far floor out on
-        # `FLAGS[0]` and a corner with no value left in it is not dim, it is missing.
-        shading.shift_along_ramp(NAME, band_ramp, -min(2 * step, 3), x=x, y=y, width=w,
+        # Three steps a zone on a thirteen-step ramp. At one step on nine the probe below
+        # still passed and the picture still looked evenly lit, which is a measurement
+        # satisfied by something nobody can see; at three on nine the far blocks bottomed
+        # out and the far wall became one tile repeated. The ramp is longer now, so the
+        # stride can be too, though capped at four: six left the far corner reading as
+        # black with masonry somewhere inside it.
+        shading.shift_along_ramp(NAME, band_ramp, -min(3 * step, 4), x=x, y=y, width=w,
                                  height=h, tolerance=8.0, layer=layer)
     variants = [r for r in rects if is_variant(r)]
     for x, y, w, h in variants:
@@ -265,12 +310,70 @@ for layer, band_ramp, rects, near, mid in (("wall", STONE, wall_rects, 34, 62),
     print(f"  {layer:<6} {len(rects):>2} blocks, {len(runs):>2} runs darkened, "
           f"{len(variants)} blocks off-value")
 
-# 5. the horizon. Two rows of near-black with one light row above them: without a hard line
-#    where the wall meets the floor, two surfaces of domed grey blocks read as one wall.
-flat({(x, 44) for x in range(W)}, STONE[3], "wall")
-flat({(x, y) for y in (45, 46) for x in range(W)}, STONE[0], "wall")
-flat({(x, 47) for x in range(W)}, FLAGS[0], "floor")
-flat({(x, 48) for x in range(W)}, FLAGS[2], "floor")
+# 5. the horizon, as a value progression rather than as a bar. Wall blocks, then a shorter
+#    and darker skirting course, then the floor darkest where it meets the wall and
+#    lightening down the frame. Three rows of the floor stepped down its own ramp does that
+#    without a single flat full-width run in it: a shift keeps the stones and their grout
+#    distinct, which a painted row cannot.
+shading.shift_along_ramp(NAME, STONE, -2, x=0, y=SKIRT_TOP, width=W,
+                         height=FLOOR_TOP - SKIRT_TOP, tolerance=8.0, layer="wall")
+for offset, drop in ((0, 4), (1, 3), (2, 2), (3, 1)):
+    shading.shift_along_ramp(NAME, FLAGS, -drop, x=0, y=FLOOR_TOP + offset, width=W,
+                             height=1, tolerance=8.0, layer="floor")
+
+# 5b. the torchlight, as the wall brightened up its own ramp inside a circle on the flame
+#     rather than as a halo painted over it. `glow` grows rings outward from the subject's
+#     silhouette, so a tall narrow flame gave a tall narrow egg with a hard elliptical
+#     boundary, and it painted at full opacity, so inside it the mortar joints and the block
+#     shading disappeared into a smooth beige oval. Light brightens a surface. It does not
+#     erase it, and that was the clearest tell that the glow was sitting on top of the
+#     picture rather than in it.
+#
+#     Every pixel here is already an exact ramp entry, so lifting one is a table lookup:
+#     find its step, move up by however much the distance from the flame allows, clamp. The
+#     joints lift too, which is why the masonry survives. One read and one write a surface.
+POOL_RADIUS, POOL_GAIN = 34, 5
+
+
+def light_pool(layer, band_ramp, rows_from, rows_to):
+    # Only the pool's own bounding box is read, not the layer. `get_pixels` caps a region at
+    # 4096 pixels, which the whole wall is not, and reading rows the light never reaches
+    # would be wasted either way.
+    index = {colour.lower(): step for step, colour in enumerate(band_ramp)}
+    x0, x1 = max(TORCH_X - POOL_RADIUS, 0), min(TORCH_X + POOL_RADIUS + 1, W)
+    y0 = max(TORCH_Y - POOL_RADIUS, rows_from)
+    y1 = min(TORCH_Y + POOL_RADIUS + 1, rows_to)
+    if y1 <= y0:
+        return 0, 0
+    grid = inspect.get_pixels(NAME, x0, y0, x1 - x0, y1 - y0, layer=layer)["pixels"]
+    lifted, skipped = [], 0
+    for row, line in enumerate(grid):
+        y = y0 + row
+        for column, pixel in enumerate(line):
+            x = x0 + column
+            reach = ((x - TORCH_X) ** 2 + (y - TORCH_Y) ** 2) ** 0.5
+            if reach >= POOL_RADIUS:
+                continue
+            step = index.get(pixel[:7].lower())
+            if step is None:
+                skipped += 1
+                continue
+            lift = round(POOL_GAIN * (1.0 - reach / POOL_RADIUS) ** 2)
+            target = min(step + lift, len(band_ramp) - 1)
+            if target != step:
+                lifted.append({"x": x, "y": y, "color": band_ramp[target]})
+    if lifted:
+        drawing.draw_pixels(NAME, lifted, layer=layer)
+    return len(lifted), skipped
+
+
+print()
+#     The wall only. The torch is high on it and the flagstones start 26 pixels below the
+#     flame, which this falloff puts at a lift of zero: calling it on the floor reported
+#     "lifted 0 pixels", which is a line of output that looks like a bug and is not one.
+moved, missed = light_pool("wall", STONE, 0, FLOOR_TOP)
+print(f"light pool: lifted {moved} wall pixels up their own ramp, "
+      f"{missed} off-ramp and left alone")
 
 # 6. the chest: wood, two straps and a lock, each its own material
 chest = rows(CHEST_X, LID) | rows(CHEST_X, SEAM) | rows(CHEST_X, BODY) | rows(CHEST_X, TRIM)
@@ -307,9 +410,9 @@ effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=8, where="outside",
 # 7. the shadow the chest throws, on the floor and clipped to it. `ground_layer` is what
 #    stops a shadow running off the flagstones and hanging in the air. The ramp is the
 #    floor's and not the chest's, because a shadow is a darkening of what it lies on, and
-#    it starts at `FLAGS[1]` rather than `FLAGS[0]` so the core reads as dark and not as a
+#    it starts at `FLAGS[2]` rather than `FLAGS[0]` so the core reads as dark and not as a
 #    hole cut in the floor.
-effects.cast_shadow(NAME, "chest", FLAGS[1:7], light_angle=LIGHT, light_height=0.42,
+effects.cast_shadow(NAME, "chest", FLAGS[2:10], light_angle=LIGHT, light_height=0.42,
                     ground_layer="floor", softness=2, new_layer="chest shadow")
 
 # 8. the sconce, then one copy of the whole room per frame of the flicker
@@ -320,6 +423,13 @@ shading.shade_region_by_light(NAME, BRASS, base_color=BRASS[5], light_angle=LIGH
                               layer="sconce")
 effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=8, where="outside",
                     layer="sconce")
+# The shadow the sconce throws on the wall it is bolted to. Every other object in this
+# scene that touches a surface had one; the one object literally attached to the wall did
+# not, and an object with no shadow on the surface behind it reads as a sticker. The light
+# is the flame directly above it, so `light_angle=90` and a high `light_height`: straight
+# down and short.
+effects.cast_shadow(NAME, "sconce", STONE[1:8], light_angle=90.0, light_height=0.72,
+                    ground_layer="wall", softness=1, new_layer="sconce shadow")
 for _ in range(len(FLICKER) - 1):
     frames.duplicate_frame(NAME, 1)
 
@@ -334,7 +444,7 @@ for frame, (profile, lean, ms) in enumerate(FLICKER, start=1):
     for points, colour in ((body, FLAME[4]), (erode(body, 1), FLAME[6]),
                            (erode(body, 2), FLAME[8])):
         flat(points, colour, "flame", frame=frame)
-    halo = effects.glow(NAME, HALO, radius=7, falloff="quadratic", dither_edge=True,
+    halo = effects.glow(NAME, HALO, radius=3, falloff="quadratic", dither_edge=True,
                         layer="flame", frame=frame, new_layer=f"glow {frame}")
     frames.set_frame_duration(NAME, frame, ms)
     print(f"  frame {frame}  {len(profile):>3}  {lean:+.2f}  {ms:>3}  "
@@ -345,7 +455,29 @@ for frame, (profile, lean, ms) in enumerate(FLICKER, start=1):
 # darken: one flagstone course has to be lighter near the torch than across the room, or
 # the zones are decoration. And the flame has to move: a flicker whose frames differ only
 # in duration is a still image with a slow shutter.
-NEAR, FAR, PROBE_Y = 20, 95, 52
+# Variety, which is the thing the old falloff probe passed while failing. Two blocks count
+# as the same pattern when their pixels rank the same, whatever their absolute brightness.
+patterns = {}
+for rx, ry, rw, rh in wall_rects:
+    cell = [inspect.get_pixels(NAME, rx, ry, rw, rh, layer="wall")["pixels"]]
+    flatten = [c[:7].lower() for grid in cell for line in grid for c in line]
+    order = sorted(set(flatten))
+    patterns.setdefault(tuple(order.index(c) for c in flatten), []).append((rx, ry))
+    assert len(order) >= 4, f"the block at {(rx, ry)} has {len(order)} tones left in it"
+unique = sum(1 for blocks in patterns.values() if len(blocks) == 1)
+print()
+print(f"wall: {len(wall_rects)} blocks, {len(patterns)} distinct shading patterns, "
+      f"{unique} of them unique, every block at 4 tones or more")
+assert unique >= 0.75 * len(wall_rects), (
+    f"only {unique} of {len(wall_rects)} blocks are shaded unlike every other")
+
+heights = [h for _x, _y, _w, h in floor_courses(FLOOR_TOP, H - 1, FLOOR_PLAN)]
+planned = [h for h, _w in FLOOR_PLAN]
+assert planned == sorted(planned), "the floor's courses do not grow taller down the frame"
+print(f"floor: course heights {planned}, stone widths "
+      f"{[w for _h, w in FLOOR_PLAN]}, down the frame")
+
+NEAR, FAR, PROBE_Y = 20, 95, 56
 steps = [c.lower() for c in FLAGS]
 near = inspect.get_pixels(NAME, NEAR, PROBE_Y, 1, 1)["pixels"][0][0][:7].lower()
 far = inspect.get_pixels(NAME, FAR, PROBE_Y, 1, 1)["pixels"][0][0][:7].lower()
