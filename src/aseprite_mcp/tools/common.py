@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..core import config, indexed
 from ..core.models import ColorSpec, SpritePath
-from ..core.runner import run_lua
+from ..core.runner import record_path, run_lua
 
 
 def parse_color(spec: str | None) -> dict:
@@ -30,8 +30,20 @@ def resolve_path(filename: str) -> Path:
 
 
 def lua_path(p: Path | str) -> str:
-    """Path string for embedding in Lua. Forward slashes work on every platform."""
-    return SpritePath(str(p)).lua()
+    """Path string for embedding in Lua. Forward slashes work on every platform.
+
+    Also records the path for the current call, which is how the runner knows which files
+    an Aseprite invocation may touch and so which invocations are safe to run in
+    parallel. This is the only seam where that can be learned reliably: every path headed
+    for a Lua script is spelled here, whereas the argument names those paths travel under
+    are not one name but ten, and a runner that guessed from the name would silently
+    claim nothing for a tool whose name it did not know. A path recorded but not used
+    costs nothing; a path used but not recorded would let two runs overwrite one sprite,
+    so the recording is deliberately wider than it needs to be rather than narrower.
+    """
+    lua = SpritePath(str(p)).lua()
+    record_path(lua)
+    return lua
 
 
 def run_ramp_lua(body: str, args: dict) -> dict:

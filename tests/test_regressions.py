@@ -123,6 +123,41 @@ def test_concurrent_edits_to_one_sprite_all_survive():
     assert {"from_a", "from_b"} <= names, f"an edit was lost: {sorted(names)}"
 
 
+def test_concurrent_edits_to_different_sprites_all_survive():
+    """The same race, across six sprites instead of one, now that the lock is per path.
+
+    Narrowing the invocation lock from the whole editor to the paths a run names is what
+    lets these six run at once (#66). The risk in doing so is that two Aseprite processes
+    share more than their sprite files, so this does not merely time them: it checks that
+    every edit landed and that every file still decodes afterwards, which is how the
+    original corruption announced itself.
+    """
+    names = [f"r/par{i}.aseprite" for i in range(6)]
+    for name in names:
+        sprite.create_sprite(name, 64, 64)
+    errors: list[str] = []
+
+    def add(name: str) -> None:
+        try:
+            layers.add_layer(name, name="added")
+        except AsepriteError as exc:  # pragma: no cover - the failure we are pinning
+            errors.append(f"{name}: {exc}")
+
+    threads = [threading.Thread(target=add, args=(name,)) for name in names]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors, f"parallel edits raised: {errors}"
+    for name in names:
+        info = inspect.get_sprite_info(name)
+        assert "added" in {layer["name"] for layer in info["layers"]}, (
+            f"the edit to {name} was lost"
+        )
+        assert (info["width"], info["height"]) == (64, 64), f"{name} came back wrong"
+
+
 def test_trim_sprite_leaves_out_a_transparent_palette_entry():
     """Pins the careful answer, which `trim_sprite` gave by scanning every pixel itself.
 
