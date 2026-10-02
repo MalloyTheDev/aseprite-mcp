@@ -184,8 +184,15 @@ LID = {
 SEAM = {51: [(-13, 13)]}
 BODY = {y: [(-13, 13)] for y in range(52, 64)}
 TRIM = {64: [(-14, 14)]}
-STRAPS = {y: [(-10, -8), (8, 10)] for y in range(44, 65)}
-LOCK = {y: [(-3, 3)] for y in range(49, 54)}
+# Two pixels wide, not three, and a five-pixel lock rather than seven. The straps and the
+# lock are drawn over the lid's seam, which is correct (a strap covers a seam), but at the
+# old widths they covered 17 of the lid's 27 pixels and the seam survived as four dashes.
+# A chest whose lid you cannot find is a box.
+STRAPS = {y: [(-10, -9), (9, 10)] for y in range(44, 65)}
+LOCK = {y: [(-2, 2)] for y in range(49, 54)}
+# The body's top edge, catching the light the lid's overhang does not block. This is what
+# actually sells a lid: not the dark seam, but the lit line under it.
+LIP = {52: [(-13, 13)]}
 
 def is_variant(rect):
     """Pick about a fifth of the blocks to sit a step darker than their neighbours.
@@ -274,15 +281,27 @@ flat(straps | lock, BRASS[5], "chest")
 shading.shade_region_by_light(NAME, CHESTWOOD, base_color=CHESTWOOD[5], light_angle=LIGHT,
                               light_z=0.5, ambient=0.26, rim=0.14, tolerance=1.0,
                               layer="chest")
-shading.shade_region_by_light(NAME, BRASS, base_color=BRASS[5], light_angle=LIGHT,
+# Before the brass is shaded, not after, and that ordering is the whole call. A contact
+# shadow needs an occluder to measure from, and `BRASS[5]` is the strap's flat fill: run
+# after the brass pass, only 3 pixels of the whole chest were still that colour and the
+# call did nothing visible. The wood is already shaded by this point, which is what the
+# darkening is applied to, so nothing is lost by going first.
+contact = shading.contact_shadow(NAME, CHESTWOOD, occluder_color=BRASS[5], radius=1,
+                                 depth=2, tolerance=12.0, layer="chest")
+assert contact["pixels_written"], "the contact shadow found no occluder to measure from"
+print(f"chest: contact shadow darkened {contact['pixels_written']} wood pixels")
+# `BRASS[:7]`, not the whole ramp. On two-pixel-wide vertical strips the full ramp puts the
+# lit column at `#efd2b6`, which is nearly white, so the least important detail on the
+# chest became the most contrasted thing on it. Reserving the top two steps keeps it brass.
+shading.shade_region_by_light(NAME, BRASS[:7], base_color=BRASS[5], light_angle=LIGHT,
                               light_z=0.5, ambient=0.28, rim=0.2, bulge=0.7,
                               tolerance=1.0, layer="chest")
-# The lid's seam, and the wood darkened where the straps stand proud of it. A contact
-# shadow is the line that stops two shapes on one layer reading as one flat shape.
+# The lid's seam and the body's lit lip, both after the furniture so neither is drawn over.
 flat(rows(CHEST_X, SEAM) - straps - lock, CHESTWOOD[1], "chest")
-shading.contact_shadow(NAME, CHESTWOOD, occluder_color=BRASS[5], radius=1, depth=2,
-                       tolerance=40.0, layer="chest")
-effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=4, where="outside",
+flat(rows(CHEST_X, LIP) - straps - lock, CHESTWOOD[7], "chest")
+# `connectivity=8`, as everything else in the showcase uses. At 4 the lid's chamfered
+# corners had their diagonal neighbours left unpainted, so the outline opened at each one.
+effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=8, where="outside",
                     layer="chest")
 
 # 7. the shadow the chest throws, on the floor and clipped to it. `ground_layer` is what
@@ -299,7 +318,7 @@ flat(rows(TORCH_X, STEM), BRASS[3], "sconce")
 shading.shade_region_by_light(NAME, BRASS, base_color=BRASS[5], light_angle=LIGHT,
                               light_z=0.5, ambient=0.3, rim=0.24, tolerance=1.0,
                               layer="sconce")
-effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=4, where="outside",
+effects.add_outline(NAME, OUTLINE, thickness=1, connectivity=8, where="outside",
                     layer="sconce")
 for _ in range(len(FLICKER) - 1):
     frames.duplicate_frame(NAME, 1)
@@ -334,6 +353,13 @@ print()
 print(f"floor row {PROBE_Y}: step {steps.index(near)} at x={NEAR}, "
       f"step {steps.index(far)} at x={FAR}")
 assert steps.index(near) > steps.index(far), "the falloff darkened nothing"
+
+seam_row = [x for x in range(CHEST_X - 14, CHEST_X + 15)
+            if inspect.get_pixels(NAME, x, 51, 1, 1)["pixels"][0][0][:7].lower()
+            == CHESTWOOD[1].lower()]
+print(f"lid seam: {len(seam_row)} of 27 pixels on row 51, in "
+      f"{sum(1 for i, x in enumerate(seam_row) if i == 0 or x != seam_row[i - 1] + 1)} runs")
+assert len(seam_row) >= 18, f"the lid seam is {len(seam_row)} pixels, too broken to read"
 
 shapes = {frozenset(flame_points(profile, lean)) for profile, lean, _ms in FLICKER}
 assert len(shapes) == len(FLICKER), "two frames share a flame silhouette"

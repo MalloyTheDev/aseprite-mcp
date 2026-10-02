@@ -250,13 +250,22 @@ Three things in that picture are worth more than the picture.
 **Forty blocks, one shading call.** `shade_region_by_light` builds a distance field over
 everything matching one base colour, and a field over a mask with forty disconnected parts
 describes each part on its own. The mortar joints are what make the mask forty components
-instead of one slab, so the whole wall takes its form from a single call and every block
-comes out domed:
+instead of one slab, so the whole wall takes its form from a single call:
 
 ```python
 shade_region_by_light("dungeon.aseprite", STONE, base_color=STONE[5],
                       light_angle=155, bulge=0.75, tolerance=1.0, layer="wall")
 ```
+
+With a caveat this README had earlier without it. Near the torch that works: a block there
+carries 12 to 19 tones and no two are shaded alike. In the dim zone it does not. Sampling
+24 blocks and normalising value away, so two blocks count as the same when their pixels
+rank the same whatever their brightness, 8 of them come back **pixel for pixel identical at
+6 tones**, all in the far zone. `shift_along_ramp` clamps at the ends, so pushing a block
+three steps down a nine-step ramp collapses its darks together and a block that has
+flattened is the same as any other block that has flattened. The far wall is one tile
+repeated, and that is [issue
+#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193) rather than a feature.
 
 **The falloff is zones down a ramp.** No tool here lights a scene from a point, and faking
 one by blending would land every pixel between palette entries. `shift_along_ramp` moves a
@@ -276,7 +285,9 @@ floor row 52: step 5 at x=20, step 1 at x=95
 That last line is [asserted by the generator](scripts/showcase/dungeon.py), because a
 falloff nobody measured is a falloff you have to take on trust. At one step a zone the
 assertion still passed and the room still looked evenly lit, which is a measurement being
-satisfied by something no reader can see.
+satisfied by something no reader can see. The reverse is also true and cost more: the
+assertion passes today as well, and the far wall is still a repeating tile, because nothing
+was measuring *that*. An assertion only covers the failure it was written for.
 
 **The flicker is four frames with four durations.** `set_all_frame_durations` would give an
 even pulse, and an even pulse reads as a machine rather than as fire. The flame also leans a
@@ -301,7 +312,11 @@ the outside of a pool of light is the wall with light on it.
 
 The chest's shadow is `cast_shadow` with `ground_layer="floor"`, which clips it to the
 flagstones so it cannot run off the floor and hang in the air, and it uses the floor's ramp
-rather than the chest's, because a shadow is a darkening of what it lies on.
+rather than the chest's, because a shadow is a darkening of what it lies on. The chest's own
+contact shadow had to move: `contact_shadow` takes the occluder's colour, and run after the
+brass pass that had already repainted the straps, only 3 pixels of the chest were still the
+colour it was given. It runs before that pass now and reports 102 darkened wood pixels,
+which the generator asserts is not zero.
 
 ### Scaffold a whole asset in one call
 

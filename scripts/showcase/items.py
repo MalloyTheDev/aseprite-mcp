@@ -17,6 +17,8 @@ it were form. Several parts refuse a form and are lit by hand, and every one of 
 refusals is correct: a 2px shield rim, a 3px key shank and a 6px ward have no interior for
 a distance field to describe, and inventing one would be drawing rather than shading.
 """
+import math
+
 from aseprite_mcp.tools import (
     drawing,
     effects,
@@ -82,6 +84,11 @@ def erode(points, steps=1):
 
 def pts(points):
     return [{"x": x, "y": y} for x, y in sorted(points)]
+
+
+def items_pixel(point):
+    x, y = point
+    return inspect.get_pixels(NAME, x, y, 1, 1)["pixels"][0][0][:7].lower()
 
 
 def band(points, keep):
@@ -157,7 +164,7 @@ BOW = {
     7: [(-7, 7)], 8: [(-7, 7)], 9: [(-7, 7)], 10: [(-7, 7)],
     11: [(-6, 6)], 12: [(-5, 5)], 13: [(-4, 4)], 14: [(-2, 2)],
 }
-BOW_HOLE = {6: [(-1, 1)], 7: [(-2, 2)], 8: [(-1, 1)]}
+BOW_HOLE = {7: [(-1, 1)], 8: [(-2, 2)], 9: [(-1, 1)]}
 # The shank is three pixels across, so it is lit as what it is: a rod, bright on the side
 # the key comes from and dark opposite. A distance field cannot say that about three
 # pixels, and `shade_region_by_light` is right to refuse rather than guess.
@@ -204,12 +211,48 @@ def form(base, band_ramp, *, rim=0.20, bulge=1.0, light_z=0.62):
 
 
 def hand_lit(points, band_ramp, *, lit=6, dark=2):
-    """Light a part with no interior: the top row takes the key, the bottom row loses it."""
+    """Light a slab with no interior: the top row takes the key, the bottom row loses it.
+
+    Right for something flat seen edge on, like a ward on a key. Wrong for anything that
+    wraps, which is what `edge_lit` is for.
+    """
     if not points:
         return
     top, bottom = min(y for _, y in points), max(y for _, y in points)
     flat(band(points, {top}), band_ramp[lit])
     flat(band(points, {bottom}), band_ramp[dark])
+
+
+def edge_lit(points, band_ramp, *, lo=1, hi=None):
+    """Light a part that wraps, by which way each pixel's edge faces.
+
+    `hand_lit` lit this sheet's shield rim before, and the measurement was damning: every
+    row of that rim, both sides, came out at the flat fill colour, because a rim's global
+    top row is two pixels and its global bottom row is one. Ninety-odd pixels of steel
+    stayed unshaded and the rim read as a second grey outline around the shield.
+
+    A thin part has no interior for a distance field to measure, which is why
+    `shade_region_by_light` refuses it. It does still have a direction: on a ring, a rim or
+    a small gem, the vector from the part's centre out to a pixel is near enough the way
+    that pixel's surface faces. Dot that against the key and take a ramp step from it.
+    """
+    if not points:
+        return
+    hi = len(band_ramp) - 2 if hi is None else hi
+    cx = sum(x for x, _ in points) / len(points)
+    cy = sum(y for _, y in points) / len(points)
+    # Screen y grows downward, so the key's vector is (cos, -sin): at 128 degrees that
+    # points up and to the left, which is where the light is.
+    kx, ky = math.cos(math.radians(LIGHT)), -math.sin(math.radians(LIGHT))
+    steps = {}
+    for x, y in points:
+        dx, dy = x - cx, y - cy
+        reach = math.hypot(dx, dy) or 1.0
+        facing = (dx / reach) * kx + (dy / reach) * ky
+        step = lo + round((hi - lo) * (facing + 1.0) / 2.0)
+        steps.setdefault(step, set()).add((x, y))
+    for step, group in sorted(steps.items()):
+        flat(group, band_ramp[step])
 
 
 def raised(points, band_ramp, *, face=5, lit=7, dark=2):
@@ -280,9 +323,11 @@ form(BRONZE[5], BRONZE, rim=0.22)
 form(RIBBON[4], RIBBON, bulge=0.8)
 # What the tool refuses, and is right to: a 2px shield rim, a 3px key shank, a 6px ward
 # and a 5px pommel gem have no interior, so there is no form for a distance field to find.
-hand_lit(shield_rim, STEEL)
+# The rim and the gem wrap, so they are lit by the direction their edges face; the wards
+# are slabs, so the top row and the bottom row is the whole of what they have to say.
+edge_lit(shield_rim, STEEL)
+edge_lit(gem, GEM)
 hand_lit(wards, BRONZE)
-hand_lit(gem, GEM)
 flat(rows(KEY, SHANK_LIT), BRONZE[6])
 flat(rows(KEY, SHANK_MID), BRONZE[4])
 flat(rows(KEY, SHANK_DARK), BRONZE[2])
@@ -298,14 +343,16 @@ flat(rows(HELM_X, VISOR), STEEL[0])
 flat(rows(HELM_X, BREATHS), STEEL[1])
 raised(crest, GOLD)
 flat(rows(SCROLL, WRITING), PARCH[1])
-# The hole goes in after the shading, not before: a lozenge with a hole in it has less
-# interior than one without, and the pass that gives it form wants all of it.
-flat(rows(KEY, BOW_HOLE), "transparent")
 
 # 4. a dithered terminator where a hard band boundary would read as a step. The steps are
 #    1-based here, so 4 and 5 are `ramp[3]` and `ramp[4]`, which is where the terminator
 #    lands at this ambient. Tolerance tight again, for the reason `form` gives.
-for band_ramp in (PAINT, PARCH, STEEL):
+#
+#    Not on STEEL. That pass landed on the helm, which is the largest smooth region on the
+#    sheet, and a four-pixel checkerboard straight across a 23px face was the loudest thing
+#    here: it read as damage rather than as a widened transition. A dither has to be small
+#    against the form it is widening, and on the helm it was a third of the surface.
+for band_ramp in (PAINT, PARCH):
     shading.dither_band(NAME, band_ramp, from_step=4, to_step=5, pattern="bayer4",
                         width=2, tolerance=1.0)
 
@@ -324,14 +371,43 @@ effects.remove_stray_pixels(NAME, protect=[STEEL[8], STEEL[1], STEEL[0], GOLD[2]
 #
 #    The scroll gets none. Parchment has no specular, and a glint on it would be the kind
 #    of detail that is added because a tool exists rather than because the surface has one.
-GLINTS = ((SWORD, STEEL, "#ffffff", 2), (SHIELD_X, PAINT, "#ffffff", 3),
-          (HELM_X, STEEL, "#ffffff", 3), (KEY, BRONZE, "#fff6e4", 2))
-for ox, band_ramp, white, size in GLINTS:
-    selection.select_region(NAME, "rect", x=ox, y=0, width=CELL, height=SIZE)
-    shading.specular_highlight(NAME, band_ramp, light_angle=LIGHT, light_z=0.62,
-                               size=size, tightness=0.55, highlight_color=white)
+#    The selection is the *part*, not the cell, and that is the whole fix. Scoped to the
+#    cell, the region was the entire compound object and the normals described its overall
+#    mass: the sword's two glint pixels landed at (19,29) and (19,30), on the leather grip,
+#    while the blade had none, and the key's landed on the lower right of its bow, which at
+#    128 degrees is the shadow side. A rectangle that holds one part and no other is enough
+#    to say which part should shine.
+GLINTS = (
+    ("blade", (SWORD, 0, CELL, 22), STEEL, "#ffffff", 2),
+    ("shield", (SHIELD_X, 0, CELL, SIZE), PAINT, "#ffffff", 3),
+    ("helm", (HELM_X, 0, CELL, SIZE), STEEL, "#ffffff", 3),
+    ("bow", (KEY, 0, CELL, 15), BRONZE, "#fff6e4", 2),
+)
+PARTS = {"blade": blade, "shield": shield, "helm": helm, "bow": bow}
+for part, (x, y, w, h), band_ramp, white, size in GLINTS:
+    selection.select_region(NAME, "rect", x=x, y=y, width=w, height=h)
+    placed = shading.specular_highlight(
+        NAME, band_ramp, light_angle=LIGHT, light_z=0.62, size=size, tightness=0.55,
+        highlight_color=white)
+    landed = {(px, py) for px, py in placed["pixels"]}
+    assert landed <= PARTS[part], f"the {part} glint landed outside it: {sorted(landed)}"
+    if part == "bow":
+        bow_glint = landed
+    print(f"  glint on the {part:<6} {sorted(landed)}")
 # Before the outline, or the outline traces one cell and leaves the rest bare.
 selection.deselect(NAME)
+
+# 6b. the key's hole, punched here and not earlier, and both halves of that matter.
+#     Not before the form pass, because a lozenge with a hole in it has less interior than
+#     one without and the pass that gives it form wants all of it. Not before the glint
+#     either, which is what the first version of this fix got wrong: scoping the glint to
+#     the bow put it at (21,10) all the same, on the bow's lower right, because a hole
+#     punched above centre takes its own edge out of the eligible interior and pushes the
+#     best-aligned pixel away from it. The hole is a feature of the drawing, not of the
+#     surface, so it goes in once the surface is finished.
+flat(rows(KEY, BOW_HOLE), "transparent")
+survivors = {p for p in bow_glint if items_pixel(p) == "#fff6e4"}
+assert survivors == bow_glint, f"the hole ate the bow's glint: {sorted(bow_glint - survivors)}"
 
 # 7. one dark outline over everything. It fills the key's hole as well, which is what a
 #    hole that small should look like.
@@ -349,7 +425,7 @@ MATERIALS = {
     KEY: ("key", BRONZE),
     SCROLL: ("scroll", PARCH, WOOD, RIBBON),
 }
-everywhere = {OUTLINE.lower()} | {white.lower() for _, _, white, _ in GLINTS}
+everywhere = {OUTLINE.lower()} | {w.lower() for _, _, _, w, _ in GLINTS}
 print()
 for ox, (item, *band_ramps) in MATERIALS.items():
     allowed = everywhere | {c.lower() for band_ramp in band_ramps for c in band_ramp}

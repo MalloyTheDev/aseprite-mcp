@@ -75,11 +75,25 @@ went wrong first.
   one, so the pass meant for one cell reshaded art in another. Nothing looked wrong. Three
   rounds went into redrawing the wrong thing before the colours were counted, which is
   now [issue #183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183).
+- `items.py` also asserts **where each glint landed**, because the colour census did not.
+  It proved no colour crossed a cell and said nothing about whether the glint inside that
+  cell was on the right object, and two of the four were not: the sword's was on its
+  leather grip and the key's was on the shadow side of its bow. Each glint is now scoped to
+  a rectangle holding one part, and the script checks its pixels are inside that part's own
+  point set ([#187](https://github.com/MalloyTheDev/aseprite-mcp/issues/187)).
+- `dungeon.py` asserts the chest's lid seam is at least 18 of its 27 pixels, and that
+  `contact_shadow` darkened something. The seam was 10 pixels in four dashes, because the
+  straps and the lock were drawn over it, and the contact shadow was a no-op because the
+  occluder colour it was given no longer existed by the time it ran
+  ([#194](https://github.com/MalloyTheDev/aseprite-mcp/issues/194)).
 - `dungeon.py` probes two points on the same flagstone course and fails if the far one is
   not darker, and it checks that all four flame frames have different silhouettes. At one
   ramp step a zone the first of those still passed while the room still looked evenly
   lit, which is a measurement satisfied by something no reader can see; the falloff is two
-  steps a zone now.
+  steps a zone now. That probe is also the clearest example here of an assertion covering
+  only the failure it was written for: it passes, and the far wall is still a repeating
+  tile, because nothing measures the *variety* of the blocks
+  ([#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193)).
 
 ## What these scripts are drawn like
 
@@ -98,8 +112,11 @@ feature at all a reader could catch being a pixel off.
 
 ## Issues these scripts turned up
 
-Drawing with the tools is the best test the tools get. Six issues came out of this round,
-all with the failing call and the measurement in them:
+Drawing with the tools is the best test the tools get, and reviewing the drawing at 12x is
+the best test the drawing gets. Sixteen issues came out of this round, ten of them from
+zooming in on art that looked finished at thumbnail size.
+
+Against the tools, with the failing call and the measurement in each:
 [#181](https://github.com/MalloyTheDev/aseprite-mcp/issues/181) (a fully masked write
 reports no counts), [#182](https://github.com/MalloyTheDev/aseprite-mcp/issues/182) (the
 `.msk` sidecar outlives its sprite),
@@ -109,4 +126,26 @@ merges two materials), [#184](https://github.com/MalloyTheDev/aseprite-mcp/issue
 [#185](https://github.com/MalloyTheDev/aseprite-mcp/issues/185) (`glow` needs one layer per
 frame), [#186](https://github.com/MalloyTheDev/aseprite-mcp/issues/186) (`dither_band`
 counts from 1 beside a list that counts from 0).
+
+Against the art in this directory:
+[#187](https://github.com/MalloyTheDev/aseprite-mcp/issues/187) and
+[#188](https://github.com/MalloyTheDev/aseprite-mcp/issues/188) and
+[#194](https://github.com/MalloyTheDev/aseprite-mcp/issues/194) are fixed, along with the
+helm's half of [#189](https://github.com/MalloyTheDev/aseprite-mcp/issues/189). Still open:
+[#189](https://github.com/MalloyTheDev/aseprite-mcp/issues/189) (the shield's blown-out top
+and the scroll's ribbon),
+[#190](https://github.com/MalloyTheDev/aseprite-mcp/issues/190) (the longsword is half
+hilt), [#191](https://github.com/MalloyTheDev/aseprite-mcp/issues/191) (the scroll has no
+silhouette), [#192](https://github.com/MalloyTheDev/aseprite-mcp/issues/192) (the sheet has
+no shared weight or palette family),
+[#193](https://github.com/MalloyTheDev/aseprite-mcp/issues/193) (the far wall repeats),
+[#195](https://github.com/MalloyTheDev/aseprite-mcp/issues/195) (the torchlight is a
+sticker) and [#196](https://github.com/MalloyTheDev/aseprite-mcp/issues/196) (the horizon is
+a letterbox bar).
+
+What fixed `#188` is worth keeping in mind for any thin part: `hand_lit` lights a part's
+global top row and global bottom row, which is right for a slab and useless for anything
+that wraps. On the shield's rim it lit two pixels and left ninety at the flat fill colour.
+`edge_lit` lights by the direction each pixel's edge faces instead, taken as the vector from
+the part's centre, which is near enough the surface normal on a ring, a rim or a small gem.
 
