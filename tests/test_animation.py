@@ -1311,3 +1311,39 @@ def test_a_concave_subject_tapers_each_part_against_its_own_width(request):
         f"the thin bar only reaches {bar} of {copies} copies, so it is still being "
         "tapered against something wider than itself"
     )
+
+
+def test_an_undrawable_pixel_does_not_move_the_anchor(request):
+    """#176: the tween pivoted on a box measured by a different definition of empty.
+
+    `Image:shrinkBounds` honours the sprite's transparent index only, so a pixel held in a
+    palette entry that is itself transparent counted as content to it, while the
+    `source_pixels` reported beside the box excluded that pixel. Measured before the fix:
+    art on rows 2 to 5, one such pixel on row 13, `source_bounds` height 12 and the bottom
+    anchor at y=13. A squash meant to keep a character's feet on the floor pivoted eight
+    rows beneath them.
+
+    Built index by index rather than by converting an RGB sprite, because the palette is
+    the whole point: a palette quantized from the art would never produce a transparent
+    entry that art is drawn in.
+    """
+    name = f"a/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 16, 16, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", "#6b4a2fff", "#ffffff00"])
+    drawing.draw_rectangle(name, 4, 2, 4, 4, "index:1", filled=True)
+    drawing.draw_pixels(name, [{"x": 6, "y": 13}], "index:2")
+    frames.add_frame(name)
+
+    result = animation.tween_cels(name, "Layer 1", [1, 2], scale_to=1.4, anchor="bottom")
+
+    rows = inspect.get_pixels(name, 0, 0, 16, 16, frame=1)["pixels"]
+    visible = [y for y in range(16) for x in range(16) if rows[y][x][7:9] != "00"]
+    assert max(visible) == 5, "the fixture's visible art ends on row 5"
+
+    box = result["source_bounds"]
+    assert box["y"] + box["height"] - 1 == 5, (
+        f"source_bounds reaches row {box['y'] + box['height'] - 1}, past the visible art"
+    )
+    assert result["anchor"]["y"] == 5, "a bottom anchor must sit on the art, not under it"
+    # And the two numbers in one result now agree about that pixel.
+    assert result["source_pixels"] == 16

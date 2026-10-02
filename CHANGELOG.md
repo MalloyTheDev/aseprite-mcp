@@ -119,6 +119,28 @@ All notable changes to this project are documented here. The format is based on
   only on CI, which is the one situation the check exists for.
 
 ### Fixed
+- **A tween pivoted on a box measured by a different definition of empty than the count
+  beside it** (#176). `Image:shrinkBounds` honours the sprite's transparent index only, so
+  a pixel held in a palette entry that is itself transparent counted as content to it.
+  Measured on an indexed sprite with art on rows 2 to 5 and one such pixel on row 13,
+  `tween_cels` reported `source_bounds` of height 12 and put a bottom anchor at y=13,
+  while `source_pixels` correctly said 16: a squash meant to keep a character's feet on
+  the floor pivoted eight rows beneath them. `tween_cels` and both passes of
+  `smear_frame` now measure with `visible_extent`, which is the definition the counts use.
+  The two remaining `shrinkBounds` calls in that module are left alone on purpose, with
+  the reasoning written where they are: one trims a cel being written, where a pixel in a
+  transparent entry is real data that cropping would discard, and the other reports a
+  single generous number rather than two that conflict.
+
+- **`remove_stray_pixels` traded a two-colour speck instead of cleaning it** (#177). Each
+  pixel of the speck is a stray whose only opaque neighbour is the other one, so the rule
+  had each take the other's colour: `#ff00ff #00ff00` became `#00ff00 #ff00ff`, the pass
+  reported two replacements having cleaned nothing, and a second pass traded them back, so
+  the tool was not idempotent on its own output. A stray may now only take a colour from a
+  pixel that is staying, so a speck with no staying neighbour is left exactly as it was and
+  the count says zero. `erase_isolated` with `min_cluster=2` is the route that cleans it.
+  A stray touching the artwork is unaffected, which a control test pins.
+
 - **`diff_sprites` measured `drawn_pixels` and `content` by two different definitions of
   indexed transparency** (#172). The count treated both the sprite's transparent index and
   any palette entry whose own alpha is 0 as empty; the content box came from

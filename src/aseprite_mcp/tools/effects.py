@@ -1343,26 +1343,58 @@ def remove_stray_pixels(
       end
     end
 
+    -- Which pixels are strays, settled before deciding what any of them becomes.
+    --
+    -- A stray may only take a colour from a pixel that is staying, and that needs knowing
+    -- which pixels those are. Without it, a two-pixel speck of two colours had each pixel
+    -- take the other's: the pass reported two replacements, cleaned nothing, and a second
+    -- pass traded them back, so the tool was not idempotent on its own output (#177).
+    -- Three mutually adjacent strays shuffled the same way.
+    --
+    -- A pixel being erased is not a stray to repaint either. It can only ever be one of
+    -- its own cluster's members, because a cluster has no opaque neighbour outside itself,
+    -- so leaving these out cannot change what any surviving pixel is replaced with.
+    local stray = {}
+    for y = 0, h - 1 do
+      for x = 0, w - 1 do
+        local here = img:getPixel(x, y)
+        if img_solid(spr, img, x, y) and not protected[here] and erase[y * w + x] == nil then
+          local alone = true
+          for dy = -1, 1 do
+            for dx = -1, 1 do
+              if not (dx == 0 and dy == 0) then
+                local nx, ny = x + dx, y + dy
+                if nx >= 0 and ny >= 0 and nx < w and ny < h
+                   and img:getPixel(nx, ny) == here then
+                  alone = false
+                end
+              end
+            end
+          end
+          if alone then stray[y * w + x] = true end
+        end
+      end
+    end
+
     -- Read first, write after: a stray replaced mid-pass would become a neighbour that
     -- rescues the next one, and the result would depend on scan order.
     local replacements, count = {}, 0
     for y = 0, h - 1 do
       for x = 0, w - 1 do
-        local here = img:getPixel(x, y)
-        -- A pixel being erased is not also a pixel to repaint. It can only ever be one of
-        -- its own cluster's members, because a cluster has no opaque neighbour outside itself,
-        -- so skipping these cannot change what any surviving pixel is replaced with.
-        if img_solid(spr, img, x, y) and not protected[here] and erase[y * w + x] == nil then
-          local tally, best, best_n, alone = {}, nil, 0, true
+        if stray[y * w + x] then
+          local here = img:getPixel(x, y)
+          local tally, best, best_n = {}, nil, 0
           for dy = -1, 1 do
             for dx = -1, 1 do
               if not (dx == 0 and dy == 0) then
                 local nx, ny = x + dx, y + dy
                 if nx >= 0 and ny >= 0 and nx < w and ny < h then
                   local other = img:getPixel(nx, ny)
-                  if other == here then
-                    alone = false
-                  elseif img_solid(spr, img, nx, ny) then
+                  -- `other ~= here` is already guaranteed for a stray, and is kept as the
+                  -- statement of that: a pixel with a neighbour of its own colour is not
+                  -- one.
+                  if other ~= here and img_solid(spr, img, nx, ny)
+                     and not stray[ny * w + nx] then
                     local n = (tally[other] or 0) + 1
                     tally[other] = n
                     if n > best_n then best, best_n = other, n end
@@ -1371,7 +1403,9 @@ def remove_stray_pixels(
               end
             end
           end
-          if alone and best ~= nil then
+          -- No staying neighbour means nothing to take, which is the same situation as a
+          -- stray on empty canvas: left alone here, and erased by `erase_isolated`.
+          if best ~= nil then
             count = count + 1
             replacements[count] = { x = x, y = y, px = best }
           end

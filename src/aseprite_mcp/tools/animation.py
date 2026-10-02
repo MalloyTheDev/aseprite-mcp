@@ -530,6 +530,17 @@ end
 # it and `smear_frame` takes its movement vector from where the content sits. A
 # canvas-sized cel reports the whole canvas as its bounds, which is a claim about the
 # drawing that is not true.
+# Two other `shrinkBounds` calls in this module are deliberately left as they are, and the
+# reasoning belongs next to them rather than in a commit nobody will find again.
+#
+# `commit_trimmed` above trims a cel that is being *written*. A pixel sitting in a
+# transparent palette entry is real data in that image, and cropping it away would discard
+# it, so honouring the transparent index alone is arguably the right question there. It is
+# also not reported beside a count, so there are no two numbers to disagree.
+#
+# `validate_loop`'s per-frame `bounds` is one generous number rather than two that
+# conflict. Changing it would change a reported metric, which wants its own change with
+# the old answer pinned first.
 _COMMIT_LUA = """
 local function commit_trimmed(spr, layer, framenum, img)
   local b = img:shrinkBounds()
@@ -601,7 +612,14 @@ end
 require_unlinked(spr, layer, frames, "tween_cels")
 
 local src_img = get_draw_image(spr, layer, frames[1])
-local sb = src_img:shrinkBounds()
+-- visible_extent, not shrinkBounds: this box is what the anchor pivots around, and
+-- shrinkBounds honours the sprite's transparent index only. On an indexed sprite holding
+-- a pixel in a palette entry that is itself transparent, the box reached past the visible
+-- art and a bottom anchor sat below it. Measured before the fix: art on rows 2 to 5, one
+-- such pixel on row 13, anchor reported at y=13, so a squash meant to keep a character's
+-- feet on the floor pivoted eight rows under them while source_pixels, counted the
+-- careful way, correctly said 16 (#176).
+local _sb_count, sb = visible_extent(spr, src_img)
 if sb == nil or sb.width <= 0 or sb.height <= 0 then
   error("the cel on frame " .. frames[1] .. " of layer '" .. layer.name .. "' has " ..
         "nothing drawn on it, so there is nothing to tween. Draw the pose first.", 0)
@@ -970,10 +988,14 @@ require_pixel_layer(layer, "smear_frame")
 local here = require_frame(spr, ARG.frame, "frame")
 local there = require_frame(spr, ARG.from_frame, "from_frame")
 
+-- visible_extent rather than shrinkBounds, for the same reason as tween_cels above: this
+-- box sets the movement vector and is reported as `bounds` beside a `drawn_pixels` count
+-- taken the careful way, so the two disagreed about an indexed sprite's undrawable pixel
+-- and the measured movement could be skewed by one (#176).
 local function content(n)
   if layer:cel(n) == nil then return nil, nil end
   local img = get_draw_image(spr, layer, n)
-  local b = img:shrinkBounds()
+  local _, b = visible_extent(spr, img)
   if b == nil or b.width <= 0 or b.height <= 0 then return img, nil end
   return img, b
 end
@@ -1056,7 +1078,10 @@ end
 require_unlinked(spr, layer, { n }, "smear_frame")
 
 local src = get_draw_image(spr, layer, n)
-local sb = src:shrinkBounds()
+-- Measured the same way the read pass measured it. These two boxes are compared against
+-- each other below to catch a subject that moved between the passes, so a mismatch in
+-- definition would make that check fire on a sprite nobody touched.
+local _src_count, sb = visible_extent(spr, src)
 if sb == nil or sb.width <= 0 or sb.height <= 0 then
   error("layer '" .. layer.name .. "' has nothing drawn on frame " .. n .. " any more.", 0)
 end
