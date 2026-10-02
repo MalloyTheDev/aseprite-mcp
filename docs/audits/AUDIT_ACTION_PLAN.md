@@ -30,7 +30,7 @@ All eleven are **done**. "Landed in" is the PR that closed the item.
 | 7 | "serialize every manifest kind" test | Med (bug latent) | `harden/…` | pure | PR #14 (`tests/test_manifest.py::test_every_manifest_kind_serializes`) |
 | 8 | `SECURITY.md` threat model | Med (sec) | `harden/…` | docs | PR #14 ([SECURITY.md](../../SECURITY.md)) |
 | 9 | README/CONTRIBUTING path drift (core split) | Low (docs) | `harden/…` | docs | PR #14 (both now link `src/aseprite_mcp/core/`) |
-| 10 | CI: `uv build` step + 3.11/3.13 matrix | Low (harden) | `harden/…` | CI | PR #14 (matrix is now 3.10 to 3.13, plus a `uv build` step) |
+| 10 | CI: `uv build` step + 3.11/3.13 matrix | Low (harden) | `harden/…` | CI | PR #14 (matrix is now 3.10 to 3.14, plus a `uv build` step) |
 | 11 | Action SHA-pinning + Dependabot | Low (sec) | defer | CI | PR #19 (deferred, then done: `.github/dependabot.yml`) |
 
 ## Suggested sequence

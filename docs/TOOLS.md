@@ -2247,7 +2247,6 @@ Args:
         the same layer *and* frame is refused, because two effects composited into one
         cel are a picture neither call describes, and so is a layer of that name this
         tool did not create.
-        Refused if a layer of that name already exists.
     frame: Frame to build the shadow for, 1-based.
 
 Returns the ellipse it used as `shadow_ellipse` (`[cx, cy, rx, ry]`), the

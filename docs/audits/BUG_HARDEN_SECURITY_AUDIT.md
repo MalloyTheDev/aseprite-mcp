@@ -283,7 +283,7 @@ Impact: minor; version-specific issues could slip.
 Recommended fix: add `3.11` and `3.13`.
 Suggested PR: harden/release-gate-and-property-tests.
 Resolution: done as recommended. The matrix in `.github/workflows/ci.yml` is now
-`["3.10", "3.11", "3.12", "3.13"]`, covering all of `requires-python = ">=3.10"`.
+`["3.10", "3.11", "3.12", "3.13", "3.14"]`, covering all of `requires-python = ">=3.10"`.
 
 ## Finding: Temp Lua handling is sound
 Severity: Info · Category: Hardening · Area: runner · Status: Confirmed (no issue) · **Re-verified at v0.8.1**
@@ -294,9 +294,9 @@ Evidence: `core/runner.run_lua`.
 Impact: none.
 Recommended fix: none.
 Suggested PR: n/a.
-Resolution: nothing to fix. Still true at `core/runner.py:175`
+Resolution: nothing to fix. Still true at `core/runner.py:367`
 (`tempfile.mkstemp(suffix=".lua", prefix="asemcp_")`) with the `os.unlink` in a `finally`
-at `core/runner.py:185`.
+at `core/runner.py:381`.
 
 ---
 
@@ -394,7 +394,7 @@ Impact: none.
 Recommended fix: none.
 Suggested PR: n/a.
 Resolution: still holds. No `shell=True` and no `os.system` anywhere in `src/`; the two
-launch sites are `core/runner.py:119` (`subprocess.Popen(argv, ...)`, argv built as
+launch sites are `core/runner.py:306` (`subprocess.Popen(argv, ...)`, argv built as
 `[exe, "-b", "--script", path]` or `[exe, "-b", *cli_args]`) and `tools/gui.py:67`
 (`[exe, str(path)]`).
 

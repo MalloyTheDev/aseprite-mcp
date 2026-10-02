@@ -7,6 +7,201 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`shade_region_by_light` and `specular_highlight` say where the region landed**
+  (#183). `base_color` scopes a pass by colour *distance*, which is not the same as
+  scoping it by material: art whose fills came from `generate_ramp` puts two materials
+  closer together than the default `tolerance` of 24, because every step of a gold ramp
+  is within 24 of a step of a brass one. Measured on two separated 12x12 squares,
+  `#f2b632` and `#e0a33c` are 18 apart, so a pass scoped to the brass reshaded the gold
+  as well and `region_pixels` could not say so: a count cannot tell one region from four.
+
+  Both tools now return `region_components` and `region_bounds`. That same call comes
+  back with 2 components and a box 44 pixels wide on a 48-pixel canvas; at
+  `tolerance=1.0` it comes back with 1 component and the 12x12 square it was aimed at. It
+  costs one flood fill over a mask that had already been built, written with an explicit
+  stack rather than recursively because a region can be the whole canvas and Lua's C
+  stack is not that deep. Worth reading on the specular in particular: its normals come
+  from the *whole* region, so a glint scoped to a compound object lands wherever that
+  object's mass bulges, which is how the showcase longsword got its only highlight on its
+  leather grip and none on its blade.
+
+- **`generate_ramp` always returns `distinct`, and warns when it clipped** (#184).
+  Lightness is clamped at both ends, so a base near white or near black spends its
+  outermost steps on one colour: `generate_ramp("#c2cde0", steps=9, hue_shift=-22,
+  saturation_shift=-28, light_range=0.68)` returns nine entries whose top two are both
+  `#ffffff`, and the old result carried `steps` and `colors` and no way to find that out.
+  The ramp is still returned, because clamping is the honest result of those inputs and a
+  caller may not care, but `warnings` now names which end collapsed and the nearest
+  `light_range` that would not. A test takes the suggested value and checks it really
+  does return nine distinct colours, because the suggestion is the actionable half and
+  has to be true rather than plausible.
+
+  Silence was expensive because the cost landed two tools later. `specular_highlight`
+  needs the ramp's top step brighter than what `shade_region_by_light` spread over the
+  lit side, so a ramp whose top two entries are both white makes the glint refuse with a
+  message about the shading pass, several calls from the cause. `core/ramps.py` gains
+  `clipped_ends`, `nearest_unclipped` and `clip_warning`, and the warning mentions
+  speculars only when the *top* collapsed, since a ramp that lost steps to black or to
+  rounding in the middle has a different problem. `nearest_unclipped` scans a grid rather
+  than bisecting: distinctness is not monotonic in `light_range`, because too wide clamps
+  the ends onto each other and too narrow rounds neighbours onto the same hex, so the
+  answer can lie either side of what was asked for. Asking the question at all meant
+  wrapping the ramp loop in a function of `light_range`, which had to leave the
+  arithmetic byte for byte identical since the committed showcase art is generated from
+  it; 18,150 input combinations were compared against the pre-patch code and every one
+  matched.
+
+- **`dither_band` reports `from_color` and `to_color`** (#186). `from_step` and `to_step`
+  are 1-based, while the `ramp` passed beside them is a list indexed from 0, so the pair
+  that dithers `ramp[3]` against `ramp[4]` is `from_step=4, to_step=5` and the two
+  conventions sit one line apart in a script. All the tool validates is that the pair is
+  adjacent, and an off-by-one still names an adjacent pair, so the call succeeded and
+  dithered the wrong boundary with nothing in the result to catch it. The two colours are
+  resolved in Python rather than in Lua, which is handed two colours already and cannot
+  tell a deliberate pair from a mistake, and the docstring spells the collision out where
+  it happens.
+
+### Changed
+- **`glow` and `cast_shadow` reuse their own effect layer across frames** (#185). The
+  guarantee worth keeping is about a *cel*: two effects composited into one cel are a
+  picture neither call describes. It was enforced on the *layer*, and a layer spans every
+  frame, so the showcase's four-frame torch flicker needed `glow 1` through `glow 4`,
+  each holding a single cel and empty on the other three, and a ten-frame effect would
+  have needed ten. The layer stack then said nothing about the animation it belonged to.
+
+  Both tools now write into a layer of the given name when they created it themselves and
+  the target frame has no cel on it yet, which is how one layer carries a per-frame
+  effect across a whole animation. The same layer *and* frame is still refused, as is a
+  layer of that name holding artwork somebody else drew, and one that has since been
+  moved out from under its subject, since `new_layer` is documented as sitting directly
+  below `layer`. The mark identifying a layer as the tool's own goes in namespaced plugin
+  data under `aseprite-mcp` rather than in `layer.data`: `data` is the User Data field
+  the editor shows, and `set_properties` already treats the unnamed group as the
+  caller's. The dungeon scene is 8 layers rather than 11 as a result, with one `halo`
+  layer holding four cels, and its composite is byte for byte what it was, because the
+  empty cels the old shape left on three layers per frame contributed nothing.
+
+- **The showcase is a five-piece equipment sheet, a torch-lit room, and two pictures for
+  capabilities that had none** (#180). The item sheet was four versions of one exercise,
+  a heart, a coin, a potion and a sword, and nothing in the gallery showed the tools
+  working together. `items.py` now draws a longsword, a kite shield, a great helm, a
+  bronze key and a spell scroll: a long thin blade, a big flat painted face, a round
+  shell, a part made of nothing but thin parts, and a matte non-metal. A showcase of one
+  material shaded one way proves much less than it looks like it does. The silhouettes
+  are typed out row by row, because the draft that derived them from curves produced a
+  lumpy heart and an emboss that read as noise.
+
+  `dungeon.py` is new, and is about what the tools do together rather than about one
+  tool: 112 by 72 pixels, five ramps, four frames. Thirty-five wall blocks take their
+  form from a single `shade_region_by_light` call, because the mortar joints make the
+  mask thirty-five components and a distance field describes each one on its own. The
+  light falls off in zones stepped down the surface's own ramp with `shift_along_ramp`, a
+  rectangle per course so that every cut lands on a joint. The chest casts onto the floor
+  layer and is clipped to it. The torch flickers over four frames with four durations,
+  four leans and four silhouettes.
+
+  `zorder.py` and `quantize.py` give `set_cel_z_index` and `quantize_palette` a picture
+  each. The first swings a blade past a round shield, behind it on the approach and in
+  front on the follow-through, with two layers that are never reordered, and it asserts
+  the composited pixel at (45,20) is the shield's oak on one frame and the blade's steel
+  on the next, because a z-index that round-trips through the file while changing nothing
+  about the render would look identical. The second renders a dusk scene in 117 colours
+  and then in 13 and in 5; its first draft produced three identical panels, because
+  `quantize_palette` derives a palette and touches no pixel, exactly as its own warning
+  says, and the `set_color_mode` that follows is what reduces the art.
+
+  Nine generators now reproduce all twelve committed images byte for byte.
+  `item_sheet.png` was recommitted along the way: three source pixels, two in the heart
+  and one in the potion, moved from a shared cool grey to their own item's ramp colour
+  because of the #177 stray-pixel fix, which is exactly the drift these scripts exist to
+  catch.
+
+- **Ten defects in that new art, found by reviewing it at 12x rather than at thumbnail
+  size** (#187 to #196, all fixed). Nine of the ten were invisible at the size the README
+  shows these images at and obvious at native scale on a checkerboard, and every one of
+  them had passed the checks the generators already carried: the cell-colour census
+  proved no colour crossed a cell and said nothing about whether the glint inside it was
+  on the right object, and the falloff probe went on passing while the far wall was one
+  tile repeated. An assertion covers the failure it was written for and no other.
+
+  Three of them turned on the same realisation, that the answer was to stop handing a
+  shape to a tool which describes a different kind of shape. The sword's blade is a prism
+  and is painted as seven columns (a lit edge, a lit bevel, a dark groove, a shadowed
+  bevel and a rim light), because `shade_region_by_light` gave it a soft gradient with no
+  edge anywhere in it (#190). The scroll's sheet is flat paper in four column bands,
+  because the pinched silhouette split the distance field into two lobes and put a blotch
+  across the lower right that read as a water stain (#191). The torchlight is the masonry
+  lifted up its own ramp, one `get_pixels` over the pool and one `draw_pixels` back,
+  which the recorded run reports as 1,503 wall pixels lifted and none off-ramp; three
+  drafts with `glow` all read as a sticker, because `glow` grows its rings from the
+  subject's silhouette and paints at full opacity, so a tall flame gives a hard-edged egg
+  and inside it the mortar joints disappear (#195). `glow` stays at `radius=3` for the
+  heat right at the flame, which is the job it is good at.
+
+  The rest, each with the measurement that caught it. Two of the four glints were on the
+  wrong part, the sword's on its leather grip and the key's on the shadow side of its
+  bow, both from scoping the highlight to a whole 40px cell; each is scoped to a
+  rectangle holding one part now, and the key's hole is punched after the glint rather
+  than before, because it had been taking the bow's own edge out of the eligible interior
+  (#187). The generator's `hand_lit` helper takes a part's global top and bottom row,
+  which is right for a slab and useless for anything that wraps: on the shield's rim it
+  lit two pixels and left ninety at the flat fill colour, so the rim and the pommel gem
+  use a new `edge_lit` that lights by the direction each pixel's edge faces, taken as the
+  vector from the part's centre (#188). One set of finishing parameters was applied to
+  five different surfaces, so `dither_band` on steel put a four-pixel checkerboard across
+  the helm's 23px face and read as damage; it runs on the shield's paint alone now
+  (#189). The five items shared no palette family and no optical weight, so the one-off
+  mint pommel gem is gone, the ribbon's pink is a deep red used twice, and their centre
+  lines agree within one row where the helm used to sit two rows high (#192). Uniform
+  17px blocks gave identical distance fields, and three steps of falloff down a nine-step
+  ramp clamped the darks together, leaving 8 of 24 sampled blocks pixel for pixel
+  identical at 6 tones; widths cycle through (17, 11, 23, 14, 20) with a per-course phase
+  and the ramps are thirteen steps, for 31 distinct patterns from 35 blocks with none
+  under 4 tones (#193). The chest's lid seam survived on 10 of its 27 pixels because the
+  straps and the lock were drawn over it, and `contact_shadow` had been handed an
+  occluder colour that a later pass repainted, so it matched 3 pixels on the whole chest;
+  the seam is 18 of 27 and the contact shadow darkens 102 wood pixels, both asserted
+  (#194). The floor's courses grow taller and its stones wider down the frame, because
+  four flat full-width rows read as a second wall lying down (#196).
+
+  Both READMEs now point at the issues, and the paragraph claiming thirty-five domed
+  blocks from one shading call is rewritten around what that claim cost.
+
+### Fixed
+- **A write whose selection masked out every pixel reported no counts at all** (#181).
+  The result harness attaches the pixel counters under one gate, and `_px_masked` was
+  read inside that gate without being part of it. A write that drew nothing left the
+  other three counters at zero, so the whole block was skipped and
+  `pixels_outside_selection` went with it: the call came back `ok: true` with
+  `selection_applied: true` and no number anywhere, in the one case where the number is
+  the entire answer. A mask that ate ten pixels is not an absence of pixels. One term
+  added to the gate. The other half is pinned as well, that a write made with no
+  selection still grows neither field, because not reporting a zero is the reason the
+  gate is there at all.
+
+- **The `.msk` selection sidecar outlived the sprite it belonged to** (#182). A selection
+  is not stored in the .aseprite file, so it lives in a sidecar beside the sprite and is
+  reloaded whenever that sprite is opened. `create_sprite(overwrite=True)` wrote a brand
+  new sprite over an old one and left the old one's sidecar sitting beside it, so the new
+  sprite opened carrying a selection from a sprite that no longer existed and every edit
+  outside that rectangle was dropped. What eventually surfaced was "Nothing to shade: no
+  pixel matched" from a later call, several steps from the cause and clean on a fresh
+  workspace, which reads as nondeterminism rather than as a leftover file.
+  `save_sprite_as` and `import_image` had the same hole.
+
+  The suffix and the two helpers now live in `core/paths.py` with the rest of the path
+  policy, because the selection tools that write the sidecar and the sprite tools that
+  have to discard it need the same answer, and two modules guessing at the same suffix is
+  how that stops being true. `create_sprite` reports `discarded_selection` when there was
+  one to discard and says nothing when there was not. Deliberately not done by the
+  exports: `with_suffix` maps `hero.png` and `hero.aseprite` onto one `hero.msk`, so an
+  export doing this would throw away the selection of the sprite it was exporting. A
+  sidecar that exists and cannot be removed raises rather than being swallowed, because
+  handing back a new sprite still carrying an old one's selection is the failure, not the
+  error about it. The test that matters is not the missing file but the next edit, which
+  now writes all 256 pixels of a 16x16 fill.
+
+### Added
 - **Per-object metadata and a packed sheet exporter**, four capabilities the editor has
   had since 1.3 (#95, #94).
 

@@ -6,10 +6,14 @@ Every tool produces a small Lua *body*. `assemble_script` wraps that body with:
     Python with `to_lua`),
   * the PRELUDE below (JSON encoder, colour/pixel helpers, deterministic drawing
     primitives, and a sprite-info serializer), and
-  * a `pcall` harness that prints either `@@ASEMCP@@<json>` (success, the contents
-    of the `RESULT` table) or `@@ASEMCP_ERR@@<message>` (a caught Lua error).
+  * a `pcall` harness that prints either `@@ASEMCP:<nonce>@@<json>` (success, the
+    contents of the `RESULT` table) or `@@ASEMCP_ERR:<nonce>@@<message>` (a caught Lua
+    error).
 
-The runner parses those sentinel lines back into Python.
+The runner parses those sentinel lines back into Python. The nonce is per launch, so a
+sentinel that a sprite's own text or a path happened to contain cannot be mistaken for
+this harness's output; `RESULT_PREFIX` and `ERROR_PREFIX` below are the un-nonced forms,
+kept only for a re-export and no longer used to frame anything.
 """
 
 from __future__ import annotations

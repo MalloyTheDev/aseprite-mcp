@@ -12,7 +12,7 @@ uv sync                     # creates .venv and installs deps (incl. dev)
 ```
 
 The package targets **Python 3.10+** (`requires-python = ">=3.10"`), and CI runs the whole
-headless tier on 3.10, 3.11, 3.12 and 3.13. Anything that only works on a newer
+headless tier on 3.10, 3.11, 3.12, 3.13 and 3.14. Anything that only works on a newer
 interpreter will fail the 3.10 job, so check the version floor before reaching for recent
 syntax.
 
@@ -92,28 +92,23 @@ uv run python scripts/release_gate.py            # runs every step below, fail-f
 It runs each of these in order and stops at the first failure:
 
 ```bash
-uv run ruff check . --select F,E9               # lint (no unused imports / undefined names)
+uv run ruff check src tests scripts             # lint (the same invocation and rules as CI)
 uv run pytest                                   # pure-Python tests
 uv run pytest --run-aseprite                    # full integration + golden tests
 uv run python scripts/gen_tool_docs.py --check  # docs/TOOLS.md is in sync with the registry
 uv build                                        # wheel + sdist build
 ```
 
-> **The gate's lint step is narrower than CI's.** `--select F,E9` overrides the
-> `[tool.ruff.lint]` selection in `pyproject.toml`, so the gate checks pyflakes and syntax
-> errors only, while CI runs `ruff check src tests scripts` under the full configured set
-> (`E`, `W`, `F`, `I`, `B`, `UP`, `C4`, `SIM`, `RUF`). Import sorting, bugbear and
-> pyupgrade findings therefore pass the local gate and fail CI. Run the CI form yourself
-> before pushing:
->
-> ```bash
-> uv run ruff check src tests scripts
-> ```
+> **The gate's lint step is exactly CI's.** It runs `ruff check src tests scripts` under
+> the configured `[tool.ruff.lint]` set in `pyproject.toml` (`E`, `W`, `F`, `I`, `B`,
+> `UP`, `C4`, `SIM`, `RUF`), which is the same invocation and the same rules CI uses. The
+> gate used to pass `--select F,E9`, which *overrides* that selection and checks pyflakes
+> and syntax errors only, so an import-order or bugbear finding could clear the local gate
+> and fail CI. It no longer can.
 
 > CI runs the pure/headless steps on every push (it has no Aseprite). The
 > `--run-aseprite` step is local-only. Pass `--skip-aseprite` to `release_gate.py` to
-> mirror CI when Aseprite isn't installed, bearing the lint difference above in mind,
-> since that flag does not make the lint step match CI either.
+> mirror CI when Aseprite isn't installed.
 
 ## Architecture (how a tool works)
 
@@ -122,7 +117,7 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
                                         │  (ARG table + shared PRELUDE)
                                         ▼
                               Aseprite.exe -b --script …
-                                        │  prints @@ASEMCP@@<json>
+                                        │  prints @@ASEMCP:<nonce>@@<json>
                                         ▼
                               runner parses sentinel → dict
 ```
