@@ -117,3 +117,49 @@ def test_a_lone_pixel_with_nothing_around_it_is_left_where_it_is(request):
 
     assert result["replaced"] == 0
     assert _metrics(name)["drawn_pixels"] == 1
+
+
+def test_a_pair_of_strays_is_left_alone_rather_than_traded(request):
+    """#177: a stray may only take a colour from a pixel that is staying.
+
+    Each pixel of a two-colour speck is a stray whose only opaque neighbour is the other
+    one, so the rule used to have each take the other's colour. The pass reported two
+    replacements, cleaned nothing, and a second pass traded them back, so the tool was
+    not idempotent on its own output. `#ff00ff #00ff00` became `#00ff00 #ff00ff` and then
+    `#ff00ff #00ff00` again, reporting `replaced: 2` both times.
+
+    The pair is now left exactly as it was, and the count says so. `erase_isolated` with
+    `min_cluster=2` is the route that actually cleans it, which the sibling test pins.
+    """
+    # (0,0) and (1,0): `_block` fills x and y from 2 to 13, so these two touch nothing
+    # but each other. Placed at 1,14 and 2,14 they are diagonally adjacent to the block's
+    # corner and are correctly replaced from it, which is what the control below covers.
+    name = _block(request)
+    drawing.draw_pixels(name, [{"x": 0, "y": 0}], "#ff00ff")
+    drawing.draw_pixels(name, [{"x": 1, "y": 0}], "#00ff00")
+
+    def pair() -> tuple[str, str]:
+        rows = inspect.get_pixels(name, 0, 0, 16, 16)["pixels"]
+        return rows[0][0], rows[0][1]
+
+    was = pair()
+    first = effects.remove_stray_pixels(name)
+    second = effects.remove_stray_pixels(name)
+
+    assert first["replaced"] == 0, "neither pixel had a staying neighbour to take from"
+    assert second["replaced"] == 0
+    assert pair() == was, "the speck was traded rather than left alone"
+
+
+def test_a_stray_next_to_real_art_is_still_replaced(request):
+    """The control for the test above. Narrowing where a replacement may come from must
+    not stop the ordinary case working: a stray touching the artwork has plenty of staying
+    neighbours and still takes the commonest of them."""
+    name = _block(request)
+    drawing.draw_pixels(name, [{"x": 5, "y": 5}], "#ff00ff")
+
+    result = effects.remove_stray_pixels(name)
+
+    assert result["replaced"] == 1
+    rows = inspect.get_pixels(name, 0, 0, 16, 16)["pixels"]
+    assert rows[5][5] != "#ff00ffff", "the stray inside the art was not cleaned"
