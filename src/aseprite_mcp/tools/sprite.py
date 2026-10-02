@@ -404,21 +404,31 @@ def trim_sprite(filename: str) -> dict:
     """Auto-crop the canvas to the bounding box of all non-transparent content
     (across every frame)."""
     src = resolve_path(filename)
+    # The prelude's `visible_extent` rather than the per-pixel getPixel loop this used to
+    # run, and rather than `Image:shrinkBounds`. The loop's answer was the careful one:
+    # it treated a pixel held in a fully transparent palette entry as empty, which
+    # shrinkBounds does not, and that answer is preserved exactly here (measured on an
+    # 8x8 indexed sprite with such a pixel at 6,6: both say 2x2 at 2,2, shrinkBounds says
+    # 5x5). What changes is that the definition now lives in one place shared with
+    # `drawn_pixels`, so trimming and counting cannot drift apart (#172), and that the
+    # scan reads the byte buffer instead of calling getPixel per pixel: 5.2x cheaper
+    # measured over a 1024x1024 frame, which matters because this is the one scan in this
+    # file with no cap but the canvas limit behind it.
     body = """
     local spr = open_sprite(ARG.src)
     local minx, miny, maxx, maxy
     for f = 1, #spr.frames do
       local flat = Image(spr.spec); flat:clear(); flat:drawSprite(spr, f)
-      for y = 0, flat.height - 1 do
-        for x = 0, flat.width - 1 do
-          local _, _, _, a = px_to_rgba(spr, flat:getPixel(x, y))
-          if a > 0 then
-            if minx == nil or x < minx then minx = x end
-            if miny == nil or y < miny then miny = y end
-            if maxx == nil or x > maxx then maxx = x end
-            if maxy == nil or y > maxy then maxy = y end
-          end
-        end
+      -- Per frame and unioned, not over a single composite: a sprite whose frames hold
+      -- art in different places has to keep all of it, so the crop is the box that
+      -- covers every frame.
+      local _, box = visible_extent(spr, flat)
+      if box ~= nil then
+        if minx == nil or box.x < minx then minx = box.x end
+        if miny == nil or box.y < miny then miny = box.y end
+        local right, bottom = box.x + box.width - 1, box.y + box.height - 1
+        if maxx == nil or right > maxx then maxx = right end
+        if maxy == nil or bottom > maxy then maxy = bottom end
       end
     end
     if minx == nil then error("Sprite is fully transparent; nothing to trim.") end

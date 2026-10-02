@@ -421,12 +421,6 @@ local function load_sprite(path, what)
   return spr
 end
 
-local function box_of(img)
-  local r = img:shrinkBounds()
-  if r == nil or r.width == 0 or r.height == 0 then return nil end
-  return { x = r.x, y = r.y, width = r.width, height = r.height }
-end
-
 local function box_text(box)
   if box == nil then return "empty" end
   return box.width .. "x" .. box.height .. " at " .. box.x .. "," .. box.y
@@ -455,11 +449,21 @@ local fb = require_frame(b, ARG.frame_b, "other_frame")
 local ia = frame_image(a, fa, ARG.layer_a)
 local ib = frame_image(b, fb, ARG.layer_b)
 
+-- One measurement per side for both numbers this result reports about it. They used to
+-- come from two: the count from the prelude's byte scan and the box from
+-- `Image:shrinkBounds`, which honours an indexed sprite's transparent index but not a
+-- palette entry whose own alpha is 0. On an 8x8 indexed sprite with one pixel held in
+-- such an entry that reported `drawn_pixels: 4` beside a 5x5 `content` box whose corner
+-- nothing in the sprite could draw (#172). Measuring once removes the chance of the two
+-- disagreeing rather than correcting one of them.
+local a_drawn, a_box = visible_extent(a, ia)
+local b_drawn, b_box = visible_extent(b, ib)
+
 if a.width ~= b.width or a.height ~= b.height then
   error("These frames cannot be compared pixel for pixel: " .. ARG.a_name .. " is " ..
         a.width .. "x" .. a.height .. " and " .. ARG.b_name .. " is " .. b.width .. "x" ..
-        b.height .. ". The art inside them is " .. box_text(box_of(ia)) .. " and " ..
-        box_text(box_of(ib)) .. ", so if the canvases differ only in padding, " ..
+        b.height .. ". The art inside them is " .. box_text(a_box) .. " and " ..
+        box_text(b_box) .. ", so if the canvases differ only in padding, " ..
         "trim_sprite or resize_canvas on a copy will line them up.", 0)
 end
 
@@ -550,9 +554,9 @@ end
 RESULT = {
   width = a.width, height = a.height,
   a = { frame = fa, color_mode = colormode_name(a.colorMode), frames = #a.frames,
-        drawn_pixels = visible_count(a, ia), content = box_of(ia) },
+        drawn_pixels = a_drawn, content = a_box },
   b = { frame = fb, color_mode = colormode_name(b.colorMode), frames = #b.frames,
-        drawn_pixels = visible_count(b, ib), content = box_of(ib) },
+        drawn_pixels = b_drawn, content = b_box },
   changed_pixels = changed,
   silhouette_added = added,
   silhouette_removed = removed,
