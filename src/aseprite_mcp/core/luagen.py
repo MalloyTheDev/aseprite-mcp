@@ -1064,8 +1064,16 @@ def assemble_script(body: str, args: dict | None = None, *, nonce: str) -> str:
         # Attached here rather than by each tool, so every pixel-writing tool reports
         # what it actually did. Only when something was touched: a tool that writes no
         # pixels should not grow a "0" that reads as a claim about pixels.
+        #
+        # `_px_masked` is part of that test and not only read inside it, which it was not
+        # at first. A write whose selection masked out *every* pixel left all three other
+        # counters at zero, so the gate skipped the whole block and took
+        # `pixels_outside_selection` with it: the result came back `ok: true`, with
+        # `selection_applied` and no count anywhere, in exactly the case where the count is
+        # the entire answer. A mask that ate ten pixels is not an absence of pixels.
         "  if type(RESULT) == 'table' and\n"
-        "     (_px_written > 0 or _px_clipped > 0 or _px_skipped > 0) then\n"
+        "     (_px_written > 0 or _px_clipped > 0 or _px_skipped > 0\n"
+        "      or _px_masked > 0) then\n"
         "    RESULT.pixels_written = _px_written\n"
         "    if _px_clipped > 0 then RESULT.pixels_clipped = _px_clipped end\n"
         "    if _px_skipped > 0 then RESULT.pixels_skipped = _px_skipped end\n"

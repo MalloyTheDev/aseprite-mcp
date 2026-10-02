@@ -149,16 +149,22 @@ Drawing with the tools is the best test the tools get, and reviewing the drawing
 the best test the drawing gets. Sixteen issues came out of this round, ten of them from
 zooming in on art that looked finished at thumbnail size.
 
-Against the tools, with the failing call and the measurement in each:
-[#181](https://github.com/MalloyTheDev/aseprite-mcp/issues/181) (a fully masked write
-reports no counts), [#182](https://github.com/MalloyTheDev/aseprite-mcp/issues/182) (the
-`.msk` sidecar outlives its sprite),
-[#183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183) (`base_color` tolerance
-merges two materials), [#184](https://github.com/MalloyTheDev/aseprite-mcp/issues/184)
-(`generate_ramp` clips silently),
-[#185](https://github.com/MalloyTheDev/aseprite-mcp/issues/185) (`glow` needs one layer per
-frame), [#186](https://github.com/MalloyTheDev/aseprite-mcp/issues/186) (`dither_band`
-counts from 1 beside a list that counts from 0).
+Against the tools, six, all fixed, and four of them give these scripts something they can
+now check rather than guess at:
+
+| | | |
+| --- | --- | --- |
+| [#181](https://github.com/MalloyTheDev/aseprite-mcp/issues/181) | a fully masked write reported no counts | `pixels_outside_selection` on a write that drew nothing |
+| [#182](https://github.com/MalloyTheDev/aseprite-mcp/issues/182) | the `.msk` sidecar outlived its sprite | the defensive `deselect` after `create_sprite` in these scripts is no longer load-bearing |
+| [#183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183) | `base_color` tolerance merged two materials | `region_components` and `region_bounds`, which is what the cell-colour census was standing in for |
+| [#184](https://github.com/MalloyTheDev/aseprite-mcp/issues/184) | `generate_ramp` clipped silently | `distinct`, and a warning naming the nearest `light_range` that works, which is what the `ramp()` helper in these scripts asserts by hand |
+| [#185](https://github.com/MalloyTheDev/aseprite-mcp/issues/185) | `glow` needed one layer per frame | `dungeon.py` has one `halo` layer with four cels, where it used to have `glow 1` through `glow 4` |
+| [#186](https://github.com/MalloyTheDev/aseprite-mcp/issues/186) | `dither_band` counted from 1 beside a list counting from 0 | `from_color` and `to_color` in the result |
+
+Two of those replace a check written here with one the tool does itself, which is the right
+direction: a measurement a generator had to invent is a measurement the tool owed its
+callers. The hand-written ones stay for now, because a script asserting what it needs is
+cheaper to read than a script trusting that someone else asserted it.
 
 Against the art in this directory, all ten are now fixed:
 [#187](https://github.com/MalloyTheDev/aseprite-mcp/issues/187) glints on the wrong part,

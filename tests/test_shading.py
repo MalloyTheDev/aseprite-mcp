@@ -436,6 +436,22 @@ def test_dither_band_touches_only_the_boundary(two_bands):
     assert {p.lower()[:7] for p in rows[7]} == {RAMP[2], RAMP[3]}
 
 
+def test_dither_band_names_the_colours_its_steps_resolved_to(two_bands):
+    """The steps are 1-based and the caller's ramp is not, one line apart.
+
+    `from_step=3` means `RAMP[2]`, and getting it wrong by one still names an adjacent
+    pair, so the call succeeds and dithers the wrong boundary. Nothing in the output said
+    which colours it had used, so there was no way to check the intent against the result.
+    """
+    result = shading.dither_band(two_bands, RAMP, from_step=3, to_step=4)
+
+    assert result["from_color"] == RAMP[2]
+    assert result["to_color"] == RAMP[3]
+    # And the colours it named are the ones it actually touched.
+    rows = inspect.get_pixels(two_bands, 0, 0, 16, 16)["pixels"]
+    assert {p.lower()[:7] for p in rows[7]} == {result["from_color"], result["to_color"]}
+
+
 def test_dither_band_introduces_no_new_colours(two_bands):
     before = _colors_in(two_bands, 16)
     shading.dither_band(two_bands, RAMP, from_step=3, to_step=4)
@@ -943,3 +959,65 @@ def test_a_palette_that_can_draw_nothing_does_not_fail_the_call(request):
     assert result["pixels_matched"] == 0
     assert result["ramp_on_palette"]["undrawable_palette"] is True
     assert "no entry that can draw a visible pixel" in " ".join(result["warnings"])
+
+
+# ===== where the region actually landed ================================================
+# `base_color` scopes by colour *distance*, which is not the same as scoping by material.
+# Two ramps from `generate_ramp` for two different materials are routinely closer than the
+# default tolerance of 24: every step of a gold ramp is within 24 of a step of a brass one.
+# A pass scoped to one then matched the other across the canvas and reshaded it, and
+# `region_pixels` could not say so, because a count cannot tell one region from four.
+
+
+@pytest.fixture()
+def two_materials(request):
+    """Two separated squares in colours that are different materials and close numbers."""
+    name = f"region/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 48, 16, overwrite=True)
+    drawing.draw_rectangle(name, 2, 2, 12, 12, "#f2b632", filled=True)   # gold
+    drawing.draw_rectangle(name, 34, 2, 12, 12, "#e0a33c", filled=True)  # brass
+    return name
+
+
+def test_a_scoped_pass_says_how_many_places_it_landed(two_materials):
+    """The default tolerance makes these one region, and the result now admits it."""
+    wide = shading.shade_region_by_light(two_materials, RAMP, base_color="#e0a33c")
+
+    assert wide["region_components"] == 2, (
+        "gold and brass are 18 apart, so at tolerance 24 the pass scoped to the brass "
+        "matched the gold square as well"
+    )
+    assert wide["region_bounds"]["x"] == 2
+    assert wide["region_bounds"]["width"] == 44, (
+        "the box spans both squares, which is the thing the caller could not see before"
+    )
+
+
+def test_a_tight_tolerance_scopes_to_one_material(two_materials):
+    tight = shading.shade_region_by_light(
+        two_materials, RAMP, base_color="#e0a33c", tolerance=1.0)
+
+    assert tight["region_components"] == 1
+    assert tight["region_bounds"] == {"x": 34, "y": 2, "width": 12, "height": 12}
+
+
+def test_region_bounds_is_the_box_and_not_the_canvas(two_materials):
+    """A bounding box of the whole canvas would be useless, so check it is not that."""
+    one = shading.shade_region_by_light(
+        two_materials, RAMP, base_color="#f2b632", tolerance=1.0)
+    assert one["region_bounds"]["width"] < 48
+    assert one["region_bounds"]["height"] < 16
+
+
+def test_specular_reports_the_region_its_normals_came_from(two_materials):
+    """The glint's placement is decided by the whole region, so its shape is the answer."""
+    shading.shade_region_by_light(
+        two_materials, RAMP, base_color="#e0a33c", tolerance=1.0)
+    glint = shading.specular_highlight(
+        two_materials, RAMP, base_color="#f2b632", tolerance=1.0,
+        highlight_color="#ffffff", size=2)
+
+    assert glint["region_components"] == 1
+    assert glint["region_bounds"] == {"x": 2, "y": 2, "width": 12, "height": 12}
+    x, y = glint["pixels"][0]
+    assert 2 <= x < 14 and 2 <= y < 14, "the glint must be inside the region it reported"

@@ -271,29 +271,76 @@ _EFFECT_LAYER_LUA = r"""
 -- names one ambiguous, and the one you can see is not necessarily the one you changed.
 -- Recursive, because find_layer searches inside groups and so a name hidden in a group
 -- would collide there while looking free here.
-local function require_free_layer_name(spr, name)
+-- The layer an effect will write into: a new one, or the one it made last time.
+--
+-- The guarantee worth keeping is about a *cel*: two effects composited into one cel are a
+-- picture neither call describes, so a second call to the same layer and frame is refused.
+-- That used to be enforced on the *layer*, and a layer spans every frame, so a four-frame
+-- torch flicker needed `glow 1` through `glow 4`, each holding a single cel and empty on
+-- the other three. A ten-frame effect needed ten. The layer stack then said nothing about
+-- the animation it belonged to.
+--
+-- Reuse is only allowed for a layer this tool made itself. Writing a glow into a layer
+-- somebody drew art on is a different surprise, and the position matters too: `new_layer`
+-- is documented as sitting directly below `layer`, so a layer that has since been moved
+-- elsewhere is not the one this call would choose.
+--
+-- The mark goes in namespaced plugin data rather than in `layer.data`. `data` is the User
+-- Data field the editor shows and a caller may be using for their own notes, and
+-- `set_properties` already treats the unnamed group as theirs; a namespace is the slot
+-- Aseprite provides for exactly this. It travels in the .aseprite file, which is what
+-- makes it readable on the next call: every call here is its own process.
+local EFFECT_NS = "aseprite-mcp"
+local EFFECT_MARK = "effect_layer"
+
+local function effect_layer_for(spr, below, name, framenum)
+  local found = nil
   local function scan(layers)
     for _, l in ipairs(layers) do
-      if l.name == name then
-        error("A layer named '" .. name .. "' already exists in this sprite. Pass " ..
-              "new_layer with a different name, or remove_layer the old one first: two " ..
-              "layers sharing a name make every later call that names it ambiguous.", 0)
-      end
+      if l.name == name then found = l end
       if l.isGroup then scan(l.layers) end
     end
   end
   scan(spr.layers)
+  if found == nil then return nil end
+
+  if found.properties(EFFECT_NS)[EFFECT_MARK] ~= true then
+    error("A layer named '" .. name .. "' already exists in this sprite and was not " ..
+          "created by this tool, so writing an effect into it would overwrite whatever " ..
+          "is there. Pass new_layer with a different name, or remove_layer the old one " ..
+          "first.", 0)
+  end
+  if found.stackIndex ~= below.stackIndex - 1 then
+    error("The layer named '" .. name .. "' is no longer directly below '" ..
+          below.name .. "', so an effect written into it would not sit where this tool " ..
+          "places one. Move it back, or pass new_layer with a different name.", 0)
+  end
+  if found:cel(framenum) ~= nil then
+    error("The layer named '" .. name .. "' already has a cel on frame " ..
+          tostring(framenum) .. ". Two effects composited into one cel are a picture " ..
+          "neither call describes, so pass new_layer with a different name, or " ..
+          "delete_cel that frame first. Writing the same effect layer on a *different* " ..
+          "frame is fine and is how a per-frame effect is built.", 0)
+  end
+  return found
 end
 
 -- A fresh layer holding `img`, placed directly BELOW `below`.
 local function add_effect_layer(spr, below, framenum, img, name, opacity)
-  local lyr = spr:newLayer()
-  lyr.name = name
+  -- Reused when this tool made it and the target frame is free, which is what lets one
+  -- layer carry a per-frame effect across a whole animation.
+  local lyr = effect_layer_for(spr, below, name, framenum)
+  if lyr == nil then
+    lyr = spr:newLayer()
+    lyr.name = name
+    -- Marked as ours, so a later call can tell its own layer from one holding artwork.
+    lyr.properties(EFFECT_NS)[EFFECT_MARK] = true
+    -- newLayer lands on top of the stack; assigning the subject's own stackIndex slides
+    -- this layer into that slot and pushes the subject up one, which leaves the effect
+    -- underneath it.
+    lyr.stackIndex = below.stackIndex
+  end
   lyr.opacity = opacity
-  -- newLayer lands on top of the stack; assigning the subject's own stackIndex slides
-  -- this layer into that slot and pushes the subject up one, which leaves the effect
-  -- underneath it.
-  lyr.stackIndex = below.stackIndex
   spr:newCel(lyr, framenum, img, Point(0, 0))
   return lyr
 end
@@ -446,7 +493,12 @@ def cast_shadow(
             are exactly ramp entries, which is what keeps conformance at 1.0; lowering it
             blends them with whatever is underneath and takes the composite off the ramp,
             so prefer a lighter ramp step over a lower opacity.
-        new_layer: Name for the shadow's own layer, created directly below `layer`.
+        new_layer: Name for the shadow's own layer, created directly below `layer`, or
+            reused when a previous call of this tool made it and `frame` has no cel on it
+            yet. That is how one shadow layer carries a whole walk cycle. A second call for
+            the same layer *and* frame is refused, because two effects composited into one
+            cel are a picture neither call describes, and so is a layer of that name this
+            tool did not create.
             Refused if a layer of that name already exists.
         frame: Frame to build the shadow for, 1-based.
 
@@ -554,7 +606,6 @@ def cast_shadow(
             "shadow has a shape to come from.", 0)
     end
     local framenum = require_frame(spr, ARG.frame, "frame")
-    require_free_layer_name(spr, ARG.new_layer)
 
     local src = get_draw_image(spr, subject, framenum)
     local W, H = src.width, src.height
@@ -795,8 +846,13 @@ def glow(
             a body blocks the halo of a gem inside it.
         tolerance: How close a pixel must be to `base_color` to be treated as a source,
             as a weighted RGB distance. Ignored when `base_color` is omitted.
-        new_layer: Name for the glow's own layer, created directly below `layer`. Refused
-            if a layer of that name already exists.
+        new_layer: Name for the glow's own layer, created directly below `layer`, or
+            reused when a previous call of this tool made it and `frame` has no cel on it
+            yet. That is how one glow layer carries a flickering torch across four frames
+            rather than needing four layers with one cel each. A second call for the same
+            layer *and* frame is refused, because two halos composited into one cel are a
+            picture neither call describes, and so is a layer of that name this tool did
+            not create.
         layer: The layer to glow around (default: top layer). Its cel is never modified.
         frame: Target frame, 1-based.
 
@@ -846,7 +902,6 @@ def glow(
             ". Name one of the layers inside it.", 0)
     end
     local framenum = require_frame(spr, ARG.frame, "frame")
-    require_free_layer_name(spr, ARG.new_layer)
 
     local src = get_draw_image(spr, subject, framenum)
     local W, H = src.width, src.height

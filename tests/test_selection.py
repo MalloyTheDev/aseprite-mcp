@@ -11,6 +11,7 @@ import pytest
 
 from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.tools import drawing, inspect, selection, shading, sprite
+from aseprite_mcp.tools.common import resolve_path
 from aseprite_mcp.tools.selection import mask_path_for
 
 
@@ -166,3 +167,69 @@ def test_selection_tools_reject_arguments_that_cannot_mean_anything(canvas):
         selection.modify_selection(canvas, "expand", 0)
     with pytest.raises(ValidationFailed, match="tolerance"):
         selection.select_by_color(canvas, "#ff0000", tolerance=999)
+
+
+def test_a_write_the_mask_ate_entirely_still_reports_the_count(canvas):
+    """The count matters most when it is the whole answer, and it used to vanish there.
+
+    The result harness attaches the pixel counters under one gate, and `_px_masked` was
+    read inside that gate without being part of it. A write whose selection excluded every
+    pixel left the other three counters at zero, so the block was skipped and
+    `pixels_outside_selection` went with it: the call came back `ok: true` with
+    `selection_applied` and no number anywhere.
+    """
+    selection.select_region(canvas, "rect", x=12, y=0, width=4, height=16)
+
+    asked = [{"x": x, "y": 5} for x in range(10)]
+    result = drawing.draw_pixels(canvas, asked, "#ff0000")
+
+    assert result["selection_applied"] is True
+    assert result["pixels_written"] == 0
+    assert result["pixels_outside_selection"] == len(asked)
+
+    row = inspect.get_pixels(canvas, 0, 5, 10, 1)["pixels"][0]
+    assert all(px.lower().endswith("00") for px in row), "nothing should have been drawn"
+
+
+def test_a_write_with_no_selection_grows_no_selection_fields(canvas):
+    """The other half of the gate: absence still reports nothing, which is why it exists."""
+    result = drawing.draw_pixels(canvas, [{"x": 1, "y": 1}], "#ff0000")
+
+    assert "selection_applied" not in result
+    assert "pixels_outside_selection" not in result
+
+
+def test_replacing_a_sprite_forgets_its_selection(canvas):
+    """A selection belongs to a sprite, so replacing the sprite has to replace it too.
+
+    `create_sprite(overwrite=True)` left the sidecar in place, and the brand new sprite
+    then opened with a selection inherited from a sprite that no longer existed. Every
+    edit outside that rectangle was dropped, and the error surfaced calls later.
+    """
+    selection.select_region(canvas, "rect", x=12, y=0, width=4, height=16)
+    assert mask_path_for(resolve_path(canvas)).exists()
+
+    replaced = sprite.create_sprite(canvas, 16, 16, overwrite=True)
+
+    assert replaced["discarded_selection"] is True
+    assert not mask_path_for(resolve_path(canvas)).exists()
+    # The real test is the next edit, not the missing file.
+    assert drawing.fill_layer(canvas, "#ff0000")["pixels_written"] == 16 * 16
+
+
+def test_a_fresh_sprite_says_nothing_about_a_selection_it_never_had(canvas):
+    made = sprite.create_sprite(f"sel/{'fresh'}.aseprite", 8, 8, overwrite=True)
+    assert "discarded_selection" not in made
+
+
+def test_saving_under_a_name_does_not_inherit_that_name_s_selection(canvas):
+    """A copy is a different sprite, so a sidecar already at its path is not its."""
+    other = "sel/save_as_target.aseprite"
+    sprite.create_sprite(other, 16, 16, overwrite=True)
+    selection.select_region(other, "rect", x=12, y=0, width=4, height=16)
+    assert mask_path_for(resolve_path(other)).exists()
+
+    sprite.save_sprite_as(canvas, other, overwrite=True)
+
+    assert not mask_path_for(resolve_path(other)).exists()
+    assert drawing.fill_layer(other, "#00ff00")["pixels_written"] == 16 * 16

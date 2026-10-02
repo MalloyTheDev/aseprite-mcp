@@ -117,3 +117,47 @@ def ensure_output_pattern(
             "Pass overwrite=True to replace them, or export to a new directory."
         )
     return resolved
+
+
+# ===== the selection sidecar ==========================================================
+# A selection is not stored in the .aseprite file, so it is kept in a `.msk` beside the
+# sprite and reloaded whenever that sprite is opened. The suffix lives here, with the rest
+# of the path policy, because two different tools need to agree on it: the selection tools
+# that write it and the sprite tools that have to throw it away.
+SELECTION_SUFFIX = ".msk"
+
+
+def selection_sidecar(sprite_path: Path) -> Path:
+    """Where this sprite's selection is kept.
+
+    Beside the sprite rather than in a subdirectory, so it is discoverable: someone
+    looking at the workspace can see that a sprite has a selection attached.
+    """
+    return Path(sprite_path).with_suffix(SELECTION_SUFFIX)
+
+
+def discard_selection_sidecar(sprite_path: Path) -> bool:
+    """Forget the selection belonging to a sprite that is being replaced.
+
+    A selection is part of a sprite's state, and replacing the sprite replaces its state.
+    Without this, `create_sprite(overwrite=True)` wrote a brand new sprite over an old one
+    and left the old one's `.msk` sitting beside it, so the new sprite silently opened with
+    a selection inherited from a sprite that no longer existed. Every edit outside that
+    rectangle was then dropped, and the error that eventually surfaced came from a later
+    call ("Nothing to shade: no pixel matched"), several steps from the cause and clean on
+    a fresh workspace, which made it look like nondeterminism rather than a leftover file.
+
+    Only for tools that write a *sprite*. An export must not call this: `with_suffix` maps
+    `hero.png` and `hero.aseprite` onto the same `hero.msk`, so exporting a PNG beside a
+    sprite would throw away the sprite's selection.
+
+    Returns whether there was one to forget. A sidecar that exists and cannot be removed
+    raises rather than being swallowed, because that is the bug this exists to prevent: the
+    caller asked for the sprite to be replaced, and handing back a new sprite still carrying
+    an old one's selection is the failure, not the error about it.
+    """
+    try:
+        selection_sidecar(sprite_path).unlink()
+    except FileNotFoundError:
+        return False
+    return True

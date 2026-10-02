@@ -401,8 +401,11 @@ The colour census: `base_color` scopes a shading pass by colour *distance*, and 
 default tolerance of 24 every step of a gold ramp is within reach of a step of a brass one,
 so a pass meant for one item also matched art in a different cell and reshaded it. Nothing
 looked wrong, and three rounds went into redrawing the wrong thing before the colours were
-counted. That is now
-[issue #183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183).
+counted. That was [#183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183), and it
+is fixed: both tools report `region_components` and `region_bounds` now, so a pass scoped to
+a 27px coin that comes back with a box spanning 200 pixels of canvas says so in its own
+result. The census here stays, because a script asserting what it needs is cheaper to read
+than one trusting that someone else asserted it.
 
 The blade's share: a draft of this sword was 54% blade at a 1 to 2.3 aspect, which is a
 spearhead, and at inventory size it read as a crystal shard on a stick. 54% is not something

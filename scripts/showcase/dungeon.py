@@ -433,10 +433,12 @@ effects.cast_shadow(NAME, "sconce", STONE[1:8], light_angle=90.0, light_height=0
 for _ in range(len(FLICKER) - 1):
     frames.duplicate_frame(NAME, 1)
 
-# 9. the flame, three nested shapes per frame, and its halo. `glow` refuses to write into a
-#    layer that already exists, so a four-frame flicker is four glow layers with one cel
-#    each rather than one layer written four times: two halos composited into one cel would
-#    be a picture neither call describes.
+# 9. the flame, three nested shapes per frame, and its halo. One `glow` layer carrying a
+#    cel per frame, which it could not do when this scene was first drawn: the refusal that
+#    stops two halos compositing into one cel used to be enforced on the layer, and a layer
+#    spans every frame, so a four-frame flicker meant `glow 1` through `glow 4`, each with a
+#    single cel and empty on the other three. That is issue #185, and this is what it was
+#    filed from.
 print()
 print("flame     rows  lean   ms  halo")
 for frame, (profile, lean, ms) in enumerate(FLICKER, start=1):
@@ -445,10 +447,14 @@ for frame, (profile, lean, ms) in enumerate(FLICKER, start=1):
                            (erode(body, 2), FLAME[8])):
         flat(points, colour, "flame", frame=frame)
     halo = effects.glow(NAME, HALO, radius=3, falloff="quadratic", dither_edge=True,
-                        layer="flame", frame=frame, new_layer=f"glow {frame}")
+                        layer="flame", frame=frame, new_layer="halo")
     frames.set_frame_duration(NAME, frame, ms)
     print(f"  frame {frame}  {len(profile):>3}  {lean:+.2f}  {ms:>3}  "
-          f"{halo['glow_pixels']} pixels in {len(halo['rings'])} rings")
+          f"{halo['glow_pixels']} pixels in {len(halo['rings'])} rings, on {halo['layer']}")
+
+stack = [lyr["name"] for lyr in inspect.get_sprite_info(NAME)["layers"]]
+print(f"layers: {len(stack)}, one halo rather than one a frame: {stack}")
+assert stack.count("halo") == 1, stack
 
 # ------------------------------------------------------------- what the picture claims
 # Two numbers, because neither is something the eye can check. The falloff has to actually

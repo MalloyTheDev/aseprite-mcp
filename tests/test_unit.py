@@ -168,6 +168,51 @@ def test_generate_ramp_perceptual_easing_bunches_the_darks():
     assert gaps == sorted(gaps), f"gaps should widen toward the light end: {gaps}"
 
 
+def test_generate_ramp_always_says_how_many_colours_are_distinct():
+    from aseprite_mcp.tools.palette import generate_ramp
+    whole = generate_ramp("#a03828", steps=5)
+    assert whole["distinct"] == 5
+    assert "warnings" not in whole, "a ramp that came back whole should not be warned about"
+
+
+def test_generate_ramp_reports_a_clipped_top_rather_than_returning_it_quietly():
+    """Nine steps in, eight colours out, and the result used to say nothing.
+
+    The cost lands two tools later: `specular_highlight` needs the ramp's top step to be
+    brighter than the lit side, so a ramp whose top two entries are both white makes that
+    call refuse, with a message about the shading pass. The cause is here, in a call that
+    reported success.
+    """
+    from aseprite_mcp.tools.palette import generate_ramp
+    clipped = generate_ramp("#c2cde0", steps=9, hue_shift=-22.0,
+                            saturation_shift=-28.0, light_range=0.68)
+
+    assert clipped["distinct"] == 8
+    assert clipped["colors"][-1] == clipped["colors"][-2] == "#ffffff"
+    assert clipped["colors"] == generate_ramp(
+        "#c2cde0", steps=9, hue_shift=-22.0, saturation_shift=-28.0,
+        light_range=0.68)["colors"], "the ramp is still returned, clipping and all"
+
+    (note,) = clipped["warnings"]
+    assert "the top 2 entries are all #ffffff" in note
+    assert "specular_highlight" in note
+
+
+def test_the_light_range_a_clip_warning_suggests_actually_works():
+    """The suggestion is the actionable half, so it has to be true rather than plausible."""
+    import re
+
+    from aseprite_mcp.tools.palette import generate_ramp
+    clipped = generate_ramp("#c2cde0", steps=9, hue_shift=-22.0,
+                            saturation_shift=-28.0, light_range=0.68)
+    suggested = float(re.search(r"light_range=([0-9.]+)", clipped["warnings"][0]).group(1))
+
+    fixed = generate_ramp("#c2cde0", steps=9, hue_shift=-22.0,
+                          saturation_shift=-28.0, light_range=suggested)
+    assert fixed["distinct"] == 9
+    assert "warnings" not in fixed
+
+
 def test_generate_ramp_rejects_unknown_curve_names():
     import pytest as _pytest
 

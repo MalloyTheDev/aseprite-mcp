@@ -282,3 +282,84 @@ def _hue_spread(colours: list[str]) -> float | None:
             gap = abs(a - b) % 360.0
             widest = max(widest, min(gap, 360.0 - gap))
     return widest
+
+
+# ===== clipping =======================================================================
+# `generate_ramp` walks lightness outward from a base and clamps at 0 and 1, so a base
+# already near either end spends its outermost steps on the same colour. Nine steps in,
+# eight distinct colours out, and until these two functions existed the result said
+# nothing about it.
+#
+# A collapsed end step costs more than one colour. `specular_highlight` exists to put a
+# glint above the lit side, so it needs the ramp's top step to be brighter than what
+# `shade_region_by_light` spread across that side; given a ramp whose top two entries are
+# both white it refuses, correctly, with a message about the shading pass. The cause is two
+# calls earlier, in one that reported success.
+
+
+def clipped_ends(colours: list[str]) -> tuple[int, int]:
+    """How many steps collapsed onto the first colour, and onto the last.
+
+    Counts the *extra* entries equal to each end, so `(0, 0)` means neither end collapsed.
+    Duplicates can also appear in the middle, from two neighbouring steps rounding to the
+    same hex, and those show up as a shortfall in `distinct` with `(0, 0)` here.
+    """
+    if len(colours) < 2:
+        return 0, 0
+    at_dark = 0
+    while at_dark + 1 < len(colours) and colours[at_dark + 1] == colours[0]:
+        at_dark += 1
+    at_light = 0
+    while at_light + 1 < len(colours) and colours[-at_light - 2] == colours[-1]:
+        at_light += 1
+    return at_dark, at_light
+
+
+def nearest_unclipped(rebuild, steps: int, requested: float,
+                      *, low: float = 0.02, high: float = 1.0,
+                      grid: float = 0.01) -> float | None:
+    """The `light_range` closest to `requested` that returns `steps` distinct colours.
+
+    Scanned rather than searched, because distinctness is **not monotonic** in
+    `light_range` and a bisection would be wrong in both directions: too wide clamps the
+    ends onto each other, and too narrow rounds neighbouring steps onto the same hex. So
+    the answer can lie either side of what was asked for, and the nearest one is the useful
+    one to name.
+
+    `rebuild` takes a `light_range` and returns the colours for it. Returns None when
+    nothing on the grid works, which is what asking for more steps than the base can
+    express looks like.
+    """
+    ticks = round((high - low) / grid) + 1
+    workable = [
+        value for value in (round(low + i * grid, 2) for i in range(ticks))
+        if len(set(rebuild(value))) == steps
+    ]
+    if not workable:
+        return None
+    # Ties broken toward the narrower range, which is the safer direction: it clamps less.
+    return min(workable, key=lambda value: (abs(value - requested), value))
+
+
+def clip_warning(colours: list[str], steps: int, suggestion: float | None) -> str:
+    """One sentence a caller can act on, for a ramp that came back short."""
+    distinct = len(set(colours))
+    at_dark, at_light = clipped_ends(colours)
+    if at_light:
+        where = f"the top {at_light + 1} entries are all {colours[-1]}"
+    elif at_dark:
+        where = f"the bottom {at_dark + 1} entries are all {colours[0]}"
+    else:
+        where = ("neighbouring steps round to the same colour, so the range is too "
+                 "narrow for this many steps")
+    fix = (f"light_range={suggestion} is the nearest value that returns {steps} distinct "
+           "colours." if suggestion is not None else
+           f"No light_range returns {steps} distinct colours from this base, so ask for "
+           "fewer steps.")
+    # Only said when the *top* collapsed, because that is the end the sentence is about. A
+    # ramp that lost steps to black, or to rounding in the middle, has a different problem
+    # and does not need to be told about speculars.
+    cost = (" A collapsed top step costs more than one colour: specular_highlight needs "
+            "the ramp's top step to be brighter than the lit side, and refuses a ramp "
+            "whose lit side is already there." if at_light else "")
+    return f"{steps} steps were asked for and {distinct} are distinct: {where}. {fix}{cost}"

@@ -17,7 +17,15 @@ import pytest
 
 from aseprite_mcp.core import lighting, quality
 from aseprite_mcp.core.errors import AsepriteError, ValidationFailed
-from aseprite_mcp.tools import drawing, effects, inspect, layers, sprite
+from aseprite_mcp.tools import (
+    cels,
+    drawing,
+    effects,
+    frames,
+    inspect,
+    layers,
+    sprite,
+)
 
 # A warm body ramp and a cool ground ramp, so a test can tell which of the two a pixel
 # came from rather than only that it came from "the ramp".
@@ -492,10 +500,16 @@ def test_an_empty_layer_cannot_glow(request):
         effects.glow(name, GROUND, layer="blank")
 
 
-def test_a_glow_layer_name_that_is_taken_is_refused(request):
+def test_glowing_the_same_layer_and_frame_twice_is_refused(request):
+    """Two halos composited into one cel are a picture neither call describes.
+
+    This used to be stated about the layer and is stated about the cel now, which is the
+    narrowing that lets one glow layer hold a cel per frame of an animation. The second
+    call here is the same layer *and* the same frame, so it is still refused.
+    """
     name = _bare_ball(request)
     effects.glow(name, GROUND, radius=2)
-    with pytest.raises(AsepriteError, match="already exists"):
+    with pytest.raises(AsepriteError, match="already has a cel on frame 1"):
         effects.glow(name, GROUND, radius=2)
 
 
@@ -876,3 +890,72 @@ def test_a_min_cluster_that_cannot_mean_anything_is_refused():
         effects.remove_stray_pixels("unused.aseprite", erase_isolated=True, min_cluster=0)
     with pytest.raises(ValidationFailed, match="min_cluster"):
         effects.remove_stray_pixels("unused.aseprite", erase_isolated=True, min_cluster=99)
+
+
+# ===== one effect layer, many frames ==================================================
+# The refusal these tools owe a caller is about a *cel*: two effects composited into one
+# cel are a picture neither call describes. It used to be enforced on the layer, and a
+# layer spans every frame, so a four-frame flicker needed four glow layers holding one cel
+# each and empty on the other three. A ten-frame effect needed ten.
+
+
+def _animated_ball(request, frames_wanted: int = 3) -> str:
+    name = _scene(request)
+    for _ in range(frames_wanted - 1):
+        frames.duplicate_frame(name, 1)
+    return name
+
+
+def test_one_glow_layer_carries_a_cel_on_every_frame(request):
+    """The flickering-torch case, which is the reason this exists."""
+    name = _animated_ball(request)
+
+    for frame in (1, 2, 3):
+        halo = effects.glow(name, BODY, radius=2, layer="ball", frame=frame,
+                            new_layer="halo")
+        assert halo["layer"] == "halo"
+        assert halo["frame"] == frame
+
+    stack = [lyr["name"] for lyr in inspect.get_sprite_info(name)["layers"]]
+    assert stack.count("halo") == 1, f"one layer, not one per frame: {stack}"
+
+    for frame in (1, 2, 3):
+        assert cels.get_cel(name, "halo", frame)["exists"] is True
+
+
+def test_a_cast_shadow_layer_carries_a_cel_on_every_frame(request):
+    name = _animated_ball(request)
+
+    for frame in (1, 2, 3):
+        effects.cast_shadow(name, "ball", GROUND, ground_layer="floor", frame=frame,
+                            new_layer="under")
+
+    stack = [lyr["name"] for lyr in inspect.get_sprite_info(name)["layers"]]
+    assert stack.count("under") == 1, f"one layer, not one per frame: {stack}"
+
+
+def test_the_same_layer_and_frame_twice_is_still_refused(request):
+    """The guarantee that was always worth keeping, now stated about the cel."""
+    name = _animated_ball(request)
+    effects.glow(name, BODY, radius=2, layer="ball", frame=2, new_layer="halo")
+
+    with pytest.raises(AsepriteError, match="already has a cel on frame 2"):
+        effects.glow(name, BODY, radius=2, layer="ball", frame=2, new_layer="halo")
+
+
+def test_an_effect_will_not_write_into_a_layer_holding_artwork(request):
+    """Reuse is only for a layer this tool made, which it records on the layer itself."""
+    name = _animated_ball(request)
+
+    with pytest.raises(AsepriteError, match="was not created by this tool"):
+        effects.glow(name, BODY, radius=2, layer="ball", frame=1, new_layer="floor")
+
+
+def test_an_effect_layer_that_has_been_moved_is_not_reused(request):
+    """`new_layer` is documented as sitting directly below `layer`, so it has to be."""
+    name = _animated_ball(request)
+    effects.glow(name, BODY, radius=2, layer="ball", frame=1, new_layer="halo")
+    layers.move_layer(name, "halo", 1)
+
+    with pytest.raises(AsepriteError, match="no longer directly below"):
+        effects.glow(name, BODY, radius=2, layer="ball", frame=2, new_layer="halo")
