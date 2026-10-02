@@ -183,7 +183,7 @@ def mirror_layer(
         if ARG.source_side == "first" then lo, hi = 0, ax - 1 else lo, hi = ax, img.width - 1 end
         for x = lo, hi do
           local mx = 2 * ax - 1 - x
-          if mx >= 0 and mx < img.width then img:drawPixel(mx, y, img:getPixel(x, y)) end
+          if mx >= 0 and mx < img.width then img_set(img, mx, y, img:getPixel(x, y)) end
         end
       end
     else
@@ -193,7 +193,7 @@ def mirror_layer(
         if ARG.source_side == "first" then lo, hi = 0, ay - 1 else lo, hi = ay, img.height - 1 end
         for y = lo, hi do
           local my = 2 * ay - 1 - y
-          if my >= 0 and my < img.height then img:drawPixel(x, my, img:getPixel(x, y)) end
+          if my >= 0 and my < img.height then img_set(img, x, my, img:getPixel(x, y)) end
         end
       end
     end

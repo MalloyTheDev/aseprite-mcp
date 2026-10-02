@@ -12,11 +12,22 @@ SaveMask and LoadMask round-trip exactly, holes and all, in well under a hundred
 `open_sprite` loads it, so an active selection scopes every later edit until it is
 cleared, which is how an image editor behaves.
 
-Two consequences worth knowing. The sidecar is state outside the sprite, so copying or
+Three consequences worth knowing. The sidecar is state outside the sprite, so copying or
 renaming a sprite leaves its selection behind, and `deselect` is a real step rather than
-a formality. And every result that touched pixels reports `selection_applied`, because an
+a formality. Every result that touched pixels reports `selection_applied`, because an
 edit that silently affected a fraction of what was asked for is worse than one that
 refused.
+
+And **the mask is consulted in exactly one place**, `masked_out` in the prelude, which
+every write has to go through. That is not an implementation detail, it is the whole
+guarantee: `selection_applied` is stamped by the harness from `_sel ~= nil`, so it says a
+selection existed and cannot say the body respected it. For a while nine write paths
+called `Image:drawPixel` directly and edited the whole layer while reporting
+`selection_applied: true`, which is worse than having no selection support at all, because
+a missing count can be noticed and a false claim cannot. `tests/test_selection_scoping.py`
+holds one case per write path and asserts the pixels outside the mask, not a count: a
+count can be satisfied by a tool that wrote the right number of pixels in the wrong places,
+which is precisely what was happening.
 """
 
 from __future__ import annotations

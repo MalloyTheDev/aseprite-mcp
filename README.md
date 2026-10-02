@@ -766,6 +766,14 @@ process, so it is kept in a `.msk` sidecar beside the sprite and loaded again on
 call. It scopes every later edit until `deselect`, which is how an image editor behaves,
 and every result that touched pixels reports `selection_applied`.
 
+"Scopes every later edit" is now enforced rather than asserted. The mask is consulted in
+one function that every write goes through, and a test holds each write path to it
+separately, asserting the pixels outside the selection rather than a count. That is there
+because nine of them used to bypass it: the anti-aliased coverage write, the flood fill,
+every per-pixel effect pass, `mirror_layer` and the batch runner's replace op all edited
+the whole layer while the result still said `selection_applied: true`. A count can be
+satisfied by a tool that wrote the right number of pixels in the wrong places.
+
 ### Slices (named regions / 9-patch)
 | Tool | Description |
 | --- | --- |

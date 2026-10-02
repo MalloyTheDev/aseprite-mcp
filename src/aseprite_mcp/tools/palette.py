@@ -424,6 +424,10 @@ def sort_palette(filename: str, by: str = "luminance", reverse: bool = False) ->
           targets[#targets + 1] = cel
         end
       end
+      -- `im:drawPixel` below, not `img_set`. This is a reindex, not a paint: it rewrites
+      -- every pixel's palette index after the palette was reordered, so the art looks
+      -- unchanged. Clipped to a selection, the unselected pixels would keep pointing at
+      -- the old indices and the sprite would visibly corrupt.
       for _, cel in ipairs(targets) do
         local im = Image(cel.image)
         for y = 0, im.height - 1 do

@@ -81,6 +81,11 @@ def apply_operations(filename: str, operations: list[dict], dry_run: bool = Fals
             raise LuaToolError(cleaned) from exc
         raise
 
+    # A batch now honours an active selection, because the ops it runs go through
+    # `img_set` like everything else. The harness's counters for it are produced and then
+    # dropped here, because a `workflow_manifest` has a fixed field list and giving it one
+    # more is a schema decision affecting every workflow tool rather than this one: see
+    # the follow-up issue.
     return workflow_manifest(
         "batch",
         sprite=sprite_summary(result["sprite"]),

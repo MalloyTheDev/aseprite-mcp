@@ -206,7 +206,7 @@ def add_outline(
           end
         end
       end
-      for _, p in ipairs(mark) do img:drawPixel(p[1], p[2], oc) end
+      for _, p in ipairs(mark) do img_set(img, p[1], p[2], oc) end
     end
     """
     return _draw(args, snippet)
@@ -1040,7 +1040,7 @@ def replace_color(
         local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
         if math.abs(r-fr) <= tol and math.abs(g-fg) <= tol
            and math.abs(b-fb) <= tol and math.abs(a-fa) <= tol then
-          img:drawPixel(xx, yy, tp)
+          img_set(img, xx, yy, tp)
         end
       end
     end
@@ -1057,7 +1057,7 @@ def _pixel_pass(snippet_inner: str) -> str:
         if a > 0 then
           local nr, ng, nb, na = r, g, b, a
           {snippet_inner}
-          img:drawPixel(xx, yy, rgba_to_px(spr, nr, ng, nb, na))
+          img_set(img, xx, yy, rgba_to_px(spr, nr, ng, nb, na))
         end
       end
     end
