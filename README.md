@@ -6,16 +6,16 @@
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-server-purple.svg)](https://modelcontextprotocol.io)
 
 <p align="center">
-  <img src="docs/assets/showcase/throw.gif" height="112" alt="A shaded ball thrown along an arc, its shadow tracking along the ground">
-  &nbsp;
-  <img src="docs/assets/showcase/item_sheet.png" height="112" alt="A heart, a coin, a potion and a sword, each shaded on its own colour ramp">
+  <img src="docs/assets/showcase/dungeon.gif" width="560" alt="A torch-lit dungeon wall with a chest on the flagstones, the flame flickering and its light falling off across the room">
+</p>
+<p align="center">
+  <img src="docs/assets/showcase/item_sheet.png" height="112" alt="Five RPG items: a longsword, a kite shield, a great helm, a bronze key and a spell scroll, each shaded on its own ramps">
   &nbsp;
   <img src="docs/assets/showcase/walk8.gif" height="112" alt="A small creature turning through eight compass facings">
   &nbsp;
   <img src="docs/assets/showcase/zorder.gif" height="112" alt="A sword swung past a round shield, passing behind it and then in front, with the layers never reordered">
-</p>
-<p align="center">
-  <img src="docs/assets/showcase/shading_stages.png" width="560" alt="One disc taken from flat colour, to shaded by light direction, to outlined and dithered">
+  &nbsp;
+  <img src="docs/assets/showcase/throw.gif" height="112" alt="A shaded ball thrown along an arc, its shadow tracking along the ground">
 </p>
 <p align="center">
   <sub>Drawn, shaded, animated, timed and then <strong>measured</strong>: entirely through MCP
@@ -94,7 +94,7 @@ Aseprite GUI.
 
 | | |
 | --- | --- |
-| [Showcase](#showcase) | What the tools produce, with the numbers behind it, including per-cel ordering and palette reduction |
+| [Showcase](#showcase) | What the tools produce, with the numbers behind it: a lit scene, an equipment sheet, per-cel ordering, palette reduction |
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
@@ -235,10 +235,78 @@ collapses, and four colours at `max_colors=4` come back as one averaged grey whi
 `max_colors=5` returns all four. The result says which happened rather than reporting a
 clean reduction either way.
 
+### Light a room, not a sprite
+
+<p align="center">
+  <img src="docs/assets/showcase/dungeon.png" width="620" alt="A torch-lit dungeon: a sconce on a stone wall, a bound chest on the flagstones throwing a shadow away from the flame, and the far side of the room in shadow">
+</p>
+<p align="center">
+  <sub>112 by 72 pixels, five ramps, four frames. Every pixel is a ramp entry: nothing here
+  is alpha, a blur, or a blend.</sub>
+</p>
+
+Three things in that picture are worth more than the picture.
+
+**Forty blocks, one shading call.** `shade_region_by_light` builds a distance field over
+everything matching one base colour, and a field over a mask with forty disconnected parts
+describes each part on its own. The mortar joints are what make the mask forty components
+instead of one slab, so the whole wall takes its form from a single call and every block
+comes out domed:
+
+```python
+shade_region_by_light("dungeon.aseprite", STONE, base_color=STONE[5],
+                      light_angle=155, bulge=0.75, tolerance=1.0, layer="wall")
+```
+
+**The falloff is zones down a ramp.** No tool here lights a scene from a point, and faking
+one by blending would land every pixel between palette entries. `shift_along_ramp` moves a
+rectangle one or two steps down the surface's own ramp instead, which is how a pixel artist
+builds a falloff. The trick is hiding the seams, and that is why it is a rectangle per
+course rather than one band across the room: the only cut that does not show is one along a
+joint, and because the courses are staggered no single column is a joint on all of them.
+
+```
+falloff (one rectangle per course per zone)
+  wall   42 blocks, 12 runs darkened, 6 blocks off-value
+  floor  22 blocks,  8 runs darkened, 5 blocks off-value
+
+floor row 52: step 5 at x=20, step 1 at x=95
+```
+
+That last line is [asserted by the generator](scripts/showcase/dungeon.py), because a
+falloff nobody measured is a falloff you have to take on trust. At one step a zone the
+assertion still passed and the room still looked evenly lit, which is a measurement being
+satisfied by something no reader can see.
+
+**The flicker is four frames with four durations.** `set_all_frame_durations` would give an
+even pulse, and an even pulse reads as a machine rather than as fire. The flame also leans a
+different way and stands a different height on each frame, and the generator asserts all
+four silhouettes differ:
+
+```
+flame     rows  lean   ms  halo
+  frame 1   14  +0.00   90  371 pixels in 7 rings
+  frame 2   12  +0.18   70  349 pixels in 7 rings
+  frame 3   15  -0.14  110  388 pixels in 7 rings
+  frame 4   12  +0.10   80  368 pixels in 7 rings
+```
+
+The halo is `glow`, whose rings are ramp steps rather than alpha. Its ramp comes from
+`ramp_between`, which returns both ends exactly, and choosing the dark end took three
+attempts worth recording. Interpolating from the stone's own blue-grey passes through
+neutral and reads as a ball of fog stuck on the wall; starting from a dark ember makes the
+outer rings darker than the wall they lie on, and a glow that darkens what it touches reads
+as a shadow. The end that works is a warm grey a step lighter than the lit stone, because
+the outside of a pool of light is the wall with light on it.
+
+The chest's shadow is `cast_shadow` with `ground_layer="floor"`, which clips it to the
+flagstones so it cannot run off the floor and hang in the air, and it uses the floor's ramp
+rather than the chest's, because a shadow is a darkening of what it lies on.
+
 ### Scaffold a whole asset in one call
 
 <p align="center">
-  <img src="docs/assets/showcase/item_sheet.png" width="520" alt="Pixel-art item sheet: a heart, a coin, a potion and a sword, each shaded on its own ramp">
+  <img src="docs/assets/showcase/item_sheet.png" width="620" alt="Pixel-art equipment sheet: a longsword, a kite shield, a great helm, a bronze key and a spell scroll, each shaded on its own ramps">
 </p>
 <p align="center">
   <img src="docs/assets/showcase/walk8_sheet.png" width="640" alt="Eight-direction sheet: one creature facing each compass point, one frame and animation tag per direction">
@@ -247,14 +315,29 @@ clean reduction either way.
   <sub><code>create_rpg_item_sheet</code> lays out a named slice per item and
   <code>make_8_direction_walk_template</code> generates the frames <strong>and one
   animation tag per direction</strong>; both are then drawn into with the drawing and
-  shading tools. Each item carries its own ramp, so the potion's glass, liquid and cork
-  are shaded independently.</sub>
+  shading tools. Each part carries its own ramp, so the sword's steel, brass, leather and
+  gem are shaded independently, and the generator
+  <a href="scripts/showcase/items.py">asserts per cell</a> that no colour from one item
+  reached another.</sub>
 </p>
 
 ```text
 validate_sprite_for_game_export -> passed  (width, height, color_mode, min_frames, required_tags)
 export_game_asset_bundle        -> hero.png, hero.gif, hero_sheet.png (+JSON), hero_idle.gif, manifest.json
+
+sword   24 colours, from 4 ramps and nothing else
+shield  14 colours, from 3 ramps and nothing else
+helm    13 colours, from 2 ramps and nothing else
+key      9 colours, from 1 ramp and nothing else
+scroll  16 colours, from 3 ramps and nothing else
 ```
+
+That last check earns its keep. `base_color` scopes a shading pass by colour *distance*, and
+at the default tolerance of 24 every step of a gold ramp is within reach of a step of a
+brass one, so a pass meant for one item also matched art in a different cell and reshaded
+it. Nothing looked wrong, and three rounds went into redrawing the wrong thing before the
+colours were counted. That is now
+[issue #183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183).
 
 <details>
 <summary>More examples</summary>

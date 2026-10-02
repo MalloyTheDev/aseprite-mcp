@@ -21,6 +21,7 @@ uv run --no-sync python scripts/showcase/tiles.py      # scene.png          -> a
 uv run --no-sync python scripts/showcase/skeleton.py   # skeleton.png       -> assets/skeleton.png
 uv run --no-sync python scripts/showcase/zorder.py     # zorder.gif, zorder_pair.png -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/quantize.py   # quantize_stages.png -> docs/assets/showcase/
+uv run --no-sync python scripts/showcase/dungeon.py    # dungeon.png, dungeon.gif  -> docs/assets/showcase/
 ```
 
 Note that two of them are renamed on the way in, and that `tiles.py` and `skeleton.py`
@@ -41,35 +42,71 @@ no settled neighbour traded colours instead of being cleaned. `items.py` calls t
 so three of its pixels moved. The image was recommitted and the reason recorded here,
 which is exactly the procedure below.
 
+(That heart, coin, potion and sword have since been replaced. `items.py` now draws a
+longsword, a kite shield, a great helm, a bronze key and a spell scroll, for the reason
+given under *What these scripts assert* below.)
+
 If a run stops matching, a tool's output has changed. Find out which tool and why before
 recommitting, because the alternative is a showcase that quietly drifts away from what the
 tools actually do.
 
-They need a real Aseprite, like the `--run-aseprite` tests do. `orb.py` also composes its
-three stages into one strip with Pillow; the rest export directly.
+They need a real Aseprite, like the `--run-aseprite` tests do. `orb.py`, `zorder.py` and
+`quantize.py` compose their panels into one strip with Pillow; the rest export directly.
+`dungeon.py` is the slowest by a distance, because its light falloff is one
+`shift_along_ramp` call per run of masonry and each call is its own Aseprite launch.
 
-The art is deliberately built the way the documentation claims: shapes from the geometry
-tools, form from `shade_region_by_light`, edges from `outline_smart` or `add_outline`, and
-`draw_pixels` only where a part is too thin for a form to be described, which the shading
-tool refuses to invent.
+## What these scripts assert
 
-`zorder.py` and `quantize.py` are shaped a little differently from the rest: each one
-**asserts the thing its picture claims**, rather than leaving a reader to take the image on
-trust. `zorder.py` reads the composited pixel where the blade crosses the shield and fails
-if the two middle frames do not disagree about which ramp owns it, because a z-index that
-round-trips through the file while changing nothing about the render would produce an
-identical-looking strip. `quantize.py` prints the colour count at each stage, so the
-banding in the picture is backed by 117 colours becoming 13 and then 5.
+`zorder.py`, `quantize.py`, `items.py` and `dungeon.py` are shaped differently from the
+rest: each one **asserts the thing its picture claims**, rather than leaving a reader to
+take the image on trust. Every one of those assertions exists because the thing it checks
+went wrong first.
 
-Both went through a draft that demonstrated the mechanic and looked like a test fixture:
-two featureless ellipses crossing, and three plain discs. They are drawn properly now, a
-sword passing a round shield and a dusk scene behind two ridgelines, because a showcase
-that does not look like the work the tool is for is not showing the tool off. The sword
-and shield are built the way `items.py` builds its items, which is the standard the rest
-of these pictures set.
+- `zorder.py` reads the composited pixel where the blade crosses the shield and fails if
+  the two middle frames do not disagree about which ramp owns it. A z-index that
+  round-trips through the file while changing nothing about the render would produce an
+  identical-looking strip.
+- `quantize.py` prints the colour count at each stage, so the banding in the picture is
+  backed by 117 colours becoming 13 and then 5. Its first draft produced three identical
+  panels, because `quantize_palette` derives a palette and does not touch a pixel.
+- `items.py` counts the colours in each cell and fails if any of them came from another
+  item's material. `base_color` scopes a shading pass by colour *distance*, and at the
+  default tolerance of 24 every step of a gold ramp is within reach of a step of a brass
+  one, so the pass meant for one cell reshaded art in another. Nothing looked wrong. Three
+  rounds went into redrawing the wrong thing before the colours were counted, which is
+  now [issue #183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183).
+- `dungeon.py` probes two points on the same flagstone course and fails if the far one is
+  not darker, and it checks that all four flame frames have different silhouettes. At one
+  ramp step a zone the first of those still passed while the room still looked evenly
+  lit, which is a measurement satisfied by something no reader can see; the falloff is two
+  steps a zone now.
 
-`quantize.py` also documents a trap worth knowing: `quantize_palette` derives a palette and
-does not touch a pixel. Its own warning says so, and the first version of that script
-produced three identical discs because of it. Reducing the art is the conversion that
-follows, `set_color_mode(..., palette_source="keep")`, so the picture needs both halves of
-the pipeline.
+## What these scripts are drawn like
+
+Every one of them went through a draft that demonstrated a mechanic and looked like a test
+fixture: two featureless ellipses crossing, three plain discs, a heart that came out lumpy
+because it was derived from a curve rather than written out row by row. They are drawn
+properly now, because a showcase that does not look like the work the tool is for is not
+showing the tool off.
+
+The standard the rest follow is `items.py`: silhouettes typed out one row at a time, form
+from `shade_region_by_light` per part, thin parts lit by hand because the shading tool
+refuses to invent a form it cannot see, and one dark outline over everything. Where a shape
+genuinely is derived, the script says why. `dungeon.py` computes its flame from a profile
+and a lean, on the grounds that a heart has a notch a formula gets wrong and a flame has no
+feature at all a reader could catch being a pixel off.
+
+## Issues these scripts turned up
+
+Drawing with the tools is the best test the tools get. Six issues came out of this round,
+all with the failing call and the measurement in them:
+[#181](https://github.com/MalloyTheDev/aseprite-mcp/issues/181) (a fully masked write
+reports no counts), [#182](https://github.com/MalloyTheDev/aseprite-mcp/issues/182) (the
+`.msk` sidecar outlives its sprite),
+[#183](https://github.com/MalloyTheDev/aseprite-mcp/issues/183) (`base_color` tolerance
+merges two materials), [#184](https://github.com/MalloyTheDev/aseprite-mcp/issues/184)
+(`generate_ramp` clips silently),
+[#185](https://github.com/MalloyTheDev/aseprite-mcp/issues/185) (`glow` needs one layer per
+frame), [#186](https://github.com/MalloyTheDev/aseprite-mcp/issues/186) (`dither_band`
+counts from 1 beside a list that counts from 0).
+
