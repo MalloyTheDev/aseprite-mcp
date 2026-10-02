@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **147 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **152 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -12,7 +12,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Frames (animation)](#frames-animation) (7)
 - [Animation (motion, timing, checks)](#animation-motion-timing-checks) (5)
 - [Animation tags](#animation-tags) (3)
-- [Cels](#cels) (7)
+- [Cels](#cels) (10)
 - [Drawing](#drawing) (10)
 - [Brushes & symmetry](#brushes--symmetry) (4)
 - [Shading & light](#shading--light) (7)
@@ -21,10 +21,10 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (2)
-- [Palette](#palette) (12)
+- [Palette](#palette) (13)
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
-- [Export & import](#export--import) (10)
+- [Export & import](#export--import) (11)
 - [Engine export presets](#engine-export-presets) (2)
 - [Minecraft resource packs](#minecraft-resource-packs) (4)
 - [Reference / rotoscope](#reference--rotoscope) (2)
@@ -983,6 +983,35 @@ visible as what it is. An edit to any of them changes all of them.
 | `frame` | integer | no | 1 |
 
 
+### `get_properties`
+
+Read the custom properties stored on one object inside the sprite.
+
+The counterpart to `set_properties`, and the only way to read that metadata back:
+neither `get_sprite_info` nor the sprite-sheet export reports custom properties.
+
+Args:
+    target, layer, frame, name, tile: Which object, exactly as `set_properties`
+        takes them.
+    namespace: Read a named group instead of the unnamed one. Aseprite offers no way
+        to list the namespaces an object has, so a group can only be read by a caller
+        who knows its name; an unknown name reads as empty rather than as an error.
+
+Returns `properties` as an object of key to value, each value in the type it was
+stored as. A value of a type JSON cannot describe (the editor can store a point or a
+rectangle) is reported as text rather than dropped.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `target` | string | yes |  |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | _none_ |
+| `name` | string | no | _none_ |
+| `tile` | integer | no | _none_ |
+| `namespace` | string | no | _none_ |
+
+
 ### `link_cels`
 
 Make several frames share one image, which is how a held pose is authored.
@@ -1033,6 +1062,96 @@ Move a cel's image to position (x, y) within the canvas.
 | `frame` | integer | yes |  |
 | `x` | integer | yes |  |
 | `y` | integer | yes |  |
+
+
+### `set_cel_z_index`
+
+Reorder one cel against the other cels in its frame, without moving any layer.
+
+This is the fix for "the arm is in front of the body this frame and behind it the
+next". The alternatives are to restructure the layer stack, which changes every other
+frame too, or to duplicate the arm onto a second layer and hide one of them per
+frame; a z-index is per cel, so it says exactly what it means and only where it
+applies.
+
+`z` is an offset, not a position: 0 (the default for every cel) means "wherever this
+cel's layer sits in the stack", a positive number moves the cel towards the front and
+a negative one towards the back. A cel draws at its layer's stack position plus `z`,
+and when two cels land on the same number the one with the larger `z` draws in front.
+So `z=1` on a cel one layer below another is enough to put it in front of that one.
+
+The ordering is scoped to the layer's siblings: a layer inside a group is ordered
+against that group's other layers, and the group as a whole keeps its place. Returns
+`order`, the frame's competing cels back to front, which is the part a caller cannot
+see for themselves.
+
+A z-index is per cel even when the cel is linked: two frames sharing one image share
+their opacity and their properties, and do not share this. Verified against the
+editor, because the opposite is the reasonable guess.
+
+`z` must be between -32768 and 32767. The editor accepts a larger number in memory
+and then stores it in a 16-bit field, so saving and reopening would silently turn it
+into a different one, usually of the opposite sign.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | yes |  |
+| `frame` | integer | yes |  |
+| `z` | integer | yes |  |
+
+
+### `set_properties`
+
+Store a custom property on an object inside the sprite, in the .aseprite file.
+
+This is where game metadata belongs: a hitbox on a slice, an anchor point on a layer,
+"this frame deals damage" on a cel, a surface kind on a tile. It travels with the art
+instead of living in a sidecar file that the next edit desynchronises, and the editor
+shows it and keeps it.
+
+Args:
+    target: Which kind of object: "sprite", "layer", "cel", "tag", "slice" or "tile".
+    key: The property name, e.g. "hitbox".
+    value: What to store. Text by default, so value="7" stores the two-character
+        string "7". Pass as_json=True to store a number, a boolean or a structure:
+        then "7" stores the number 7, "true" stores a boolean, and
+        '{"x": 8, "y": 15}' stores a table. A value that begins like a JSON object or
+        array is read as JSON either way, since there is no other reading of one.
+    layer: The layer's name. Needed for target "layer", "cel" and "tile".
+    frame: 1-based frame number, for target "cel" (default: the first frame).
+    name: The tag's or slice's name, for target "tag" and "slice".
+    tile: An index into the layer's tileset, for target "tile". 0 is the empty tile.
+    namespace: Keep the property in a named group rather than in the unnamed one the
+        editor's own property panel uses. Two tools can then both use the key
+        "anchor" without colliding. Namespaces cannot be listed back, so a caller has
+        to know the name to read one again.
+    as_json: Parse `value` as JSON before storing it (see `value`).
+    delete: Remove the property instead of setting it. `value` is then ignored, and
+        removing a key that was not there is not an error.
+
+A selector the target does not use is refused rather than ignored, because the
+property would otherwise land on a different object than the one that was named.
+
+Properties live on the record that linked cels share, so setting one on a held pose
+sets it on every frame of the hold. The result says which frames those were.
+
+Returns the whole property group after the write, so the stored value is visible as
+the type it was stored as.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `target` | string | yes |  |
+| `key` | string | yes |  |
+| `value` | string | no | _none_ |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | _none_ |
+| `name` | string | no | _none_ |
+| `tile` | integer | no | _none_ |
+| `namespace` | string | no | _none_ |
+| `as_json` | boolean | no | False |
+| `delete` | boolean | no | False |
 
 
 ### `unlink_cels`
@@ -2630,6 +2749,42 @@ Load a palette from a file (.gpl, .pal, .aseprite, .png, ...) and apply it.
 | `palette_file` | string | yes |  |
 
 
+### `quantize_palette`
+
+Derive a palette from the art, reduced to at most `max_colors` entries.
+
+The step between a picture and pixel art. `extract_palette` lists the colours a
+sprite already uses but cannot reduce them to a budget, and `set_color_mode` maps art
+onto a palette but cannot decide what the palette should be. This asks the editor's
+own quantizer for the best `max_colors` colours for this art and installs them, which
+is what to do before `set_color_mode("indexed", palette_source="keep")`.
+
+One entry is spent on transparency, at index 0, which is what an indexed sprite needs
+there: an opaque colour at the transparent index is in the palette and can never be
+drawn.
+
+**`max_colors` is a ceiling and nothing more, and it has a cliff in it.** The
+reduction merges whole levels of colour space at a time, so it can stop well short of
+what was asked for: measured, four distinct colours with `max_colors=4` came back as
+one mid-grey that was the average of all four, while `max_colors=5` on the same art
+returned all four exactly. The result therefore reports how many colours the art has,
+how many of them the new palette holds exactly, and how many entries can draw at all,
+and says in `warnings` when the palette cannot hold the art. Raising `max_colors` by
+a little is usually what fixes it.
+
+Refuses an indexed sprite. There a pixel is an offset into the palette rather than a
+colour, so replacing the palette changes what every pixel means without touching a
+pixel; the error says how to do it in that case.
+
+Past a million pixels the art is not scanned, the palette is still derived, and the
+result says the comparison was skipped rather than implying the art is blank.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `max_colors` | integer | no | 256 |
+
+
 ### `ramp_between`
 
 Build a ramp from its two ends, which is how a ramp is usually decided.
@@ -2995,6 +3150,61 @@ Args:
 | `ignore_layer` | string | no | _none_ |
 | `split_layers` | boolean | no | False |
 | `split_tags` | boolean | no | False |
+| `overwrite` | boolean | no | False |
+
+
+### `export_spritesheet_packed`
+
+Export a sprite sheet with the controls a game engine needs: extrude, dedupe, trim.
+
+The sibling of `export_spritesheet`, which goes through the Aseprite CLI. This one
+drives the editor's own export command, which the CLI flags do not fully reach, and
+adds three things that matter when the sheet is going into an engine rather than into
+a preview:
+
+Args:
+    output: Destination sheet image (.png).
+    sheet_type: one of horizontal, vertical, rows, columns, packed (the default).
+    trim: Trim each frame to its drawn pixels before packing, so empty margins cost
+        no sheet space. The frame rectangles in the data file say where each frame
+        went and how much was trimmed, so an engine can still place it correctly.
+    extrude: Duplicate each frame's edge pixels one pixel outwards around its cell.
+        This is the fix for the thin seam or transparent line that appears between
+        tiles in Unity, Godot or a shader at non-integer zoom: the sampler reads
+        half a texel past the frame's edge, and without extrude that is whatever the
+        neighbouring frame or empty space holds. The frame rectangle in the data file
+        still names the frame itself, not the border.
+    merge_duplicates: Give identical frames one rectangle in the sheet instead of a
+        copy each, which is what shrinks a sheet full of held poses. Identical by
+        pixels, so it catches both a duplicated frame and a linked cel. A packed
+        sheet does this anyway and the result says so.
+    padding: Pixels of padding around and between frames, as `export_spritesheet`.
+        Padding separates frames; extrude fills the gap at the frame's own edge.
+        They solve different halves of the same bleeding problem and compose.
+    data_output: Optional .json path for the sheet metadata, which also carries the
+        layer, tag and slice lists.
+    data_format: "json-array" (the default when `data_output` is given) or
+        "json-hash". The array form lists frames in order, which an engine indexing
+        by frame number wants; the hash form keys them by name, which a loader
+        looking frames up by name wants. The tag section is called `frameTags` in
+        both.
+    overwrite: Replace existing output(s) (default False = no-clobber). When
+        `data_output` is given, both files are checked before anything is written.
+
+The source sprite is not modified: verified, the file's bytes and frame count are the
+same afterwards, including with trim and extrude set.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `output` | string | yes |  |
+| `sheet_type` | string | no | packed |
+| `trim` | boolean | no | False |
+| `extrude` | boolean | no | False |
+| `merge_duplicates` | boolean | no | False |
+| `padding` | integer | no | 0 |
+| `data_output` | string | no | _none_ |
+| `data_format` | string | no | _none_ |
 | `overwrite` | boolean | no | False |
 
 

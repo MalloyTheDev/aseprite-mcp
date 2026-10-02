@@ -15,6 +15,33 @@ from .common import lua_path, resolve_path
 
 _SHEET_TYPES = {"horizontal", "vertical", "rows", "columns", "packed"}
 
+# The two data formats `ExportSpriteSheet` writes. Validated here because the command does
+# not: `dataFormat = "no-such-format"` was accepted without a word and wrote a file in its
+# default format, so a misspelling would have produced a sheet whose metadata was in the
+# other shape than the one asked for.
+_DATA_FORMATS = {"json-array", "json-hash"}
+
+
+def _packed_sheet_notes(sheet_type: str, merge_duplicates: bool) -> list[str]:
+    """What is worth saying about a sheet-type and flag combination.
+
+    One combination misreports itself. A packed sheet merges identical frames whether or
+    not `merge_duplicates` is set: measured on a three-frame sprite whose first two
+    frames were identical, `sheet_type="packed"` with the flag off produced a two-cell
+    sheet and a data file in which frames 0 and 1 share one rectangle, while the same
+    sprite exported as rows put all three side by side. A caller comparing a packed sheet
+    with and without the flag therefore sees no difference and concludes the flag does
+    nothing.
+    """
+    if sheet_type == "packed" and not merge_duplicates:
+        return [
+            "A packed sheet merges identical frames whether or not merge_duplicates is "
+            "set, because the packer reuses a rectangle it has already placed. This "
+            "sheet is deduplicated; the flag only changes anything for the row and "
+            "column layouts."
+        ]
+    return []
+
 
 
 def _sprite_facts(src) -> dict:
@@ -246,6 +273,171 @@ def export_spritesheet(
         result["data_output"] = str(data_path)
     run_cli(cli)
     result["bytes"] = _verify_written(out, "export_spritesheet")
+    return result
+
+
+@mcp.tool()
+def export_spritesheet_packed(
+    filename: str,
+    output: str,
+    sheet_type: str = "packed",
+    trim: bool = False,
+    extrude: bool = False,
+    merge_duplicates: bool = False,
+    padding: int = 0,
+    data_output: str | None = None,
+    data_format: str | None = None,
+    overwrite: bool = False,
+) -> dict:
+    """Export a sprite sheet with the controls a game engine needs: extrude, dedupe, trim.
+
+    The sibling of `export_spritesheet`, which goes through the Aseprite CLI. This one
+    drives the editor's own export command, which the CLI flags do not fully reach, and
+    adds three things that matter when the sheet is going into an engine rather than into
+    a preview:
+
+    Args:
+        output: Destination sheet image (.png).
+        sheet_type: one of horizontal, vertical, rows, columns, packed (the default).
+        trim: Trim each frame to its drawn pixels before packing, so empty margins cost
+            no sheet space. The frame rectangles in the data file say where each frame
+            went and how much was trimmed, so an engine can still place it correctly.
+        extrude: Duplicate each frame's edge pixels one pixel outwards around its cell.
+            This is the fix for the thin seam or transparent line that appears between
+            tiles in Unity, Godot or a shader at non-integer zoom: the sampler reads
+            half a texel past the frame's edge, and without extrude that is whatever the
+            neighbouring frame or empty space holds. The frame rectangle in the data file
+            still names the frame itself, not the border.
+        merge_duplicates: Give identical frames one rectangle in the sheet instead of a
+            copy each, which is what shrinks a sheet full of held poses. Identical by
+            pixels, so it catches both a duplicated frame and a linked cel. A packed
+            sheet does this anyway and the result says so.
+        padding: Pixels of padding around and between frames, as `export_spritesheet`.
+            Padding separates frames; extrude fills the gap at the frame's own edge.
+            They solve different halves of the same bleeding problem and compose.
+        data_output: Optional .json path for the sheet metadata, which also carries the
+            layer, tag and slice lists.
+        data_format: "json-array" (the default when `data_output` is given) or
+            "json-hash". The array form lists frames in order, which an engine indexing
+            by frame number wants; the hash form keys them by name, which a loader
+            looking frames up by name wants. The tag section is called `frameTags` in
+            both.
+        overwrite: Replace existing output(s) (default False = no-clobber). When
+            `data_output` is given, both files are checked before anything is written.
+
+    The source sprite is not modified: verified, the file's bytes and frame count are the
+    same afterwards, including with trim and extrude set.
+    """
+    if sheet_type not in _SHEET_TYPES:
+        raise ValidationFailed(f"sheet_type must be one of {sorted(_SHEET_TYPES)}")
+    if data_format is not None and data_format not in _DATA_FORMATS:
+        raise ValidationFailed(f"data_format must be one of {sorted(_DATA_FORMATS)}")
+    if data_format is not None and not data_output:
+        raise ValidationFailed(
+            "data_format only applies to data_output, and no data_output was given, so "
+            "nothing would be written in that format."
+        )
+    if padding < 0:
+        raise ValidationFailed(f"padding cannot be negative (got {padding}).")
+
+    src = resolve_path(filename)
+    # Every target is validated before anything runs, so a two-file export cannot fail
+    # halfway and leave one of them behind.
+    out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
+    data_path = (
+        ensure_output_path(data_output, overwrite=overwrite, error_type=ExportError)
+        if data_output
+        else None
+    )
+    args = {
+        "src": lua_path(src),
+        "output": lua_path(out),
+        "sheet_type": sheet_type,
+        "trim": bool(trim),
+        "extrude": bool(extrude),
+        "merge_duplicates": bool(merge_duplicates),
+        "padding": int(padding),
+        "data_output": lua_path(data_path) if data_path is not None else None,
+        "data_format": (data_format or "json-array") if data_path is not None else None,
+    }
+    body = """
+    -- Mapped to the editor's own enums rather than passed through as strings. The command
+    -- accepts `type = "no-such-type"` without a word and exports in its default layout,
+    -- so a typo anywhere on this path would otherwise produce a sheet in a layout nobody
+    -- asked for and report success. Python has already checked the name; this is the half
+    -- of the check that cannot drift from the enum.
+    local SHEET_TYPES = {
+      horizontal = SpriteSheetType.HORIZONTAL,
+      vertical = SpriteSheetType.VERTICAL,
+      rows = SpriteSheetType.ROWS,
+      columns = SpriteSheetType.COLUMNS,
+      packed = SpriteSheetType.PACKED,
+    }
+    local DATA_FORMATS = {
+      ["json-array"] = SpriteSheetDataFormat.JSON_ARRAY,
+      ["json-hash"] = SpriteSheetDataFormat.JSON_HASH,
+    }
+    local kind = SHEET_TYPES[ARG.sheet_type]
+    if kind == nil then error("unknown sheet_type '" .. tostring(ARG.sheet_type) .. "'", 0) end
+
+    local spr = open_sprite(ARG.src)
+    local params = {
+      ui = false,
+      type = kind,
+      textureFilename = ARG.output,
+      trim = ARG.trim,
+      extrude = ARG.extrude,
+      mergeDuplicates = ARG.merge_duplicates,
+    }
+    if ARG.padding > 0 then
+      params.shapePadding = ARG.padding
+      params.borderPadding = ARG.padding
+    end
+    if ARG.data_output ~= nil then
+      local fmt = DATA_FORMATS[ARG.data_format]
+      if fmt == nil then
+        error("unknown data_format '" .. tostring(ARG.data_format) .. "'", 0)
+      end
+      params.dataFilename = ARG.data_output
+      params.dataFormat = fmt
+      -- The three sections that make the data file worth writing: without them it
+      -- describes rectangles and nothing about what is in them.
+      params.listLayers = true
+      params.listTags = true
+      params.listSlices = true
+    end
+    app.command.ExportSpriteSheet(params)
+
+    -- Measured off the written file rather than computed from the layout: the sheet's
+    -- size is the one fact a caller cannot work out for themselves, and it is how the
+    -- effect of trim, padding and extrude becomes visible at all. Deliberately no
+    -- save_sprite: the export does not modify the sprite and saving it would rewrite a
+    -- file the caller did not ask to have touched.
+    RESULT = { ok = true, frames = #spr.frames }
+    if app.fs.isFile(ARG.output) then
+      local sheet = app.open(ARG.output)
+      RESULT.sheet_size = { width = sheet.width, height = sheet.height }
+    end
+    """
+    result = run_lua(body, args)
+    result.update({
+        "output": str(out),
+        "sheet_type": sheet_type,
+        "trim": bool(trim),
+        "extrude": bool(extrude),
+        "merge_duplicates": bool(merge_duplicates),
+        # run_cli is not involved here, so the "exited 0 having done nothing" check that
+        # `run_cli` makes has to be made again: the command returns before the file is
+        # verified and would report success for a sheet it never wrote.
+        "bytes": _verify_written(out, "export_spritesheet_packed"),
+    })
+    if data_path is not None:
+        result["data_output"] = str(data_path)
+        result["data_format"] = data_format or "json-array"
+        result["data_bytes"] = _verify_written(data_path, "export_spritesheet_packed data")
+    notes = _packed_sheet_notes(sheet_type, bool(merge_duplicates))
+    if notes:
+        result["warnings"] = notes
     return result
 
 
