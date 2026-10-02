@@ -123,6 +123,48 @@ def test_concurrent_edits_to_one_sprite_all_survive():
     assert {"from_a", "from_b"} <= names, f"an edit was lost: {sorted(names)}"
 
 
+def test_trim_sprite_leaves_out_a_transparent_palette_entry():
+    """Pins the careful answer, which `trim_sprite` gave by scanning every pixel itself.
+
+    It now shares the prelude's byte-stride measurement with `drawn_pixels` (#172), and
+    the whole risk in that move is that the shared helper might answer the way
+    `Image:shrinkBounds` does. On this sprite the two differ and the difference is
+    visible in the result: the careful answer crops to 2x2, shrinkBounds would crop to
+    5x5 and keep a column and a row that nothing in the palette can draw.
+    """
+    name = "r/trimidx.aseprite"
+    sprite.create_sprite(name, 8, 8, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", "#6b4a2fff", "#ffffff00"])
+    drawing.draw_rectangle(name, 2, 2, 2, 2, "index:1", filled=True)
+    drawing.draw_pixels(name, [{"x": 6, "y": 6}], "index:2")
+
+    out = sprite.trim_sprite(name)
+
+    assert (out["width"], out["height"]) == (2, 2), (
+        "trim_sprite kept a pixel held in a fully transparent palette entry"
+    )
+
+
+def test_trim_sprite_keeps_content_from_every_frame():
+    """The crop is the union across frames, so a frame-by-frame box must not replace it.
+
+    Moving to the shared helper changed this from one scan over every frame's pixels to
+    one box per frame, unioned, and a union written the wrong way round silently crops
+    away whichever frame is measured first.
+    """
+    name = "r/trimframes.aseprite"
+    sprite.create_sprite(name, 16, 16)
+    drawing.draw_pixels(name, [{"x": 2, "y": 3}], "#6b4a2f", frame=1)
+    frames.add_frame(name)
+    drawing.draw_pixels(name, [{"x": 11, "y": 12}], "#6b4a2f", frame=2)
+
+    out = sprite.trim_sprite(name)
+
+    assert (out["width"], out["height"]) == (10, 10), (
+        "the crop lost art that only one frame holds"
+    )
+
+
 @pytest.mark.parametrize(
     ("case", "payload"),
     [
