@@ -220,12 +220,6 @@ def test_the_perpendicular_is_the_axis_a_smear_thins_across():
     assert inbetween.perpendicular((0, -5)) == (1.0, 0.0)
 
 
-def test_the_half_extent_is_the_box_projected_onto_that_axis():
-    box = {"x": 0, "y": 0, "width": 11, "height": 21}
-    assert inbetween.box_half_extent(box, (0.0, 1.0)) == 10.0
-    assert inbetween.box_half_extent(box, (1.0, 0.0)) == 5.0
-
-
 def test_the_plots_come_back_furthest_first_so_the_nearer_copy_wins():
     plan = inbetween.plan_smear((10, 0), mode="stretch", strength=1.0, steps=3,
                                 ramp_length=5)
@@ -415,3 +409,51 @@ def test_a_rotation_is_bounded_by_its_corners_not_its_axes():
     box = budget["boxes"][0]
     span = box["x1"] - box["x0"] + 1
     assert span > 11 + 2, f"a turned square needs more than its own width, got {span}"
+
+
+# ------------------------------------------- what a trail copy keeps, per line (#150)
+def test_the_whole_span_survives_at_the_subject_and_only_its_centre_at_the_tip():
+    """A smear leaves the subject at the subject's own width and ends in a single pixel.
+    Those are the two ends of the taper and they are what `t` means."""
+    assert inbetween.trail_span(0.0, 10.0, 0.0) == (-0.5, 10.5)
+    assert inbetween.trail_span(0.0, 10.0, 1.0) == (4.5, 5.5)
+
+
+def test_a_span_that_does_not_straddle_zero_tapers_toward_its_own_centre():
+    """The whole of #150 in one assertion.
+
+    This is the L's foot: a line whose own span sits between 8.5 and 11.5, well away from
+    the subject's box centre. The taper must converge on 10, the middle of that span. The
+    rule it replaced measured distance from the box centre instead, so a part of the shape
+    that happened to sit far from the middle of the bounding box lost its trail no matter
+    how wide it was.
+    """
+    low, high = inbetween.trail_span(8.5, 11.5, 1.0)
+
+    assert (low + high) / 2 == 10.0, "converges on the line's own centre"
+    assert not inbetween.keeps_in_trail(0.0, 8.5, 11.5, 1.0), (
+        "the subject's box centre is not in this line's span and must not attract it"
+    )
+
+
+@pytest.mark.parametrize("t", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_a_one_pixel_line_keeps_its_trail_for_the_whole_length(t):
+    """A feature one pixel wide is already as thin as a taper can make it, so it must
+    survive to the tip. The half pixel of slack is what guarantees that: without it an
+    even span would taper to nothing and the trail would end in a gap rather than a
+    point."""
+    assert inbetween.keeps_in_trail(7.0, 7.0, 7.0, t)
+
+
+def test_the_taper_never_widens_as_it_recedes():
+    """Monotone by construction, and worth pinning: a reach that grew with `t` would read
+    as a trumpet rather than a smear, and the error would look like a wrong sign in one
+    place rather than like a broken shape."""
+    reaches = [
+        inbetween.trail_span(0.0, 20.0, t / 10.0)[1]
+        - inbetween.trail_span(0.0, 20.0, t / 10.0)[0]
+        for t in range(11)
+    ]
+
+    assert reaches == sorted(reaches, reverse=True)
+    assert reaches[0] > reaches[-1], "and it actually narrows"

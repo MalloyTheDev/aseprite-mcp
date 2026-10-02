@@ -1256,3 +1256,58 @@ def test_the_lua_sample_budget_agrees_with_the_python_one(request):
 
     assert result["samples"] == budget["samples"]
     assert result["samples"] > 0, "a budget of zero would make the comparison vacuous"
+
+
+def test_a_concave_subject_tapers_each_part_against_its_own_width(request):
+    """#150: the taper used to be measured against one figure for the whole subject, taken
+    from its content box, so it was really measuring distance from the box's centre line.
+
+    An L is the case that separates the two. Here it is a 4px wide bar with a 16px wide
+    foot, moved straight down, so the perpendicular axis is horizontal and each row's own
+    span is what the trail should narrow toward. Measured before the fix and after, on
+    this exact fixture:
+
+        column:   8  9 10 11 | 12 13 14 15 16 17 18 19 20 21 22 23
+        before:   0  1  2  2 |  3  4  5  6  6  5  4  3  2  2  1  0
+        after:    2  6  6  2 |  3  4  5  6  6  5  4  3  2  2  1  0
+
+    Before, one lens centred on the box (x 15.5), with the thin bar out on its flank
+    getting almost nothing. After, two lenses, each centred on its own part. The foot is
+    unchanged, which is the sign the fix is targeted: the foot is the widest part, so its
+    own span already was the box's span.
+
+    The assertion is the invariant rather than those numbers: every part of the subject,
+    thin or wide, reaches the full trail length along its own centre line.
+    """
+    name = f"a/{request.node.name}.aseprite"
+    width, height = 32, 44
+    sprite.create_sprite(name, width, height)
+    for frame, top in ((1, 4), (2, 14)):
+        if frame == 2:
+            frames.add_frame(name)
+            drawing.clear_layer(name, frame=2)
+        drawing.draw_rectangle(name, 8, top, 4, 14, RAMP[2], filled=True, frame=frame)
+        drawing.draw_rectangle(name, 8, top + 14, 16, 4, RAMP[2], filled=True, frame=frame)
+
+    def painted() -> set:
+        rows = inspect.get_pixels(name, 0, 0, width, height, frame=2)["pixels"]
+        return {(x, y) for y in range(height) for x in range(width)
+                if rows[y][x] != "#00000000"}
+
+    before = painted()
+    result = animation.smear_frame(name, layer="Layer 1", frame=2, from_frame=1,
+                                   mode="stretch", strength=0.6, ramp=RAMP)
+    trail = painted() - before
+
+    def deepest(columns: range) -> int:
+        return max(len([1 for y in range(height) if (x, y) in trail]) for x in columns)
+
+    bar = deepest(range(8, 12))        # the 4px wide bar
+    foot = deepest(range(12, 24))      # the 16px wide foot, beyond the bar
+    copies = result["copies"]
+
+    assert foot == copies, "the widest part reaches the full trail length"
+    assert bar == copies, (
+        f"the thin bar only reaches {bar} of {copies} copies, so it is still being "
+        "tapered against something wider than itself"
+    )

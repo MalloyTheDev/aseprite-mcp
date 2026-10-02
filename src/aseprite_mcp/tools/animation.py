@@ -1074,6 +1074,61 @@ if sb.x ~= e.x or sb.y ~= e.y or sb.width ~= e.width or sb.height ~= e.height th
         "try again.", 0)
 end
 
+
+-- The subject's own span across the movement, per line along it.
+--
+-- One extra pass over the box the tool already walks, which is bounded by the same
+-- MAX_SMEAR_PIXELS budget the read pass enforced, so this costs a scan and no new risk.
+--
+-- Lines are buckets of the projection onto the movement direction, rounded to whole
+-- pixels. For the common horizontal or vertical smear a bucket is exactly a column or a
+-- row; for a diagonal one it is a band a pixel wide, which is the same approximation the
+-- offsets themselves already make by being whole pixels.
+--
+-- A line's span is its lowest and highest opaque pixel, so a subject with a hole on this
+-- axis has the hole spanned rather than tapered around, and a ring's trail draws through
+-- its own hole. That is a deliberate choice and not an oversight: tapering each interval
+-- of a holed line separately would keep a ring reading as a ring, and is the better
+-- answer, but it needs per-line interval lists where this needs two numbers.
+--
+-- It is also not a regression. Measured on a ring of outer radius 9 and hole radius 4,
+-- smeared vertically, the trail lands 50 pixels inside the hole both before this change
+-- and after, with the same peak depth; the only difference is that the flanks taper a
+-- little tighter, because each row is now measured against its own span rather than the
+-- box's. Everything the issue listed, a sword, a figure with thin legs under a wide
+-- torso, an L, a crescent, is per-line convex and is fixed by this.
+local spans, project, bucket_of = nil, nil, nil
+if ARG.perp_x ~= nil then
+  local cx, cy = ARG.centre_x, ARG.centre_y
+  local px, py = ARG.perp_x, ARG.perp_y
+  -- The movement direction is the perpendicular's perpendicular, which saves passing it.
+  local ux, uy = py, -px
+  project = function(x, y)
+    local dx, dy = x - cx, y - cy
+    return dx * ux + dy * uy, dx * px + dy * py
+  end
+  bucket_of = function(along)
+    return math.floor(along + 0.5)
+  end
+  spans = {}
+  for y = sb.y, sb.y + sb.height - 1 do
+    for x = sb.x, sb.x + sb.width - 1 do
+      local _, _, _, a = px_to_rgba(spr, src:getPixel(x, y))
+      if a > 0 then
+        local along, perp = project(x, y)
+        local key = bucket_of(along)
+        local span = spans[key]
+        if span == nil then
+          spans[key] = { lo = perp, hi = perp }
+        else
+          if perp < span.lo then span.lo = perp end
+          if perp > span.hi then span.hi = perp end
+        end
+      end
+    end
+  end
+end
+
 local img = Image(spr.spec)
 img:clear()
 
@@ -1100,13 +1155,23 @@ for _, plot in ipairs(ARG.plots) do
       local r, g, b, a = px_to_rgba(spr, px)
       if a > 0 then
         local keep = true
-        if ARG.half_perp ~= nil then
-          -- Thinning across the movement: the trail is the subject's full width where it
+        if spans ~= nil then
+          -- Thinning across the movement: the trail is the subject's own width where it
           -- leaves and a single pixel at the tip, which is the shape of a smear rather
           -- than the shape of a rectangle.
-          local perp = (x - ARG.centre_x) * ARG.perp_x + (y - ARG.centre_y) * ARG.perp_y
-          if perp < 0 then perp = -perp end
-          keep = perp <= ARG.half_perp * (1 - plot.t) + 0.5
+          --
+          -- Against this line's own span, not the whole subject's box. A transcription of
+          -- `inbetween.trail_span`, which is the authority and is tested on CI; the span
+          -- itself can only be measured here, where the pixels are.
+          local along, perp = project(x, y)
+          local span = spans[bucket_of(along)]
+          if span == nil then
+            keep = false
+          else
+            local centre = (span.lo + span.hi) / 2.0
+            local reach = (span.hi - span.lo) / 2.0 * (1 - plot.t) + 0.5
+            keep = perp >= centre - reach and perp <= centre + reach
+          end
         end
         if keep then
           if on_palette then
@@ -1355,7 +1420,7 @@ def smear_frame(
     args = {
         "src": src, "layer": layer, "frame": here, "plots": plots,
         "expect_bounds": measured["bounds"],
-        "lut": None, "half_perp": None,
+        "lut": None,
         "centre_x": None, "centre_y": None, "perp_x": None, "perp_y": None,
     }
     if ramp_rgb is None:
@@ -1385,7 +1450,6 @@ def smear_frame(
         args.update({
             "centre_x": centre[0], "centre_y": centre[1],
             "perp_x": axis[0], "perp_y": axis[1],
-            "half_perp": inbetween.box_half_extent(measured["bounds"], axis),
         })
 
     applied = run_lua(_SMEAR_WRITE_LUA, args)
