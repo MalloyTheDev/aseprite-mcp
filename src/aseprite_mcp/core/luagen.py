@@ -129,10 +129,30 @@ local _linked_hit_frame, _linked_hit_others = nil, nil
 -- The active selection, or nil. Set by open_sprite when a sidecar mask is loaded.
 --
 -- It has to be consulted by hand: a selection clips app.useTool and the filter commands,
--- but NOT Image:drawPixel, which is what every drawing tool here goes through. Without
--- this check a selection would appear to work for effects and be silently ignored for
--- drawing, which is worse than not supporting selections at all.
+-- but NOT Image:drawPixel, which is what every write in here ultimately calls. Without
+-- this check a selection would appear to work for some tools and be silently ignored by
+-- others, which is worse than not supporting selections at all.
 local _sel = nil
+
+-- The rule, in one place, because having it in two is how this went wrong. `img_set` used
+-- to be the only write that checked the mask, and nine others called `Image:drawPixel`
+-- directly: the anti-aliased coverage write, the flood fill, every per-pixel effect pass,
+-- `mirror_layer` and the batch runner's replace op. All of them edited the whole layer
+-- while the harness stamped `selection_applied: true`, because that flag is set from
+-- `_sel ~= nil` and has no way to know whether the body honoured it. A missing count can
+-- be noticed; a result that asserts a selection was applied when it was not cannot.
+--
+-- Counts each refused pixel once, so a caller comparing `pixels_written` against
+-- `pixels_outside_selection` gets two numbers that add up.
+local function masked_out(x, y)
+  -- contains() costs roughly a quarter of a microsecond, so a full 256x256 canvas is
+  -- about 16ms: cheap enough to check per pixel rather than precomputing a bitmap.
+  if _sel ~= nil and not _sel:contains(math.floor(x), math.floor(y)) then
+    _px_masked = _px_masked + 1
+    return true
+  end
+  return false
+end
 
 -- The sprite the body opened, for the harness. See open_sprite.
 local _sprite = nil
@@ -558,6 +578,11 @@ local function blend_over(spr, img, x, y, r, g, b, cov)
     return
   end
   x, y = math.floor(x), math.floor(y)
+  -- Checked here rather than by routing through `img_set`, which is defined further down
+  -- the prelude and so is not in scope yet. Once, before both branches, because the
+  -- indexed branch below returns without writing on low coverage and a mask refusal is
+  -- not the same event as a coverage refusal.
+  if masked_out(x, y) then return end
   if cov > 1 then cov = 1 end
   if spr.colorMode == ColorMode.RGB then
     local dr, dg, db, da = px_to_rgba(spr, img:getPixel(x, y))
@@ -688,12 +713,7 @@ end
 -- ===== drawing primitives (operate on an Image, sprite-space coords) ======
 local function img_set(img, x, y, px)
   if x >= 0 and y >= 0 and x < img.width and y < img.height then
-    -- contains() costs roughly a quarter of a microsecond, so a full 256x256 canvas is
-    -- about 16ms: cheap enough to check per pixel rather than precomputing a bitmap.
-    if _sel ~= nil and not _sel:contains(math.floor(x), math.floor(y)) then
-      _px_masked = _px_masked + 1
-      return
-    end
+    if masked_out(x, y) then return end
     img:drawPixel(math.floor(x), math.floor(y), px)
     _px_written = _px_written + 1
   else
@@ -821,18 +841,34 @@ local function flood_fill_img(img, x, y, px)
   if x < 0 or y < 0 or x >= img.width or y >= img.height then return end
   local target = img:getPixel(x, y)
   if target == px then return end
+  -- A masked pixel is a wall, not a hole. Not painting it is only half the answer: the
+  -- fill must not spread *through* it either, or it leaks around the selection and paints
+  -- the far side of whatever the region was meant to protect.
+  --
+  -- Tracked so each refused pixel counts once. A masked pixel is never painted, so it
+  -- keeps matching `target` and can be reached again from each of its four neighbours,
+  -- which would otherwise report up to four times the boundary.
+  local blocked = {}
   local stack = { { x, y } }
   while #stack > 0 do
     local p = stack[#stack]; stack[#stack] = nil
     local px0, py0 = p[1], p[2]
     if px0 >= 0 and py0 >= 0 and px0 < img.width and py0 < img.height
        and img:getPixel(px0, py0) == target then
-      img:drawPixel(px0, py0, px)
-      _px_written = _px_written + 1
-      stack[#stack + 1] = { px0 + 1, py0 }
-      stack[#stack + 1] = { px0 - 1, py0 }
-      stack[#stack + 1] = { px0, py0 + 1 }
-      stack[#stack + 1] = { px0, py0 - 1 }
+      if _sel ~= nil and not _sel:contains(px0, py0) then
+        if blocked[py0] == nil then blocked[py0] = {} end
+        if not blocked[py0][px0] then
+          blocked[py0][px0] = true
+          _px_masked = _px_masked + 1
+        end
+      else
+        img:drawPixel(px0, py0, px)
+        _px_written = _px_written + 1
+        stack[#stack + 1] = { px0 + 1, py0 }
+        stack[#stack + 1] = { px0 - 1, py0 }
+        stack[#stack + 1] = { px0, py0 + 1 }
+        stack[#stack + 1] = { px0, py0 - 1 }
+      end
     end
   end
 end

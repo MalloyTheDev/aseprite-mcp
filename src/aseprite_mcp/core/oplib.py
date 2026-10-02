@@ -374,7 +374,7 @@ local function run_op(op)
         local r, g, b, al = px_to_rgba(spr, img:getPixel(xx, yy))
         if math.abs(r - fr) <= tol and math.abs(g - fg) <= tol
            and math.abs(b - fb) <= tol and math.abs(al - fa) <= tol then
-          img:drawPixel(xx, yy, tp)
+          img_set(img, xx, yy, tp)
         end
       end
     end

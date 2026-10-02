@@ -168,6 +168,50 @@ All notable changes to this project are documented here. The format is based on
   blocks from one shading call is rewritten around what that claim cost.
 
 ### Fixed
+- **Nine write paths ignored the active selection and reported `selection_applied`
+  anyway** (#199). A caller who scoped an edit to a character's armour and ran
+  `adjust_brightness_contrast` recoloured the whole character and was told the selection
+  had been applied. This is the inverse of #181, and the worse half of it: a missing count
+  can be noticed, a false claim cannot.
+
+  `img_set` in the prelude was the only write that consulted the mask. The anti-aliased
+  coverage write, the flood fill behind `fill_area`, `_pixel_pass` (so `invert_colors`,
+  `desaturate`, `adjust_brightness_contrast` and `adjust_hue_saturation`),
+  `replace_color` in both `effects.py` and the batch runner, `add_outline`'s marks and
+  `mirror_layer`'s two axes all called `Image:drawPixel` directly, so they skipped the
+  check and the `pixels_outside_selection` counter together, while the harness stamped
+  `selection_applied` from `_sel ~= nil` and had no way to know the body had not honoured
+  it. The correct behaviour sat one line away: hard-edged `draw_line` not only clipped, it
+  reported `pixels_outside_selection: 8` on the same canvas where the others reported
+  nothing.
+
+  The rule now lives in one function, `masked_out`, which `img_set` and the three prelude
+  paths all use, because having it in two places is how this happened. The flood fill
+  treats a masked pixel as a wall rather than a hole: not painting it is only half the
+  answer, since spreading *through* it leaks the fill around the selection and paints the
+  far side of the region the mask was there to protect. It counts each refused pixel once,
+  because a masked pixel is never painted, so it keeps matching the fill's target and can
+  be reached again from each of its four neighbours.
+
+  Six writes deliberately keep using `Image:drawPixel`, each with a comment saying why,
+  because **a selection is in canvas space** and these are not: `paint_tile_pixels` writes
+  a tileset tile's own image in tile-local coordinates, three tilemap writes address a grid
+  of tile *indices* by column and row, and `sort_palette`'s reindex rewrites every pixel's
+  palette index after the palette is reordered, so clipping it would leave the unselected
+  pixels pointing at the old entries and visibly corrupt the sprite. Sweeping every
+  `drawPixel` would have broken three tools.
+
+  `tests/test_selection_scoping.py` holds one case per write path and asserts the pixels
+  outside the mask rather than a count, since a count can be satisfied by a tool that wrote
+  the right number of pixels in the wrong places. Each case is arranged so it fails without
+  the fix, which was checked by reverting it, and the no-selection half is pinned too, on a
+  canvas that is deliberately not uniform: on a flat one, mirroring copies red onto red and
+  three of the four cases could not have told a working tool from one that wrote nothing.
+
+  This closes #80, which asked for the effects tools to gain selection scoping, by a
+  different route than it proposed: its premise was that "the `app.command.*` filters
+  honour the active mask", and `effects.py` contains no `app.command` calls at all.
+
 - **A write whose selection masked out every pixel reported no counts at all** (#181).
   The result harness attaches the pixel counters under one gate, and `_px_masked` was
   read inside that gate without being part of it. A write that drew nothing left the

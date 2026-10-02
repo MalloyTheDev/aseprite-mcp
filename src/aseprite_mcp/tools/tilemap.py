@@ -163,6 +163,8 @@ def paint_tile_pixels(
     }
     body = _TM + """
     if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index, 0) end
+    -- `im:drawPixel` below, not `img_set`: this writes a tileset tile's own image and the
+    -- coordinates are tile-local, so a canvas-space selection does not address it.
     local im = ts:tile(ARG.index).image
     local default = nil
     if ARG.color ~= nil then default = to_pixel(spr, ARG.color) end
