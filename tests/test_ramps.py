@@ -128,3 +128,68 @@ def test_nothing_drawn_says_so():
 def test_one_step_is_refused_here_too():
     with pytest.raises(ValueError, match="at least 2"):
         ramps.cluster_by_luminance({"#000000": 1}, 1)
+
+
+# ===== clipping =======================================================================
+# `generate_ramp` clamps lightness at both ends, so a base near white or near black spends
+# its outermost steps on one colour. The ramp is still returned; what was missing was any
+# way to find out, and the failure then surfaced two tools later in `specular_highlight`
+# with a message about the shading pass.
+
+
+def test_clipped_ends_counts_the_extra_entries_at_each_end():
+    assert ramps.clipped_ends(["#000000", "#111111", "#222222"]) == (0, 0)
+    assert ramps.clipped_ends(["#aaaaaa", "#ffffff", "#ffffff"]) == (0, 1)
+    assert ramps.clipped_ends(["#000000", "#000000", "#000000", "#333333"]) == (2, 0)
+    assert ramps.clipped_ends(["#808080", "#808080"]) == (1, 1), (
+        "a two-entry ramp of one colour has collapsed from both directions"
+    )
+    assert ramps.clipped_ends(["#808080"]) == (0, 0)
+    assert ramps.clipped_ends([]) == (0, 0)
+
+
+def test_clipped_ends_does_not_claim_an_end_for_a_duplicate_in_the_middle():
+    """A pair rounding together mid-ramp is a different problem from a clamped end."""
+    assert ramps.clipped_ends(["#101010", "#404040", "#404040", "#f0f0f0"]) == (0, 0)
+
+
+def test_nearest_unclipped_looks_both_ways():
+    """Distinctness is not monotonic in light_range, so a bisection would be wrong.
+
+    Too wide clamps the ends onto each other; too narrow rounds neighbours onto the same
+    hex. The answer can therefore lie either side of what was asked for.
+    """
+    # Workable in a window around 0.5, so asking from below and from above should both
+    # walk toward it rather than away.
+    def rebuild(span):
+        return ["a", "b", "c"] if 0.40 <= span <= 0.60 else ["a", "a", "c"]
+
+    assert ramps.nearest_unclipped(rebuild, 3, 0.20) == 0.40
+    assert ramps.nearest_unclipped(rebuild, 3, 0.90) == 0.60
+    assert ramps.nearest_unclipped(rebuild, 3, 0.50) == 0.50
+
+
+def test_nearest_unclipped_returns_nothing_rather_than_a_value_that_does_not_work():
+    assert ramps.nearest_unclipped(lambda span: ["a", "a"], 2, 0.5) is None
+
+
+def test_clip_warning_names_the_end_the_steps_went_to():
+    light = ramps.clip_warning(["#cccccc", "#ffffff", "#ffffff"], 3, 0.47)
+    assert "the top 2 entries are all #ffffff" in light
+    assert "light_range=0.47" in light
+    assert "specular_highlight" in light, (
+        "a collapsed top step is specifically what breaks a glint, so say so"
+    )
+
+    dark = ramps.clip_warning(["#000000", "#000000", "#cccccc"], 3, 0.13)
+    assert "the bottom 2 entries are all #000000" in dark
+    assert "specular_highlight" not in dark, (
+        "the dark end has a different problem and does not need a note about glints"
+    )
+
+    middle = ramps.clip_warning(["#101010", "#404040", "#404040", "#f0f0f0"], 4, 0.3)
+    assert "too narrow for this many steps" in middle
+
+
+def test_clip_warning_says_so_when_no_range_would_work():
+    assert "ask for fewer steps" in ramps.clip_warning(["#888888", "#888888"], 2, None)

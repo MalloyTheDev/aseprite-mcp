@@ -12,7 +12,7 @@ from ..core.limits import (
     MAX_VERIFY_PIXELS,
     check_canvas_size,
 )
-from ..core.paths import ensure_output_path
+from ..core.paths import discard_selection_sidecar, ensure_output_path
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -55,6 +55,10 @@ def create_sprite(
     mode = indexed.normalise_color_mode(color_mode)
     bg = parse_color(background) if background else None
     path = ensure_output_path(filename, overwrite=overwrite)
+    # A selection is state belonging to a sprite, and this replaces the sprite. Left in
+    # place, the sidecar made the new sprite open with the old one's selection and quietly
+    # dropped every edit outside it.
+    inherited = discard_selection_sidecar(path)
     args = {
         "path": lua_path(path),
         "width": width,
@@ -91,6 +95,10 @@ def create_sprite(
     """
     info = run_lua(body, args)
     info["path"] = str(path)
+    # Said rather than done silently: a caller who had a selection on the old sprite of
+    # this name should know it is gone, and one who did not should see nothing.
+    if inherited:
+        info["discarded_selection"] = True
     return info
 
 
@@ -107,6 +115,9 @@ def save_sprite_as(
     """
     src = resolve_path(filename)
     dst = ensure_output_path(new_filename, overwrite=overwrite)
+    # The copy is a different sprite at a different path, so whatever selection happened to
+    # be sitting beside that path is not its. The source's own sidecar is untouched.
+    discard_selection_sidecar(dst)
     args = {"src": lua_path(src), "dst": lua_path(dst), "flatten": bool(flatten)}
     body = """
     local spr = open_sprite(ARG.src)

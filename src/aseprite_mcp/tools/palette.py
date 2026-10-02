@@ -487,7 +487,20 @@ def generate_ramp(
         filename: If set with apply, write the ramp into that sprite's palette.
         apply: "none" (just return), "append" (add to palette), or "replace".
 
-    Returns the ramp as a list of "#RRGGBB" colours (darkest first).
+    Returns the ramp as a list of "#RRGGBB" colours (darkest first), with `distinct`, how
+    many of them are different from each other.
+
+    **`distinct` is not always `steps`.** Lightness is clamped at both ends, so a base
+    already near white or near black spends its outermost steps on the same colour: nine
+    steps in, eight colours out. The ramp is still returned, because clamping is the honest
+    result of the inputs and a caller may not care, but `warnings` then names which end
+    collapsed and the nearest `light_range` that would not.
+
+    It is worth caring about at least once. `specular_highlight` needs the ramp's top step
+    to be brighter than what `shade_region_by_light` spread across the lit side, so a ramp
+    whose top two entries are both `#ffffff` makes that call refuse, with a message about
+    the shading pass. The cause is two calls earlier, in this one, which used to report
+    success either way.
     """
     import colorsys
 
@@ -509,44 +522,61 @@ def generate_ramp(
     shadow_h = colorsys.rgb_to_hls(*_unit_rgb(shadow_hue))[0] if shadow_hue else None
     light_h = colorsys.rgb_to_hls(*_unit_rgb(light_hue))[0] if light_hue else None
 
-    colors = []
-    for i in range(steps):
-        u = i / (steps - 1)  # 0 = darkest .. 1 = lightest
-        t = u - 0.5  # -0.5 .. 0.5, the original parameterisation
+    # Wrapped in a function of `span` rather than reading `light_range` directly, so the
+    # clipping check below can ask what this same arithmetic would have produced at another
+    # range. Nothing inside it changed when it was wrapped, which matters: the committed
+    # showcase art is reproduced byte for byte from these numbers.
+    def build(span: float) -> list[str]:
+        colors = []
+        for i in range(steps):
+            u = i / (steps - 1)  # 0 = darkest .. 1 = lightest
+            t = u - 0.5  # -0.5 .. 0.5, the original parameterisation
 
-        # Lightness. "perceptual" bunches the dark steps, because equal steps in HLS
-        # lightness are not equal steps to the eye and a ramp built that way has a
-        # muddy shadow end.
-        lt = (u**1.5) - 0.5 if easing == "perceptual" else t
-        L = min(1.0, max(0.0, lum + lt * light_range))
+            # Lightness. "perceptual" bunches the dark steps, because equal steps in HLS
+            # lightness are not equal steps to the eye and a ramp built that way has a
+            # muddy shadow end.
+            lt = (u**1.5) - 0.5 if easing == "perceptual" else t
+            L = min(1.0, max(0.0, lum + lt * span))
 
-        # Hue. Explicit targets express the rule as artists state it, "shadows go
-        # toward blue, highlights toward yellow", which a single symmetric rotation
-        # about the base cannot: it forces the two ends to be equal and opposite.
-        if shadow_h is not None or light_h is not None:
-            if u <= 0.5:
-                target, k = (shadow_h if shadow_h is not None else h), 1 - (u * 2)
+            # Hue. Explicit targets express the rule as artists state it, "shadows go
+            # toward blue, highlights toward yellow", which a single symmetric rotation
+            # about the base cannot: it forces the two ends to be equal and opposite.
+            if shadow_h is not None or light_h is not None:
+                if u <= 0.5:
+                    target, k = (shadow_h if shadow_h is not None else h), 1 - (u * 2)
+                else:
+                    target, k = (light_h if light_h is not None else h), (u - 0.5) * 2
+                H = _lerp_hue(h, target, k)
             else:
-                target, k = (light_h if light_h is not None else h), (u - 0.5) * 2
-            H = _lerp_hue(h, target, k)
-        else:
-            H = (h + (t * hue_shift / 360.0)) % 1.0
+                H = (h + (t * hue_shift / 360.0)) % 1.0
 
-        # Saturation. A ramp's chroma peaks in the midtone and falls at both ends:
-        # highlights desaturate toward the light, deep shadows toward ambient. The
-        # monotonic form cannot express that, so the brightest step came out the most
-        # saturated, which is the opposite of how a hand-built ramp reads.
-        if sat_curve == "peak":
-            falloff = (2 * u - 1) ** 2  # 0 at the midtone, 1 at either end
-            S = sat * (1 - (saturation_shift / 100.0) * falloff)
-        else:
-            S = sat * (1 + t * saturation_shift / 100.0)
-        S = min(1.0, max(0.0, S))
+            # Saturation. A ramp's chroma peaks in the midtone and falls at both ends:
+            # highlights desaturate toward the light, deep shadows toward ambient. The
+            # monotonic form cannot express that, so the brightest step came out the most
+            # saturated, which is the opposite of how a hand-built ramp reads.
+            if sat_curve == "peak":
+                falloff = (2 * u - 1) ** 2  # 0 at the midtone, 1 at either end
+                S = sat * (1 - (saturation_shift / 100.0) * falloff)
+            else:
+                S = sat * (1 + t * saturation_shift / 100.0)
+            S = min(1.0, max(0.0, S))
 
-        rr, gg, bb = colorsys.hls_to_rgb(H, L, S)
-        colors.append(f"#{round(rr * 255):02x}{round(gg * 255):02x}{round(bb * 255):02x}")
+            rr, gg, bb = colorsys.hls_to_rgb(H, L, S)
+            colors.append(
+                f"#{round(rr * 255):02x}{round(gg * 255):02x}{round(bb * 255):02x}")
+        return colors
 
-    result = {"steps": steps, "colors": colors}
+    colors = build(light_range)
+    distinct = len(set(colors))
+    result = {"steps": steps, "colors": colors, "distinct": distinct}
+    # Only when it happened. A ramp that came back whole should not grow a warning saying
+    # so, for the same reason the pixel counters do not grow a "0".
+    if distinct < steps:
+        result["warnings"] = [
+            ramps.clip_warning(
+                colors, steps, ramps.nearest_unclipped(build, steps, light_range)
+            )
+        ]
     applied = _apply_palette(filename, colors, apply)
     if applied is not None:
         result["applied"] = applied

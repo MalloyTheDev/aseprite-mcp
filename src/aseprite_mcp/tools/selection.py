@@ -26,6 +26,7 @@ from pathlib import Path
 from ..app import mcp
 from ..core.errors import ValidationFailed
 from ..core.limits import MAX_PIXEL_LIST_LENGTH, check_list_length
+from ..core.paths import selection_sidecar
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -37,10 +38,11 @@ _MODIFY_OPS = ("expand", "contract", "border")
 def mask_path_for(sprite_path: Path) -> Path:
     """The sidecar that holds this sprite's selection.
 
-    Beside the sprite rather than in a subdirectory, so it is discoverable: someone
-    looking at the workspace can see that a sprite has a selection attached.
+    Defined in `core.paths` alongside the rest of the path policy, because the sprite tools
+    need the same answer: replacing a sprite has to throw its selection away, and two
+    modules guessing at the same suffix is how that stops being true.
     """
-    return sprite_path.with_suffix(".msk")
+    return selection_sidecar(sprite_path)
 
 
 def _mask_lua(sprite_path: Path) -> str:

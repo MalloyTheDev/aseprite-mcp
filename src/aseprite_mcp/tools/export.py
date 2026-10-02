@@ -9,7 +9,11 @@ from __future__ import annotations
 from ..app import mcp
 from ..core.errors import ExportError, ValidationFailed
 from ..core.models import FRAME_GUARD_LUA
-from ..core.paths import ensure_output_path, ensure_output_pattern
+from ..core.paths import (
+    discard_selection_sidecar,
+    ensure_output_path,
+    ensure_output_pattern,
+)
 from ..core.runner import run_cli, run_lua
 from .common import lua_path, resolve_path
 
@@ -619,6 +623,11 @@ def import_image(input_image: str, output: str, overwrite: bool = False) -> dict
         overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
     dst = ensure_output_path(output, overwrite=overwrite)
+    # This writes a sprite, so unlike every other tool in this module it has to forget any
+    # selection sitting beside that path. None of the exports may: `with_suffix` maps
+    # `hero.png` and `hero.aseprite` onto the same `hero.msk`, so an export doing this
+    # would throw away the selection of the sprite it was exporting.
+    discard_selection_sidecar(dst)
     args = {
         "src": lua_path(resolve_path(input_image)),
         "dst": lua_path(dst),
