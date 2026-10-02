@@ -120,10 +120,11 @@ there: nothing that writes a file the caller owns is marked read-only.
 
 Key that list on the annotation rather than on the tool's name. The hint comes from a
 hand-curated `READ_ONLY_TOOLS` set in `src/aseprite_mcp/app.py`, not from a name pattern,
-and it is narrower than the naming suggests: `get_selection`, `assess_sprite` and
-`diff_sprites` only measure, but none of the three carries the hint. A client keyed on
-`get_*` would therefore auto-approve one tool the server does not vouch for, and still
-prompt on the other two.
+and it is wider than any name pattern: of the nineteen tools that carry it, only seven are
+named `get_*`. A client keyed on `get_*` would keep prompting on `assess_sprite`,
+`diff_sprites`, `render_preview`, `list_sprites`, `list_slices`, `health_check`,
+`gui_available`, `plan_asset_spec` and the four `validate_*` tools, all of which the
+server does vouch for.
 
 ### Claude Code (CLI)
 

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes target the latest released `0.8.x` line and `main`. Older tags are not
+Security fixes target the latest released `0.9.x` line and `main`. Older tags are not
 patched; upgrade to the newest release.
 
 ## Threat model

@@ -80,11 +80,26 @@ Aseprite GUI.
   duplicating a frame; and `validate_loop` measures the result and names the faults a
   still frame hides: a wrap frame repeating the first, a pose held by duplication,
   placeholder timing, a contact edge that drifts.
+- **Calls you can check** - the three bullets above measure the artwork; this one measures
+  the call. A tool that did something other than what it was asked for is the failure this
+  server keeps finding, and it is always quiet, so the result says *what* happened rather
+  than that it happened. A write whose selection excluded every pixel reports
+  `pixels_outside_selection` rather than a bare `ok`. `shade_region_by_light` and
+  `specular_highlight` report `region_components` and `region_bounds`, because `base_color`
+  scopes by colour *distance* and two materials' ramps are routinely closer than the
+  default tolerance: every step of a gold ramp is within it of a step of a brass one, so a
+  pass can land somewhere its caller never looked. `generate_ramp` reports `distinct` and,
+  when lightness clamping has collapsed two steps onto one colour, the `light_range` that
+  would not have. `dither_band` names the two colours its 1-based steps resolved to.
+  Every one of those exists because its absence cost a debugging session, and the
+  [showcase generators](scripts/showcase/README.md) are where they were spent.
 - **Sandboxed file access**: by default the file capability is scoped to the workspace
   (relative paths only; absolute/`..` paths rejected unless you opt in).
 - **No-clobber by default**: output-writing tools refuse to overwrite an existing file;
   pass `overwrite=True` to replace it intentionally.
-- **Structured results**: every editing tool returns JSON describing the updated sprite.
+- **Structured results**: every editing tool returns JSON describing the updated sprite,
+  and every pixel-writing one returns how many pixels it wrote, clipped, skipped, or lost
+  to an active selection.
 - **`render_preview`** returns a PNG so the agent can *see* its work and self-correct.
 - **Deterministic, stateless, robust**: each call is an isolated, headless Aseprite run.
 
@@ -764,7 +779,7 @@ and every result that touched pixels reports `selection_applied`.
 | `add_outline` | Pixel outline around art (outside/inside, 4/8-connectivity, thickness). |
 | `add_drop_shadow` | Hard drop shadow on a new layer beneath the art. |
 | `cast_shadow` | A shadow on the ground, away from the light and foreshortened by its height, built of ramp steps and clipped to the surface it falls on. |
-| `glow` | A halo of several rings, each a step further down a ramp, optionally dithered at the outer edge. Its own layer, so deleting it removes the effect. |
+| `glow` | A halo of several rings, each a step further down a ramp, optionally dithered at the outer edge. Its own layer, so deleting it removes the effect, and one cel a frame, so one layer carries an animated one. |
 | `replace_color` | Swap a colour (with per-channel tolerance). |
 | `remove_stray_pixels` | Replace pixels with no neighbour of their own colour by the colour around them: the dirt a shading pass leaves, without touching a dither or introducing a colour. |
 | `invert_colors` | Invert RGB (alpha preserved). |
@@ -799,7 +814,7 @@ and every result that touched pixels reports `selection_applied`.
 | `extract_palette` | Collect the unique colours used in a sprite/image. |
 | `sort_palette` | Sort by hue/luminance/saturation/value (remaps indexed pixels). |
 | `quantize_palette` | Derive a palette from the artwork itself, reduced to at most N colours. |
-| `generate_ramp` | Build a hue-shifted shading ramp from a base colour. |
+| `generate_ramp` | Build a hue-shifted shading ramp from a base colour. Says how many steps came back distinct, since lightness clamps at both ends. |
 | `ramp_between` | Build a ramp from its two ends, the cool shadow and the warm highlight, interpolated in Oklab so the middle is a blend rather than a hue rotation. |
 | `ramp_from_art` | Recover the ramp a sprite is already painted with, ordered dark to light, with the share of the art each step covers. |
 
