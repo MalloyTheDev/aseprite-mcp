@@ -237,6 +237,98 @@ def plan_tween(
     return {"steps": steps, "warnings": warnings}
 
 
+# ------------------------------------------------- what the tween pivots and costs
+# Both of these are arithmetic over the source cel's drawn bounds, and both used to exist
+# only in Lua, where the pure test tier cannot reach them. The bounds themselves are the
+# editor's to measure, and `tween_cels` is one Aseprite launch by design (#124), so there
+# is no read pass in which Python could learn them and decide before the write happens.
+#
+# That leaves two options and the repository has already chosen between them once: the
+# decision lives here as the authority, the Lua carries a transcription of it, and a test
+# asserts the two agree on a real sprite. `lighting.filled_ellipse_points` is the
+# precedent. The alternative, two implementations with nothing holding them together, is
+# what produced an indexed decode that disagreed with itself (#134) and two slice readers
+# of which one was incomplete (#106).
+def anchor_point(bounds: dict, mode: str) -> tuple[float, float]:
+    """The point a squash or stretch pivots around, within the drawn bounds.
+
+    Measured on the pixel centres rather than the box edges: a 4px wide box spans columns
+    0 to 3, so its centre is 1.5 and not 2.0. Half a pixel sounds like nothing and is the
+    difference between a scaled shape that stays put and one that creeps a pixel per
+    frame, which over an eight frame tween is a shape that has visibly walked.
+
+    A `bottom` anchor is the one that matters most in practice: it is what keeps a
+    squashing character's feet on the floor, and `tests/test_animation.py` asserts a
+    `contact_drift_px` of 0 for exactly that case.
+    """
+    if mode not in ANCHORS:
+        raise ValueError(f"unknown anchor {mode!r}; expected one of {', '.join(ANCHORS)}")
+    centre_x = bounds["x"] + (bounds["width"] - 1) / 2.0
+    centre_y = bounds["y"] + (bounds["height"] - 1) / 2.0
+    if mode == "top":
+        return (centre_x, float(bounds["y"]))
+    if mode == "bottom":
+        return (centre_x, float(bounds["y"] + bounds["height"] - 1))
+    if mode == "left":
+        return (float(bounds["x"]), centre_y)
+    if mode == "right":
+        return (float(bounds["x"] + bounds["width"] - 1), centre_y)
+    return (centre_x, centre_y)
+
+
+def tween_sample_budget(
+    bounds: dict,
+    steps: list[dict],
+    *,
+    anchor: str,
+    canvas_width: int,
+    canvas_height: int,
+) -> dict:
+    """How many pixels a tween would resample, and the box each frame lands in.
+
+    The count is what the cap is enforced against, so it has to be the work the sampler
+    will actually do rather than an estimate of it:
+
+    * The source box is counted once, as the base. That pass happens whatever the
+      transforms are, and on a large canvas it is already millions of reads, so a budget
+      that ignored it would not bound the call it exists to bound.
+    * Each frame contributes its destination box, found by pushing the source box's four
+      corners through that frame's forward matrix. Corners are enough because the
+      transform is affine, so the image of a rectangle is a parallelogram and its
+      axis-aligned bound is the bound of its corners.
+    * A pixel of slop each way, because a nearest-neighbour sample can round into the box
+      from just outside it, and a dropped edge row is a shape that loses its outline.
+    * Then clipped to the canvas, since nothing off it will be sampled.
+
+    `off_canvas` is reported per frame before the clipping, because "this frame will be
+    cut off" is the caller's business and is invisible once the box has been clipped to
+    fit.
+    """
+    anchor_x, anchor_y = anchor_point(bounds, anchor)
+    left, top = bounds["x"], bounds["y"]
+    right, bottom = left + bounds["width"] - 1, top + bounds["height"] - 1
+    corners = ((left, top), (right, top), (left, bottom), (right, bottom))
+
+    samples = bounds["width"] * bounds["height"]
+    boxes: list[dict] = []
+    for step in steps:
+        xs, ys = [], []
+        for corner_x, corner_y in corners:
+            off_x, off_y = corner_x - anchor_x, corner_y - anchor_y
+            xs.append(anchor_x + step["f00"] * off_x + step["f01"] * off_y)
+            ys.append(anchor_y + step["f10"] * off_x + step["f11"] * off_y)
+        x0, x1 = math.floor(min(xs)), math.ceil(max(xs))
+        y0, y1 = math.floor(min(ys)), math.ceil(max(ys))
+        off_canvas = x0 < 0 or y0 < 0 or x1 > canvas_width - 1 or y1 > canvas_height - 1
+        x0, y0 = max(0, x0 - 1), max(0, y0 - 1)
+        x1 = min(canvas_width - 1, x1 + 1)
+        y1 = min(canvas_height - 1, y1 + 1)
+        boxes.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "off_canvas": off_canvas})
+        if x1 >= x0 and y1 >= y0:
+            samples += (x1 - x0 + 1) * (y1 - y0 + 1)
+    return {"samples": samples, "boxes": boxes}
+
+
 # ------------------------------------------------------------------------- the smear
 def box_centre(bounds: dict) -> tuple[float, float]:
     """The centre of a content box, in pixel coordinates."""

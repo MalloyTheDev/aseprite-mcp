@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from aseprite_mcp.core import inbetween
 from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.core.runner import AsepriteError
 from aseprite_mcp.tools import (
@@ -781,15 +782,30 @@ def test_a_transform_that_lands_off_the_canvas_is_refused_atomically(request):
 
 
 def test_a_tween_too_big_to_run_is_refused_with_the_sample_count(request):
+    """The cap is driven by the source cel's drawn *bounds*, not by how much of that box
+    is painted, so two specks at opposite corners buy the same refusal as a full canvas.
+
+    This used to fill 2048x2048 and copy the cel three times, which is 4.2 million
+    `img_set` calls to produce a bounding box, and the tween is refused before it reads a
+    single source pixel anyway. The Aseprite tier is the slowest part of the gate at
+    roughly eleven minutes, and a test that spends a chunk of that on setup it does not
+    need is a test that makes every future run worse.
+    """
     name = f"a/{request.node.name}.aseprite"
     sprite.create_sprite(name, 2048, 2048)
-    drawing.draw_rectangle(name, 0, 0, 2048, 2048, "#b04a5a", filled=True)
+    drawing.draw_rectangle(name, 0, 0, 2, 2, "#b04a5a", filled=True)
+    drawing.draw_rectangle(name, 2046, 2046, 2, 2, "#b04a5a", filled=True)
     for _ in range(3):
         frames.add_frame(name)
     for f in (2, 3, 4):
         cels.copy_cel(name, "Layer 1", 1, f)
-    with pytest.raises(AsepriteError, match="maximum is"):
+
+    with pytest.raises(AsepriteError, match="maximum is") as err:
         animation.tween_cels(name, "Layer 1", [1, 2, 3, 4], scale_to=1.6)
+
+    # The number in the refusal, not just the fact of one: that is what pins the box to
+    # the full canvas and so proves the cheaper fixture still reaches the same cap.
+    assert "would resample" in str(err.value)
 
 
 # --------------------------------------------------- refused before Aseprite is launched
@@ -1191,3 +1207,52 @@ def test_a_ramp_of_palette_indices_is_refused_with_the_reason():
     with pytest.raises(ValidationFailed, match="palette index"):
         animation.smear_frame("unused.aseprite", "Layer 1", 2,
                               ramp=["index:1", "index:2"])
+
+
+# ------------------------------------- the Lua transcriptions agree with Python (#149)
+# `anchor_point` and the sample budget exist twice: as the authority in
+# `core/inbetween.py`, where the pure tier can test them without an editor, and as a
+# transcription inside _TWEEN_LUA, because the bounds are the editor's to measure and this
+# tool is one Aseprite launch by design. A dual implementation is only safe while
+# something holds the two together. These are that something.
+@pytest.mark.parametrize("mode", list(inbetween.ANCHORS))
+def test_the_lua_anchor_agrees_with_the_python_one(request, mode):
+    """Driven through a real tween on a deliberately off-centre, even-sided box, which is
+    where an implementation measuring box edges rather than pixel centres diverges by half
+    a pixel."""
+    name = f"a/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 48, 48)
+    drawing.draw_rectangle(name, 7, 11, 8, 14, "#b04a5a", filled=True)
+    frames.add_frame(name)
+
+    result = animation.tween_cels(name, "Layer 1", [1, 2], scale_to=1.2, anchor=mode)
+
+    expected_x, expected_y = inbetween.anchor_point(result["source_bounds"], mode)
+    assert (result["anchor"]["x"], result["anchor"]["y"]) == (expected_x, expected_y)
+
+
+def test_the_lua_sample_budget_agrees_with_the_python_one(request):
+    """The cap's number, recomputed from outside the editor and compared rather than
+    trusted. `source_bounds` is in the result for exactly this: it is the one input only
+    Aseprite could supply, so with it in hand the rest of the arithmetic is reproducible.
+    """
+    name = f"a/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 64, 64)
+    drawing.draw_ellipse(name, 20, 24, 9, 13, "#b04a5a", filled=True)
+    for _ in range(3):
+        frames.add_frame(name)
+
+    result = animation.tween_cels(
+        name, "Layer 1", [1, 2, 3, 4], scale_to=1.7, rotate_to=30.0, anchor="bottom",
+        ease="ease_out")
+
+    plan = inbetween.plan_tween(
+        4, scale_from=1.0, scale_to=1.7, scale_y_from=1.0, scale_y_to=1.7,
+        rotate_from=0.0, rotate_to=30.0, opacity_from=255, opacity_to=255,
+        ease="ease_out")
+    budget = inbetween.tween_sample_budget(
+        result["source_bounds"], plan["steps"],
+        anchor="bottom", canvas_width=64, canvas_height=64)
+
+    assert result["samples"] == budget["samples"]
+    assert result["samples"] > 0, "a budget of zero would make the comparison vacuous"
