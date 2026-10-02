@@ -30,7 +30,7 @@ PURE_PYTHON_TESTS = (
     "test_quality", "test_slice_data", "test_tool_docs", "test_loopcheck",
     "test_motion", "test_timing", "test_ramps",
     "test_frameops", "test_spritediff", "test_indexed", "test_lighting",
-    "test_inbetween", "test_style",
+    "test_inbetween", "test_style", "test_metadata", "test_quantization",
 )
 # Deliberately absent: test_walk_template_batch, which compares a batched scaffold against
 # the per-frame one it replaced and so needs the real editor. It belongs to the

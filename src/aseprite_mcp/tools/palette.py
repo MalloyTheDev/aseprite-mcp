@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import indexed, ramps
+from ..core import indexed, quantization, ramps
 from ..core.errors import ValidationFailed
-from ..core.limits import MAX_COLOR_LIST_LENGTH, check_count, check_list_length
+from ..core.limits import (
+    MAX_ASSESS_PIXELS,
+    MAX_COLOR_LIST_LENGTH,
+    check_count,
+    check_list_length,
+)
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
@@ -236,6 +241,127 @@ def extract_palette(
     RESULT = { count = #colors, colors = hexes }
     """
     return run_lua(body, args)
+
+
+@mcp.tool()
+def quantize_palette(filename: str, max_colors: int = 256) -> dict:
+    """Derive a palette from the art, reduced to at most `max_colors` entries.
+
+    The step between a picture and pixel art. `extract_palette` lists the colours a
+    sprite already uses but cannot reduce them to a budget, and `set_color_mode` maps art
+    onto a palette but cannot decide what the palette should be. This asks the editor's
+    own quantizer for the best `max_colors` colours for this art and installs them, which
+    is what to do before `set_color_mode("indexed", palette_source="keep")`.
+
+    One entry is spent on transparency, at index 0, which is what an indexed sprite needs
+    there: an opaque colour at the transparent index is in the palette and can never be
+    drawn.
+
+    **`max_colors` is a ceiling and nothing more, and it has a cliff in it.** The
+    reduction merges whole levels of colour space at a time, so it can stop well short of
+    what was asked for: measured, four distinct colours with `max_colors=4` came back as
+    one mid-grey that was the average of all four, while `max_colors=5` on the same art
+    returned all four exactly. The result therefore reports how many colours the art has,
+    how many of them the new palette holds exactly, and how many entries can draw at all,
+    and says in `warnings` when the palette cannot hold the art. Raising `max_colors` by
+    a little is usually what fixes it.
+
+    Refuses an indexed sprite. There a pixel is an offset into the palette rather than a
+    colour, so replacing the palette changes what every pixel means without touching a
+    pixel; the error says how to do it in that case.
+
+    Past a million pixels the art is not scanned, the palette is still derived, and the
+    result says the comparison was skipped rather than implying the art is blank.
+    """
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "max_colors": quantization.check_max_colors(max_colors),
+        "scan_cap": quantization.MAX_SCANNED_COLORS,
+        # Paid per pixel through getPixel and px_to_rgba, which is the slow decode rather
+        # than the byte-stride count `MAX_VERIFY_PIXELS` is sized for, so the smaller cap
+        # is the right one: a million pixels is about six tenths of a second.
+        "max_scan_pixels": MAX_ASSESS_PIXELS,
+    }
+    body = """
+    local spr = open_sprite(ARG.src)
+    if spr.colorMode == ColorMode.INDEXED then
+      error("this sprite is indexed, so its pixels are offsets into the palette rather " ..
+            "than colours: replacing the palette would change what every pixel means " ..
+            "without touching a pixel, and the art on disk is left alone instead. " ..
+            "Measured on an indexed sprite, quantizing reordered the palette and the " ..
+            "art came back showing different colours, and a reduction left pixels " ..
+            "pointing past the end of the palette. To reduce an indexed sprite's " ..
+            "palette: set_color_mode(rgb), quantize_palette, then " ..
+            "set_color_mode(indexed, palette_source='keep'), which remaps the art.", 0)
+    end
+
+    -- The art's own colours, counted before the palette is replaced. Only the count and
+    -- the exact matches are reported: the palette is the tool's output and the art's
+    -- colours are the question asked of it, not a second palette to hand back.
+    local scan_pixels = spr.width * spr.height * #spr.frames
+    local scanned = scan_pixels <= ARG.max_scan_pixels
+    local seen, art, capped = {}, 0, false
+    if scanned then
+      for f = 1, #spr.frames do
+        local flat = Image(spr.spec); flat:clear(); flat:drawSprite(spr, f)
+        for y = 0, flat.height - 1 do
+          for x = 0, flat.width - 1 do
+            local r, g, b, a = px_to_rgba(spr, flat:getPixel(x, y))
+            if a > 0 then
+              local key = string.format("%d_%d_%d_%d", r, g, b, a)
+              if seen[key] == nil then
+                if art < ARG.scan_cap then
+                  seen[key] = true
+                  art = art + 1
+                else
+                  capped = true
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+
+    app.command.ColorQuantization{ ui = false, maxColors = ARG.max_colors }
+
+    local pal = spr.palettes[1]
+    local have = {}
+    for i = 0, #pal - 1 do
+      local c = pal:getColor(i)
+      have[string.format("%d_%d_%d_%d", c.red, c.green, c.blue, c.alpha)] = true
+    end
+    local exact = 0
+    for key in pairs(seen) do if have[key] then exact = exact + 1 end end
+    local colors = {}
+    for i = 0, #pal - 1 do colors[i + 1] = color_hex(pal:getColor(i)) end
+
+    save_sprite(spr)
+    RESULT = { ok = true, requested = ARG.max_colors, size = #pal, colors = colors,
+               art_scanned = scanned, art_colors = art, art_colors_exact = exact,
+               art_colors_capped = capped }
+    if not scanned then
+      RESULT.unscanned_reason = string.format(
+        "%d pixels across %d frame(s) is past the scan cap of %d", scan_pixels,
+        #spr.frames, ARG.max_scan_pixels)
+    end
+    """ + _PALETTE_STATE_LUA
+    result = run_lua(body, args)
+    # The judgement is pure and lives in `core.quantization`; this only hands it the
+    # measurement. `indexed.palette_readings` is deliberately not also applied: it can
+    # only speak about indexed sprites, and this tool refuses those.
+    notes = quantization.quantization_readings({
+        "requested": result.get("requested"),
+        "size": result.get("size"),
+        "drawable": (result.get("palette") or {}).get("drawable"),
+        "art_scanned": result.get("art_scanned", True),
+        "art_colors": result.get("art_colors"),
+        "art_colors_exact": result.get("art_colors_exact"),
+        "art_colors_capped": result.get("art_colors_capped"),
+    })
+    if notes:
+        result["warnings"] = notes
+    return result
 
 
 @mcp.tool()

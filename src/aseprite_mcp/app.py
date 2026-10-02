@@ -183,6 +183,10 @@ READ_ONLY_TOOLS = frozenset({
     "get_cel",
     "get_palette",
     "get_pixels",
+    # Opens the sprite, enumerates one property group, and never saves. It is the only
+    # way to read custom properties back, so an agent that writes metadata calls it as
+    # often as it calls get_sprite_info.
+    "get_properties",
     "get_selection",
     "get_sprite_info",
     "get_tilemap",
@@ -226,9 +230,17 @@ DESTRUCTIVE_TOOLS = frozenset({
     # Overwrites a whole layer or the whole palette with new content.
     "fill_layer",
     "load_palette",
+    # Derives a new palette from the art and installs it over whatever was there. The
+    # old palette is not recoverable from the result, and on a sprite whose palette was
+    # hand-built or loaded from a .gpl that is the thing being thrown away.
+    "quantize_palette",
     "replace_color",
     "resize_palette",
     "set_palette",
+    # Writes one key, which replaces whatever that key held, and with delete=True removes
+    # it outright. Small, but it is somebody's stored metadata and nothing else keeps a
+    # copy of it.
+    "set_properties",
     # Its op vocabulary includes remove_layer, clear_layer, remove_tag and replace_color,
     # so any given batch may well be destructive.
     "apply_operations",
