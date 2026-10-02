@@ -18,6 +18,7 @@ from ..core.limits import (
     MAX_OUTLINE_THICKNESS,
     MAX_SHADOW_ELLIPSE_POINTS,
     MAX_SHADOW_SOFTNESS,
+    MAX_STRAY_CLUSTER,
     check_count,
     check_list_length,
     check_region_size,
@@ -30,12 +31,6 @@ from .shading import _FIELD_LUA
 
 _GRAD_TYPES = {"linear", "radial"}
 
-# The largest detached cluster `remove_stray_pixels` will call dirt. Dirt arrives in ones
-# and twos; by eight pixels a thing standing clear of the artwork is a mark somebody drew,
-# and erasing it changes the silhouette, which is the one thing that tool otherwise never
-# does. The cap also bounds the work: each cluster is walked until it passes this size, so a
-# higher ceiling would cost a multiple of the single pass over every pixel of the art.
-_MAX_STRAY_CLUSTER = 8
 
 
 @mcp.tool()
@@ -1242,7 +1237,7 @@ def remove_stray_pixels(
     otherwise: a count of work nobody asked for reads as a finding.
     """
     min_cluster = check_count(
-        "min_cluster", min_cluster, _MAX_STRAY_CLUSTER, minimum=1,
+        "min_cluster", min_cluster, MAX_STRAY_CLUSTER, minimum=1,
         remedy="A detached cluster that big is a mark rather than a speck, and erasing it "
                "is a silhouette change this tool should not be making on your behalf: "
                "draw_pixels with 'transparent' is the honest way to remove a shape.",
