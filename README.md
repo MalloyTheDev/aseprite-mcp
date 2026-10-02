@@ -11,6 +11,8 @@
   <img src="docs/assets/showcase/item_sheet.png" height="112" alt="A heart, a coin, a potion and a sword, each shaded on its own colour ramp">
   &nbsp;
   <img src="docs/assets/showcase/walk8.gif" height="112" alt="A small creature turning through eight compass facings">
+  &nbsp;
+  <img src="docs/assets/showcase/zorder.gif" height="112" alt="A sword swung past a round shield, passing behind it and then in front, with the layers never reordered">
 </p>
 <p align="center">
   <img src="docs/assets/showcase/shading_stages.png" width="560" alt="One disc taken from flat colour, to shaded by light direction, to outlined and dithered">
@@ -92,7 +94,7 @@ Aseprite GUI.
 
 | | |
 | --- | --- |
-| [Showcase](#showcase) | What the tools produce, with the numbers behind it |
+| [Showcase](#showcase) | What the tools produce, with the numbers behind it, including per-cel ordering and palette reduction |
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
@@ -158,6 +160,80 @@ passed: true
 An agent cannot watch a GIF play. It can read that the spacing is symmetric about the
 apex, that the ball slows as it rises and speeds as it falls, and that the extremes are
 held two and a half times as long as the passing frames.
+
+### Reorder one cel, not the layer stack
+
+<p align="center">
+  <img src="docs/assets/showcase/zorder_pair.png" width="500" alt="Two frames of the same sprite: the shield interrupts the blade, then the blade runs across the shield">
+</p>
+<p align="center">
+  <sub>The same two layers in the same order, on two frames. Only the cel's z-index differs.</sub>
+</p>
+
+```python
+set_cel_z_index("swing.aseprite", "sword", frame=2, z=0)   # blade behind the shield
+set_cel_z_index("swing.aseprite", "sword", frame=3, z=2)   # blade in front, same layer
+```
+
+A blade that crosses a shield is behind it on the approach and in front of it on the
+follow-through, and a layer stack cannot say that: a layer's position applies to every
+frame at once. Moving the layer changes the other frames; duplicating the sword onto a
+second layer means hiding one of the two per frame and keeping two drawings in step
+forever.
+
+`z` is an offset on the layer's own stack position, so `0` means "wherever this layer
+sits" and a cel one layer down needs only `z=1` to draw in front of the one above it. The
+result reports the frame's competing cels back to front, because a number alone does not
+tell you the arm moved:
+
+```
+frame 2  z=0  renders: sword then shield   pixel (45,20) is #5c7a3a, the shield's oak
+frame 3  z=2  renders: shield then sword   pixel (45,20) is #eef1f5, the blade's steel
+```
+
+That pixel is the whole claim, and [the generator asserts
+it](scripts/showcase/zorder.py): a z-index that round-tripped through the file while
+changing nothing about the render would produce an identical-looking strip. The blade is
+drawn long enough to show its tip on the far side, because "behind" only reads as
+occlusion when you can see both ends of the thing being occluded. Note also that
+`z` is refused outside -32768 to 32767, because the editor accepts a larger number in
+memory and then stores it in a 16-bit field, so saving and reopening turned 32768 into
+-32768.
+
+### Turn a blend into pixel art
+
+<p align="center">
+  <img src="docs/assets/showcase/quantize_stages.png" width="620" alt="A dusk scene three times: smoothly rendered, then reduced to thirteen colours, then to five">
+</p>
+<p align="center">
+  <sub>117 colours, then 13, then 5. The banding is the palette doing its work, not a filter over the top.</sub>
+</p>
+
+```python
+quantize_palette("dusk.aseprite", max_colors=14)            # derive a palette from the art
+set_color_mode("dusk.aseprite", "indexed", palette_source="keep")   # then map the art onto it
+```
+
+`extract_palette` reports the colours an image already uses and `set_color_mode` maps art
+onto a palette that exists; `quantize_palette` is the step in between, deriving a small
+palette *from* the artwork.
+
+It is two calls on purpose, and the first one touches no pixels. Quantizing derives the
+palette and says so:
+
+```
+max_colors=14   palette holds 14, art has 117, 8 of them exactly
+    warning: 109 of the 117 colours in the art are not in the derived palette and will be
+             approximated by their nearest entry when the sprite is converted to indexed.
+converted to indexed   3888 drawn pixels, verified=True, now 13 colours
+```
+
+`verified=True` is the conversion confirming it did not lose a single drawn pixel, which
+is the one thing a mode change must never do quietly. `max_colors` is also a ceiling with
+a cliff in it: a budget equal to the number of colours in the art is where the reduction
+collapses, and four colours at `max_colors=4` come back as one averaged grey while
+`max_colors=5` returns all four. The result says which happened rather than reporting a
+clean reduction either way.
 
 ### Scaffold a whole asset in one call
 
