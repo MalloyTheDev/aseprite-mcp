@@ -381,6 +381,46 @@ brass pass that had already repainted the straps, only 3 pixels of the chest wer
 colour it was given. It runs before that pass now and reports 102 darkened wood pixels,
 which the generator asserts is not zero.
 
+### Animate a palette, not the pixels
+
+<img src="docs/assets/showcase/lava.gif" width="384" alt="A lava cavern: a cataract falls
+into a molten pool while the stone stays still" align="right">
+
+Every other animation here moves something. This one moves nothing: there is **one drawn
+frame**, and the lava flows because its *indices* rotate. `cycle_palette` generates the
+timeline from that single frame, and the twenty-four frames of the loop contain no new
+drawing at all.
+
+The technique constrains the art rather than the other way round, and
+[`lava.py`](scripts/showcase/lava.py) records the three drafts it took to learn how. A
+rotation can only translate a pattern that is **monotone in index space**, so the lava has
+to be painted as a sawtooth of consecutive indices laid across the direction of travel; a
+triangle would reflect instead of flowing. The run has to **close**, because a one-way dark
+to white ramp puts a bright-to-black seam at every wrap, which reads as a moving staircase.
+And it has to be **long and weighted**: with eight entries the bright one recurs every eight
+pixels, which is a bright line every eight pixels however the brightnesses are arranged, so
+the fall came out as a drill thread. This run is twenty-four entries of which twelve are
+crust that barely differ, built by three `ramp_between` calls joined at shared ends, and
+what travels is the crack.
+
+**The direction is a sign, and not the one you would reason to.** `step=1` puts frame two's
+row *y* where frame one's row *y - 1* was, so the pattern travels down and the cataract
+falls. The first draft had it running uphill.
+
+The cataract and the pool drift differently, and **both come out of the same call**: the
+fall is banded by row and the pool across the flow, so one rotation moves one down and the
+other sideways. Nothing in the generator says "move this down and that right".
+
+The stone is the control, and the generator holds it to that: it reads the same rock window
+on all twenty-four frames and requires it unchanged, which is what separates "the colours
+rotated" from "the picture was redrawn". It also checks the flow by comparing two frames
+through a *shifted* window, which is how the backwards `step` was caught. Aseprite's Lua API
+exposes no per-frame palette (measured on 1.3.18.6 and written down in `cycle_palette`'s own
+docstring), so the rotation is applied to the pixels' own indices and the result says which
+mechanism ran: `method: "pixel_remap"`. On an indexed sprite the two are the same picture,
+and the move never routes a colour through a nearest-entry match, so the palette comes back
+byte for byte.
+
 ### Scaffold a whole asset in one call
 
 <p align="center">
