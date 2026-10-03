@@ -53,6 +53,20 @@ If a run stops matching, a tool's output has changed. Find out which tool and wh
 recommitting, because the alternative is a showcase that quietly drifts away from what the
 tools actually do.
 
+A deliberate redraw is the other reason an image changes, and it is worth distinguishing
+from that one because the procedure is different: nothing is wrong, so there is nothing to
+find out. `assets/skeleton.png` was redrawn after a review at native scale. The old figure
+was symmetrical, both arms were the same two-pixel rectangle at the same angle, the legs ran
+off the bottom of the canvas with no feet, and there was no pelvis for them to attach to: it
+read as programmer art. It has joints, one raised arm, a ribcage with air in it, a pelvis
+and feet now.
+
+One thing that redraw taught, which the next person to touch a thirty-two pixel skull will
+want: the features have to stay *separate* dark masses with lit bone between them. The first
+attempt put a jaw line one row under the eye sockets and a nose between them, and all three
+merged into a single shape that read as one enormous eye. Sockets high, a clear lit row
+under them, the jaw line below that, and no nose at all.
+
 They need a real Aseprite, like the `--run-aseprite` tests do. `orb.py`, `zorder.py` and
 `quantize.py` compose their panels into one strip with Pillow; the rest export directly.
 `dungeon.py` is the slowest by a distance, because its light falloff is one
