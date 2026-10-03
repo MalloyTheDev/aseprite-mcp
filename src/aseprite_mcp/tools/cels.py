@@ -20,7 +20,6 @@ sharing, and `unlink_cels` gives a frame its own copy back.
 
 from __future__ import annotations
 
-import json
 from typing import Annotated
 
 from pydantic import BeforeValidator
@@ -378,7 +377,7 @@ def _coerce_property_value(value: object) -> object:
     or a boolean because its JSON text parses as one.
     """
     if isinstance(value, (dict, list, bool, int, float)):
-        return json.dumps(value)
+        return metadata.encode_property_value(value)
     return value
 
 

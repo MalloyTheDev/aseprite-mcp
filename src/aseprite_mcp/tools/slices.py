@@ -12,6 +12,7 @@ from typing import Annotated
 from pydantic import BeforeValidator
 
 from ..app import mcp
+from ..core.errors import ValidationFailed
 from ..core.runner import run_lua
 from ..core.slice_metadata import parse_user_data
 from .common import lua_path, parse_color, resolve_path
@@ -32,7 +33,20 @@ def _coerce_slice_data(value: object) -> object:
     validation still applies to it: `data=5` is a mistake and stays an error.
     """
     if isinstance(value, (dict, list)):
-        return json.dumps(value)
+        try:
+            return json.dumps(value)
+        except RecursionError as exc:
+            # `json.dumps` walks the value recursively, so user-data nested past the
+            # interpreter's limit raised a RecursionError here: a RuntimeError, which
+            # reaches the client as an untyped internal failure with no remedy in it.
+            # This runs as a `BeforeValidator`, so it fails ahead of any cap. Slice
+            # user-data has no depth cap of its own (it is stored opaquely and read
+            # back by `core.slice_metadata`), so the refusal names the shape to send
+            # rather than a limit nothing else enforces.
+            raise ValidationFailed(
+                "data nests too deeply to encode. Slice user-data is a short tag like "
+                '{"type": "hitbox", "id": "body"}; flatten it.'
+            ) from exc
     return value
 
 

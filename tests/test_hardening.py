@@ -21,11 +21,11 @@ import sys
 
 import pytest
 
-from aseprite_mcp.core import config, limits
+from aseprite_mcp.core import config, limits, metadata
 from aseprite_mcp.core.errors import ExportError, ValidationFailed, WorkspaceError
 from aseprite_mcp.core.paths import ensure_output_pattern, expansion_matches
 from aseprite_mcp.core.runner import _run_bounded, _truncate
-from aseprite_mcp.tools import export, image, sprite, text
+from aseprite_mcp.tools import cels, export, image, slices, sprite, text
 
 
 @pytest.fixture
@@ -657,20 +657,64 @@ def test_a_full_canvas_shape_still_fits_under_the_cap():
     assert limits.MAX_CANVAS_DIMENSION <= limits.MAX_DRAW_EXTENT_PIXELS
 
 
-# ================= a property value too deep to parse is typed =============
-def test_a_value_nested_past_the_recursion_limit_is_a_typed_refusal():
-    """The depth cap was the right cap in the wrong place for this one input:
-    `json.loads` walks the nesting itself, so a value nested past the interpreter's
-    recursion limit never reached `_check_tree`. RecursionError is a RuntimeError, not a
-    ValueError, so the invalid-JSON branch did not catch it either, and the call
-    surfaced as an untyped internal failure with no remedy in it.
-    """
-    from aseprite_mcp.core.metadata import parse_property_value
+# ================= a property value too deep to store is typed =============
+# Which guard catches an over-deep value is a property of the platform and not of the
+# value: `json` walks the nesting in C, and how much of that walk fits before the
+# interpreter gives up differs, so a 5,000-deep *text* is caught by the depth cap on the
+# CI runners and by the RecursionError branch on Windows. The first version of this test
+# asserted the Windows wording and so passed here and failed on all five runners. Both
+# refusals lead with the clause below, and these assert that rather than whichever
+# branch happened to run.
+DEPTH_REFUSAL = f"nests more than {metadata.MAX_PROPERTY_DEPTH} levels deep"
 
-    deep = '{"a":' * 5000 + "0" + "}" * 5000
-    with pytest.raises(ValidationFailed) as caught:
-        parse_property_value(deep, as_json=True)
-    assert "nests too deeply" in str(caught.value)
+
+@pytest.mark.parametrize("depth", [9, 1200, 5000])
+def test_a_property_value_too_deep_is_a_typed_refusal_as_json_text(depth):
+    """`json.loads` walks the nesting itself, so a value nested past the interpreter's
+    recursion limit never reached `_check_tree`. RecursionError is a RuntimeError, not a
+    ValueError, so the invalid-JSON branch did not catch it either, and
+    `set_properties(value='{"a":' * 5000 + ..., as_json=True)` surfaced as an untyped
+    internal failure with no remedy in it.
+    """
+    deep = '{"a":' * depth + "0" + "}" * depth
+    with pytest.raises(ValidationFailed, match=DEPTH_REFUSAL):
+        metadata.parse_property_value(deep, as_json=True)
+
+
+@pytest.mark.parametrize("depth", [9, 1200, 5000])
+def test_a_property_value_too_deep_is_a_typed_refusal_arriving_pre_parsed(depth):
+    """The other side of the same cap. Some clients parse a JSON-looking argument before
+    the server sees it, so the value arrives as a dict and is encoded on the way in, and
+    that encode was a second recursive walk which ran *before* the cap.
+
+    `_check_tree` stops descending at nine levels and so cannot recurse away itself,
+    which is why it now runs first: this refusal names the path at depth nine on every
+    platform, however deep the value actually goes.
+    """
+    deep = 0
+    for _ in range(depth):
+        deep = {"a": deep}
+    with pytest.raises(ValidationFailed, match=DEPTH_REFUSAL):
+        metadata.parse_property_value(deep)
+    with pytest.raises(ValidationFailed, match=DEPTH_REFUSAL):
+        cels._coerce_property_value(deep)
+
+
+def test_slice_user_data_too_deep_to_encode_is_a_typed_refusal(monkeypatch):
+    """`_coerce_slice_data` holds the same unguarded `json.dumps`, one layer earlier: it
+    runs as a `BeforeValidator`, so it failed ahead of any cap.
+
+    The RecursionError is injected rather than provoked with a deep value, because the
+    depth at which `json.dumps` gives up is the platform-dependent part. What is under
+    test is the translation into a typed refusal, which is not.
+    """
+
+    def boom(*_args, **_kwargs):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(slices.json, "dumps", boom)
+    with pytest.raises(ValidationFailed, match=r"too deeply to encode"):
+        slices._coerce_slice_data({"type": "hitbox", "id": "body"})
 
 
 # ======================= supply chain: the lock and the workflows ==========
