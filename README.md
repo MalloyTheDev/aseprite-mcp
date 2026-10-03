@@ -462,6 +462,47 @@ centreline then cleared the ground and the blade's own *thickness* still did not
 generator checks that directly now, because a background was added and the contact
 measurement stopped being able to say so.
 
+### Make fast movement read as speed, in colours the sprite already had
+
+<img src="docs/assets/showcase/smear_stages.png" width="300" alt="Three stages: no smear,
+a stretch smear, an echo smear" align="right">
+
+Two frames of something moving quickly are two frames of it being in two places, which the
+eye reads as teleportation. A **smear** is the frame an animator draws to fix that, and
+`smear_frame` takes the movement vector from the cels themselves, so there is nothing to
+keep in sync with the drawing. Top to bottom: the movement as it arrives, the `stretch`
+smear that elongates the subject back along its path, and the `echo` smear that draws it
+several times.
+
+**The trail is made of colours the sprite already had.** Each pixel of it is the nearest
+ramp entry to the subject's own colour there, stepped toward the dark end and clamped, so
+the smear never invents a colour and `palette_conformance` stays at 1.0.
+[`smear.py`](scripts/showcase/smear.py) asserts that directly: every colour in the trail is
+on the ramp it was given, the trail lies between the two positions, and the subject's own
+pixels are untouched because the trail goes behind it.
+
+This piece is **indexed** on purpose, because `smear_frame` was the one ramp-taking tool
+with no reading of what its ramp becomes on a palette: it resolves the ramp in Python into a
+lookup table and never passes a ramp to Lua, so the harness that measures that had nothing
+to see. The reading exists now, and building this piece immediately taught three things the
+docstring does not say.
+
+A stretch trail asks for **one shift level per ramp entry**, so it is as long as the ramp,
+and it measures its room by where the *subject's lightest* colour sits. Two drafts went into
+lengthening the ramp and shortening the movement before the message was read properly: what
+fixed it was giving the sphere a **specular highlight**, so a pixel finally sat on the
+ramp's top step. A highlight turned out to be load-bearing.
+
+And on a *shaded* subject the reading then fires anyway, in both modes, because the darker
+pixels run out of ramp before the trail ends and clamp at the dark entry. That is not
+avoidable by drawing better: the only subject that cannot clamp is one painted in a single
+colour. The warning is right that those copies come out the same colour, and wrong about
+why, which is filed as
+[#226](https://github.com/MalloyTheDev/aseprite-mcp/issues/226): it blames the palette and
+suggests adding colours while its own numbers say the palette holds every target exactly.
+So the generator asserts on `trail_on_palette`'s counts rather than on the sentence, and
+those counts are what separate a clamped ramp from a palette that is genuinely too small.
+
 ### Scaffold a whole asset in one call
 
 <p align="center">
