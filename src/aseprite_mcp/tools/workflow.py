@@ -181,6 +181,7 @@ def create_tileset_project(
     columns: int = 4,
     rows: int = 4,
     tiles: list[dict] | None = None,
+    overwrite: bool = False,
 ) -> dict:
     """Scaffold a tilemap project: a canvas sized columns×rows tiles, a tilemap layer,
     and a starter tileset (grass/dirt/water/stone by default, or your own
@@ -199,7 +200,11 @@ def create_tileset_project(
         remedy="Each tile is its own Aseprite launch; add the rest with add_tile.",
     )
     filename = _aseprite_name(name)
-    sprite.create_sprite(filename, columns * tile_size, rows * tile_size, "rgb")
+    # Passed through, because without it this tool could be called exactly once per
+    # filename and never again: every other creation tool here takes it, and a scaffold
+    # that cannot be re-run is a scaffold you cannot iterate a tileset with.
+    sprite.create_sprite(filename, columns * tile_size, rows * tile_size, "rgb",
+                         overwrite=overwrite)
     tilemap.create_tilemap_layer(filename, "tiles", tile_size, tile_size, columns, rows)
 
     created = []

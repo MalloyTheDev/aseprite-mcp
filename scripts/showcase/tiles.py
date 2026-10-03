@@ -40,7 +40,8 @@ def scatter(rows, colours, weights, seed_offset=0, block=2):
     return out
 
 
-made = workflow.create_tileset_project(NAME, tile_size=TS, columns=COLS, rows=ROWS)
+made = workflow.create_tileset_project(NAME, tile_size=TS, columns=COLS,
+                                      rows=ROWS, overwrite=True)
 index = {t["name"]: t["index"] for t in made["tilemap"]["tiles"]}
 print("tiles:", index)
 
