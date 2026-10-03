@@ -125,7 +125,7 @@ def test_geometry_tools_document_their_coordinate_conventions():
 
     tools = {t.name: (t.description or "") for t in asyncio.run(mcp.list_tools())}
     geometry = (
-        "draw_pixels", "draw_line", "draw_polyline", "draw_curve",
+        "draw_pixels", "draw_pixel_map", "draw_line", "draw_polyline", "draw_curve",
         "draw_rectangle", "draw_ellipse", "fill_area",
     )
     for name in geometry:

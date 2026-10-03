@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **155 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **156 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -93,6 +93,12 @@ Aseprite GUI.
   would not have. `dither_band` names the two colours its 1-based steps resolved to.
   Every one of those exists because its absence cost a debugging session, and the
   [showcase generators](scripts/showcase/README.md) are where they were spent.
+  Pixel art is authored, not rendered, and the server now takes it that way:
+  `draw_pixel_map` accepts the same character grid `get_pixels(format="map")` emits, so
+  per-pixel intent can be written down and read back. A caller handed only a
+  thousand-entry coordinate list does not write a thousand considered pixels, it writes a
+  formula that emits them, and a formula produces the smooth monotone surfaces that make
+  generated pixel art look generated.
   The shape is uniform rather than nearly uniform: **every result that describes a
   sprite carries `ok`**, which thirty of them did not until the key moved into the one
   function they all return through, and a workflow manifest reports the same pixel
@@ -117,7 +123,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 155 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 156 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -733,7 +739,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 `selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
 section of their own, because the sections above each describe the *product* while these
 are a verdict on the *call*, and because every other result in this server reports them
-there: one rule reads them across all 155 tools. They are **absent rather than zero**, so a
+there: one rule reads them across all 156 tools. They are **absent rather than zero**, so a
 key that is present at all means there is something to read, and a tool that writes no
 pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
 them, which let a batch report `status: applied` for an op whose every pixel an active
@@ -865,6 +871,7 @@ and says so rather than doing it quietly.
 | Tool | Description |
 | --- | --- |
 | `draw_pixels` | Plot individual pixels (per-pixel or shared colour). |
+| `draw_pixel_map` | Draw from a **character grid**, one character per pixel, with a legend of symbol to colour. The write side of `get_pixels(format="map")` and the same shape it returns, so a read, an edit and a write round-trip. A ragged map is refused rather than padded, and a character the legend does not define is refused rather than skipped: a typo in a grid would otherwise paint nothing and report success. |
 | `draw_line` · `draw_polyline` | Line / connected segments; `pixel_perfect` & `antialias` options. |
 | `draw_curve` | Quadratic Bézier curve. |
 | `draw_rectangle` · `draw_ellipse` | Outline or filled rectangle / ellipse; ellipse has `antialias`. |
