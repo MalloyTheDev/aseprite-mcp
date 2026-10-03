@@ -168,6 +168,39 @@ client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
 - [`src/aseprite_mcp/tools/`](src/aseprite_mcp/tools/): one module per domain (the
   `@mcp.tool()` layer).
 
+### The dependency direction is a rule, not a preference
+
+**`tools/` may depend on `core/`. `core/` may depend on neither `tools/` nor the MCP SDK,
+and must not know MCP exists.**
+
+`core/` is the engine: sprite operations, drawing, the pixel-art algorithms, animation
+logic, palette work, quantization, analysis, asset-export logic, Lua generation, Aseprite
+process execution, path safety, limits and typed errors. None of that is inherently about
+MCP. `tools/` is an adapter: it validates what arrived on the wire, calls `core/`, and
+serializes the result back.
+
+The point is that the engine is not trapped behind one interface. The same logic should be
+reachable from a CLI, a Python API or another integration later without the sprite code
+being rewritten, and that only stays true while the arrow points one way. The moment a
+`core/` module reaches for a tool or for the SDK, MCP stops being an interface to the
+engine and becomes the place the engine lives.
+
+Enforced, not just stated, by
+`tests/test_imports.py::test_core_does_not_import_mcp_app_or_tools`. It imports every
+module under `core/` in a **clean interpreter** and asserts that `aseprite_mcp.app`,
+`mcp.server` and every `aseprite_mcp.tools.*` are absent from `sys.modules` afterwards, so
+an *indirect* import by way of some module that itself pulls in the SDK fails too, which a
+scan of the source text would miss. The module list is **discovered from the filesystem**
+rather than written down: it used to be a hand-written nine against a `core/` of
+twenty-eight, and the nineteen it missed were the ones added after the list, because a list
+leaves every later module outside the guard by default.
+
+Two consequences worth knowing before they surprise you. `core/` may not import `tools/`
+even to share a constant, which is why `core/manifest.py` repeats the harness key set that
+`tools/common.py` also holds, with a test pinning the two against each other rather than
+one importing the other. And a helper that needs a `@mcp.tool()` decorator belongs in
+`tools/`, however algorithmic it looks.
+
 ## Adding a tool
 
 > **Check the idea against [`docs/HEADLESS.md`](docs/HEADLESS.md) first.** Every tool is

@@ -1,12 +1,40 @@
 """Pure-Python tests for the core/MCP split + backwards-compat shims (CI tier)."""
 
 import importlib
+import pathlib
 import subprocess
 import sys
 
 import pytest
 
-CORE_MODULES = [
+
+def _discovered_core_modules():
+    """Every module under `core/`, found rather than listed.
+
+    This was a hand-written list of nine, and `core/` holds twenty-eight. The nineteen it
+    missed were, with one exception, the ones added *after* the list was written, which is
+    the failure mode of listing: a module is outside the guard by default from the moment
+    it is created, and the guard below is the one thing that keeps `core/` reusable without
+    MCP. Discovery makes a new module covered because it exists rather than because
+    somebody remembered.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1] / "src" / "aseprite_mcp" / "core"
+    names = set()
+    for path in root.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.parent if path.name == "__init__.py" else path.with_suffix("")
+        parts = rel.relative_to(root).parts
+        names.add(".".join(("aseprite_mcp", "core", *parts)))
+    return sorted(names)
+
+
+CORE_MODULES = _discovered_core_modules()
+
+# The nine that were listed by hand before discovery replaced them, kept as a floor. A
+# glob that silently returned nothing would make every assertion below pass without
+# checking anything, which is the one way this file could stop working without failing.
+CORE_MODULES_FLOOR = frozenset({
     "aseprite_mcp.core.config",
     "aseprite_mcp.core.errors",
     "aseprite_mcp.core.limits",
@@ -16,7 +44,7 @@ CORE_MODULES = [
     "aseprite_mcp.core.paths",
     "aseprite_mcp.core.runner",
     "aseprite_mcp.core.validation",
-]
+})
 
 # The public names each backwards-compat shim must keep re-exporting.
 SHIM_EXPORTS = {
@@ -47,10 +75,26 @@ def test_error_alias_survives():
     assert AsepriteError is AsepriteMCPError
 
 
+def test_the_core_module_list_is_discovered_and_complete():
+    """The floor under the guard below, which is only as wide as the list it walks."""
+    assert set(CORE_MODULES) >= CORE_MODULES_FLOOR, (
+        f"discovery lost modules it used to cover: "
+        f"{sorted(CORE_MODULES_FLOOR - set(CORE_MODULES))}")
+    assert len(CORE_MODULES) >= 25, (
+        f"only {len(CORE_MODULES)} core modules found, which is fewer than exist: the "
+        "glob is broken and every import guard in this file is now passing vacuously")
+
+
 def test_core_does_not_import_mcp_app_or_tools():
     """Importing core must not pull in the MCP app or any tool module, proving
     core is reusable without MCP registration side effects. Checked in a clean
-    interpreter so other tests' imports don't pollute the result."""
+    interpreter so other tests' imports don't pollute the result.
+
+    This is the one test that keeps `core/` a library rather than the inside of a server.
+    `tools/` may depend on `core/`; `core/` may depend on neither `tools/` nor the MCP SDK,
+    and must not know MCP exists. A clean interpreter is what makes it mean that: an
+    indirect import, by way of some module that itself imports the SDK, fails here too,
+    which a scan of the source text would miss."""
     imports = "".join(f"import {m}\n" for m in CORE_MODULES)
     code = (
         "import sys\n"
