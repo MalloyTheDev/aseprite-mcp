@@ -86,6 +86,17 @@ MAX_VERIFY_PIXELS = 33_554_432  # 2 * MAX_CANVAS_PIXELS
 # histogram rather than a finding, and the count still says how many there were.
 MAX_DIFF_COLORS = 24
 
+# Pixels one `get_pixels` call may read back. A product, not a per-axis bound, because
+# the cost is the serialized payload rather than either dimension: 4,096 is 64x64, which
+# is the shape of request it is sized for, and a 1x4096 strip costs the same to carry.
+#
+# Lived as a bare `4096` inside the Lua body until #220, which is why it is the one cap
+# in this module that also exists in the prelude: the body bounds the *derived* extent
+# (`ARG.width or (spr.width - x0)`), which is only knowable once the sprite is open, so
+# the Lua check stays as the backstop and this is the pre-flight in front of it. Injected
+# into the prelude through `core.luagen._LIMITS_LUA` so there is one definition, not two.
+MAX_READ_REGION_PIXELS = 4_096
+
 # --- Lighting and effects -------------------------------------------------- #
 # These three guard the *picture* rather than the process, which makes them the odd family
 # in this module: none of them bounds an allocation or a loop. They are here because the
@@ -380,18 +391,51 @@ def check_region_size(
     width: int | None,
     height: int | None,
     *,
+    x: int | None = None,
+    y: int | None = None,
     field: str = "region",
+    remedy: str = "Fill a smaller region, or leave width/height unset for the whole canvas.",
 ) -> None:
     """Validate an optional fill region, where ``None`` on an axis means "to the edge".
 
     A region is a canvas-shaped quantity and is bounded like one. The generated fill
     loops read ``for yy = ry, ry + rh - 1`` with only an inner on-canvas skip, so an
     oversized region iterates in full even when every pixel is off-canvas and nothing
-    is drawn: ``width=1e9`` is 1e9 iterations on a 16x16 sprite. When one axis is
-    omitted the canvas supplies it at run time and is already bounded, so only the
-    given axis is checked.
+    is drawn: ``width=1e9`` is 1e9 iterations on a 16x16 sprite.
+
+    **The origin is bounded for the same reason, not for tidiness.** This function used
+    to say that an omitted axis "is already bounded" because the canvas supplies it.
+    What the canvas supplies is ``spr.width - rx``, bounded by the canvas *and the
+    origin*, and it is computed at run time, after this check: ``x=-1000000`` with
+    ``width`` unset is the same 1e6-wide loop by another route. Measured at v0.10.0 to
+    reach Lua on every tool in this family, including the three that already called
+    this with their extent.
+
+    A region may still overhang the canvas, which is why this checks a distance rather
+    than demanding an on-canvas origin: what is refused is an origin further from the
+    canvas than any canvas is wide, which cannot put a pixel on one.
+
+    ``remedy`` exists because the default advice is a fill tool's. ``get_pixels`` shares
+    this check and must not repeat it: that tool reads rather than fills, and leaving
+    width/height unset there asks for a whole canvas it would then refuse as a payload,
+    so the default sentence would send a caller the one direction that cannot work.
     """
-    remedy = "Fill a smaller region, or leave width/height unset for the whole canvas."
+    for axis, value in (("x", x), ("y", y)):
+        if value is None:
+            continue
+        try:
+            offset = int(value)
+        except (TypeError, ValueError):
+            raise ValidationFailed(
+                f"{field} {axis} must be a whole number of pixels, got {value!r}."
+            ) from None
+        if abs(offset) > MAX_CANVAS_DIMENSION:
+            raise ValidationFailed(
+                f"{field} {axis} is {offset}; the maximum distance from the canvas is "
+                f"{MAX_CANVAS_DIMENSION}px. A region may overhang the canvas, but an "
+                "origin further away than any canvas is wide cannot reach it, and with "
+                "width/height unset it becomes the region's size."
+            )
     if width is not None and height is not None:
         check_canvas_size(width, height, field=field)
     elif width is not None:

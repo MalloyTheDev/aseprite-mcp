@@ -6,6 +6,173 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`scaffold_cycle`: one named cycle, at the frame count the craft actually uses**
+  (#91 item 2). `walk|run|idle|attack|hurt|death` at 8, 6, 4, 5, 2 and 6 frames, one tag
+  per phase (`walk_contactL`, `walk_downL`, ...) rather than numbered poses, and
+  durations shaped by `apply_timing_curve` instead of left uniform: walk comes out
+  `[250, 100, 100, 100, 250, 100, 100, 100]`, attack `[240, 24, 200, 80, 80]`.
+
+  Loop versus one-shot is the part that is easy to get wrong and was verified by reading
+  the saved sprite back rather than by trusting the call: attack, hurt and death carry
+  `repeats = 1` on **every** tag including the per-phase ones, because a per-phase tag
+  left at 0 says "hold this pose forever". `validate_loop` is the independent check, and
+  it behaves accordingly: it reports the wrap on `walk` and says nothing about `death`,
+  because `tag_loops` is derived from `repeats == 0`.
+
+  Added **alongside** `make_4_frame_idle_animation` and `make_8_direction_walk_template`
+  rather than replacing them as #91 proposed. Removing a registered tool is a breaking
+  change for every caller and belongs in a release decision of its own; what to do about
+  the overlap is recorded on the issue.
+
+- **`cycle_palette` and `list_palette_usage`: palette cycling, and the measurement that
+  says what is worth cycling** (#128). `list_palette_usage` reports which palette indices
+  the art actually draws with, as runs of consecutive entries, so the run worth cycling is
+  visible before anything is animated. `cycle_palette` rotates such a run across new
+  frames.
+
+  **Aseprite's Lua API exposes no per-frame palette**, and that was established by probing
+  the editor (1.3.18.6) rather than assumed. `#spr.palettes` stays 1 on a fresh indexed
+  sprite; `Palette(4).frame` is nil and assigning to it raises on `__setters`; the
+  `palettes` collection is read-only to assignment, `table.insert` and `length`;
+  `Sprite:newPalette` and `Sprite:deletePalette` do not exist; `Palette{frame = 2}`
+  returns a plain Lua table that `setPalette` rejects as `PaletteObj expected, got
+  table`; and both `spr:setPalette` and `app.command.LoadPalette` replace palette 1
+  whatever frame is current, with the reopened file holding one palette.
+
+  So the rotation is applied to the pixels' own indices, and the result says which
+  mechanism ran (`method: "pixel_remap"`) rather than implying the other. On an indexed
+  sprite the two are the same picture, the move is exact because it never resolves a
+  colour through `nearest_index`, and the palette comes back byte for byte.
+
+### Fixed
+
+- **`smear_frame` was the one ramp-taking tool that never said what its ramp becomes on
+  an indexed palette** (#173, the other half of #145). #145's mechanism is the Lua
+  harness, which fires on `ARG.ramp`; `smear_frame` resolves its ramp in Python into a
+  colour-to-colour table and passes `ARG.lut`, so there was nothing for the harness to
+  measure. The snap still happened: those table targets go through `rgba_to_px` like any
+  other colour, so two shift levels could resolve to one palette entry and draw two trail
+  copies of identical colour, reported nowhere.
+
+  Measured on a 64x40 indexed sprite built explicitly rather than converted: with the
+  palette holding ramp steps 0, 2 and 4, an `echo` smear planned targets `#e07a5f`,
+  `#6b2d4a` and `#2c1b2e`, of which the last two both resolve to palette entry 1. Frame 3
+  contained no `#6b2d4a` at all, `warnings` was empty and there was no `ramp_on_palette`
+  key.
+
+  The reading is a sibling judgement rather than a reuse of `ramp_readings`, because the
+  question is genuinely different: what matters here is which of the **table's targets**
+  share an entry, not which declared ramp steps the palette can hold. Measuring the
+  declared ramp answers a question the tool does not ask, and on the same fixture it
+  reports a collision between two steps no plot reaches. The measurement itself is the
+  prelude's existing `ramp_palette_state`, called with the table's targets; no second
+  `nearest_index` was written and `core/luagen.py` was not touched.
+
+- **`get_pixels` enforced its read cap in Lua, so a call that could not succeed still
+  launched Aseprite** (#220). The bound was a bare `4096` inside the Lua body, invisible
+  to `core/limits.py`, so an over-cap read opened the sprite and came back as an untyped
+  Lua error instead of the typed refusal every other over-cap argument produces. It is now
+  `MAX_READ_REGION_PIXELS` in `core/limits.py`, injected into the prelude through
+  `_LIMITS_LUA` so there is one definition rather than two copies, and checked in Python
+  before launch.
+
+  The Lua check **stays** as the backstop, and the two are not redundant: the body bounds
+  the *derived* extent (`ARG.width or (spr.width - x0)`), which is only knowable once the
+  sprite is open, so it still refuses an unset extent with a far-away origin. Python
+  bounds what the caller stated.
+
+  **Behaviour change.** `get_pixels` now shares `check_region_size` with the fill family,
+  so a zero or negative axis is refused (`region size must be at least 1x1, got 0x4`)
+  where it previously reached Lua and returned an empty grid. An empty read is a silent
+  no-op, which this project treats as worse than an error.
+
+- **Thirty tools returned a sprite description with nothing in it that could say the call
+  did nothing** (#221). `sprite_info` had no `ok` key while forty-one other tools set
+  `ok = true` in a table of their own, so a caller could not write one check: `add_layer`
+  and `fill_layer` sit in the same module and disagreed about whether the key exists. One
+  line now adds it to the table `sprite_info` returns and all thirty inherit it.
+
+  Checked rather than assumed, because an inherited key is only safe if nothing embeds the
+  table where it would read as something else's verdict. Of 33 call sites, 31 return it
+  whole; `core/oplib.py` nests it under `sprite`, where `core/manifest.py::sprite_summary`
+  copies eight named fields and not this one, and `tools/slices.py` keeps only `slices`.
+  Both are now pinned, so a third nested use has to be justified. The census in the issue
+  needed one correction: `merge_layer_down` already set its own `ok`, and `save_sprite_as`
+  was missed because it reads `sprite_info(copy)`.
+
+- **`apply_operations` honoured an active selection and its manifest said nothing about
+  it** (#201). After #199 the batch clipped correctly and the Lua result carried the
+  harness's counters, then `workflow_manifest` dropped all three: a run under a selection
+  reported `status: applied` per op while the mask had refused every pixel of one of them.
+  Measured: `pixels_written 64`, `pixels_outside_selection 64`, `selection_applied True`
+  in the raw result, all three absent from the manifest.
+
+  The issue left open where a manifest should report counts, and the decision is **top
+  level**, written down next to `SCHEMA_VERSION` with the reasoning. The manifest's
+  sections describe the *product* (`sprite`, `exports`, `palette`); the harness's counters
+  are a verdict on the *call*, which is why `ok` and `dry_run` are already top-level. The
+  deciding evidence was in the tree: `tools/common.py` already names this exact field set
+  and already has `carry_harness_keys`, whose whole job is to put them at the top level of
+  a result the Python side rebuilt, so a `pixels` section would have made one tool of 155
+  the place that helper's answer lands in the wrong spot. Counts sum, `selection_applied`
+  is any, and absent stays absent rather than becoming zero.
+
+  Applied across the manifest-returning tools that write pixels, and the six that do not
+  carry a one-line note saying so, each established by measurement rather than by
+  reading: `draw_ellipse` reports 221 written, `add_outline` 72, `draw_rectangle` 36,
+  while `create_sprite`, `set_palette`, `add_frame`, `set_cel_position`,
+  `set_all_frame_durations`, `add_tag` and the two tilemap calls report nothing at all.
+
+
+### Fixed
+
+- **A value nested past the parser's limit was refused differently on each platform, and
+  not at all when it arrived already parsed** (#215). `MAX_PROPERTY_DEPTH` is enforced by
+  `_check_tree`, which runs after `json.loads`, and `json` walks the nesting in C: how
+  much of that walk fits before the interpreter gives up is a property of the platform
+  rather than of the value, so the same 5,000-deep text was caught by the cap on the CI
+  runners and by a `RecursionError` on Windows. Two guards, two sentences. Both now lead
+  with the same clause, so a caller reads one cap either way.
+
+  The pre-parsed route was unguarded rather than merely worded differently. Some clients
+  parse a JSON-looking argument before the server sees it, so a hitbox sent as
+  `{"x": 8}` arrives as a dict and is encoded on the way in, and that `json.dumps` sat
+  outside the try: the value died as an untyped `RecursionError` with no remedy in it.
+  `_check_tree` stops descending at nine levels and so cannot recurse away itself, which
+  is why it now runs first, and both halves go through one `encode_property_value`.
+  `_coerce_slice_data` held the same unguarded encode one layer earlier, in a
+  `BeforeValidator`, where it failed ahead of any cap. Depth 8 still stores and depth 9
+  still raises the existing message.
+
+- **Three tools took a region with no bound on it, and a negative origin defeated the
+  bound on every tool that had one** (#212). `shift_along_ramp` was the filed case;
+  sweeping the family behaviourally found `gradient_map` with the identical
+  `for yy = ry, ry + rh - 1` loop and `select_region` with something worse. A selection's
+  stored mask is one bit per pixel of the region *as asked for*, not of the canvas it is
+  applied to: measured on a 16x16 sprite, a 100000x4 region writes a 50,070-byte sidecar
+  and a 100000x100 one writes 1,250,070, so the 1e6 x 1e6 region that reached Aseprite
+  was asking it for 125 GB.
+
+  `check_region_size` said that an omitted axis "is already bounded" because the canvas
+  supplies it. What the canvas supplies is `spr.width - rx`, bounded by the canvas *and
+  the origin*, and it is computed at run time, after the check: `x=-1000000` with `width`
+  unset is the same 1e6-wide loop by another route, and it reached Lua on every tool in
+  the family including the three that already called the check with their extent. The
+  origin is now bounded by the same distance, and a region may still overhang the canvas,
+  which is why the check is on a distance rather than on being on-canvas.
+
+  `assess_sprite` was the one route to a palette taking a `ramp` without the
+  `check_list_length` its seven siblings apply. The cost there is linear rather than
+  quadratic, so this is consistency and not a weakness: a cap that holds for seven of
+  eight call sites is a cap nobody can rely on.
+
+  Both families are now asserted registry-wide, because neither gap was introduced by
+  editing a tool. They arrived with new ones, so a new tool that takes a `ramp` or a
+  region fails the suite until it is given the cap or exempted with the reason it needs
+  none.
+
 ## [0.10.0] - 2026-10-02
 
 The release where the results started saying what the calls actually did. Six tools grew a

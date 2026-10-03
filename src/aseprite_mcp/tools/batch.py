@@ -52,7 +52,10 @@ def apply_operations(filename: str, operations: list[dict], dry_run: bool = Fals
     exists: an out-of-range frame is rejected with the sprite's valid range rather than
     clamped, so a per-op `summary` always describes the frames actually touched.
 
-    Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
+    Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list, and,
+    when the ops touched pixels, the same `pixels_written` / `pixels_outside_selection` /
+    `selection_applied` fields every other tool reports: a batch run under an active
+    selection is clipped to it, and these say how much the mask refused.
     """
     normalized = oplib.validate_operations(operations)  # raises ValidationFailed on bad shape
 
@@ -81,15 +84,19 @@ def apply_operations(filename: str, operations: list[dict], dry_run: bool = Fals
             raise LuaToolError(cleaned) from exc
         raise
 
-    # A batch now honours an active selection, because the ops it runs go through
-    # `img_set` like everything else. The harness's counters for it are produced and then
-    # dropped here, because a `workflow_manifest` has a fixed field list and giving it one
-    # more is a schema decision affecting every workflow tool rather than this one: see
-    # the follow-up issue.
+    # A batch honours an active selection, because the ops it runs go through `img_set`
+    # like everything else, and `counters=result` is what makes the manifest say so. The
+    # harness's report used to be produced here and dropped: measured on a 16x8 canvas
+    # with the right half selected, one batched `replace_color` came back from Lua with
+    # `pixels_written: 64, pixels_outside_selection: 64, selection_applied: true` and the
+    # manifest reported `status: applied` and nothing else, which cannot tell a scoped
+    # batch from one the mask refused outright. #201 settled where a manifest puts those
+    # fields; the reasoning is in `core/manifest.py` beside HARNESS_REPORT_KEYS.
     return workflow_manifest(
         "batch",
         sprite=sprite_summary(result["sprite"]),
         operations=result.get("operations", []),
+        counters=result,
         suggested_next_actions=[
             f"Validate it's game-ready: validate_sprite_for_game_export('{filename}').",
         ],

@@ -71,7 +71,7 @@ def fill_gradient(
         raise ValidationFailed("Provide at least 2 colour stops.")
     if dither and len(colors) != 2:
         raise ValidationFailed("Dithered gradients require exactly 2 colours.")
-    check_region_size(width, height, field="gradient region")
+    check_region_size(width, height, x=x, y=y, field="gradient region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
@@ -1228,7 +1228,7 @@ def fill_checkerboard(
     frame: int = 1,
 ) -> dict:
     """Fill a region with a 2-colour checkerboard of `size`-pixel squares."""
-    check_region_size(width, height, field="checkerboard region")
+    check_region_size(width, height, x=x, y=y, field="checkerboard region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),

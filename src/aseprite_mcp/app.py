@@ -192,6 +192,10 @@ READ_ONLY_TOOLS = frozenset({
     "get_tilemap",
     "gui_available",
     "health_check",
+    # Counts which palette indices the art draws with and never saves, which is what
+    # makes it safe to call before deciding whether to cycle anything. Its sibling
+    # `cycle_palette` writes frames and is deliberately not here.
+    "list_palette_usage",
     "list_slices",
     "list_sprites",
     "plan_asset_spec",

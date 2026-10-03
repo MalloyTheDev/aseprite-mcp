@@ -12,7 +12,14 @@ from mcp.server.mcpserver import Image
 from ..app import mcp
 from ..core import config, indexed, quality, spritediff
 from ..core.errors import ValidationFailed
-from ..core.limits import MAX_ASSESS_PIXELS, MAX_DIFF_COLORS
+from ..core.limits import (
+    MAX_ASSESS_PIXELS,
+    MAX_COLOR_LIST_LENGTH,
+    MAX_DIFF_COLORS,
+    MAX_READ_REGION_PIXELS,
+    check_list_length,
+    check_region_size,
+)
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import AsepriteError, run_cli, run_lua
 from .common import lua_path, parse_color, resolve_path
@@ -92,6 +99,38 @@ def get_pixels(
     """
     if format not in ("rows", "map"):
         raise ValidationFailed('format must be "rows" or "map".')
+    # Bounded here as well as in the body, and the two are not redundant. Measured at
+    # v0.10.0 with `assemble_script` intercepted: every over-cap region reached Lua, so a
+    # request that cannot succeed paid a process launch and came back as an untyped Lua
+    # error instead of the typed refusal every other over-cap argument produces. The body
+    # keeps its own check because it bounds the *derived* extent (`ARG.width or
+    # (spr.width - x0)`), which needs the sprite open; this bounds what the caller stated.
+    #
+    # The product goes first, ahead of the shared region check, because 4,096 is the
+    # tighter of the two whenever both axes are given, so this is the message that tells
+    # the caller what to ask for next.
+    if width is not None and height is not None:
+        try:
+            w_asked, h_asked = int(width), int(height)
+        except (TypeError, ValueError):
+            raise ValidationFailed(
+                f"region size must be whole numbers of pixels, got {width!r}x{height!r}."
+            ) from None
+        if w_asked * h_asked > MAX_READ_REGION_PIXELS:
+            raise ValidationFailed(
+                f"region size {w_asked}x{h_asked} exceeds the "
+                f"{MAX_READ_REGION_PIXELS}-pixel ceiling on one read "
+                f"({w_asked * h_asked} px). Max {MAX_READ_REGION_PIXELS} (e.g. 64x64) "
+                "per call, because the cost is the serialized payload; read in tiles."
+            )
+    # Then the region family's own check, for what the product cannot see: an origin
+    # further from the canvas than any canvas is wide (which becomes the extent when
+    # width/height are unset), and the case where only one axis was given.
+    check_region_size(
+        width, height, x=x, y=y, field="region",
+        remedy=f"Read a smaller region: up to {MAX_READ_REGION_PIXELS} pixels "
+               "(e.g. 64x64) per call, in tiles.",
+    )
     src = resolve_path(filename)
     args = {
         "src": lua_path(src),
@@ -109,8 +148,15 @@ def get_pixels(
     local y0 = ARG.y
     local w = ARG.width or (spr.width - x0)
     local h = ARG.height or (spr.height - y0)
-    if w * h > 4096 then
-      error("Region too large (" .. (w * h) .. " px). Max 4096 (e.g. 64x64) per call.")
+    -- The backstop, not the only bound: the pre-flight in Python refuses a stated extent
+    -- before Aseprite is launched. This one stays because it measures the DERIVED extent,
+    -- so a width left unset with a far-away origin is refused by this route and by no
+    -- other. MAX_READ_REGION comes from core.limits through the prelude, so the number
+    -- has one definition; "64x64" is the request shape it is sized for, and is the part
+    -- of the message that tells the caller what to ask for next.
+    if w * h > MAX_READ_REGION then
+      error("Region too large (" .. (w * h) .. " px). Max " .. MAX_READ_REGION ..
+            " (e.g. 64x64) per call.")
     end
     -- The prelude's decode, not a local copy of it. Two copies of this function used to
     -- live here and both went straight to the palette, missing the transparentColor
@@ -343,6 +389,14 @@ def assess_sprite(
     Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
     the measurements, so this is cheap to call after every pass.
     """
+    if ramp:
+        # The cap its seven siblings apply, and the only route to a palette that was
+        # missing it. The cost here is linear in the ramp rather than quadratic
+        # (`quality.palette_conformance` builds a set once and then does O(pixels)
+        # membership tests, and the prelude's `ramp_palette_state` is O(ramp x palette)
+        # with the palette capped at 256), so this is consistency and not a weakness: a
+        # cap that holds for seven of eight call sites is a cap nobody can rely on.
+        check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
     src = resolve_path(filename)
     measured = run_lua(_ASSESS_LUA, {
         "src": lua_path(src), "frame": int(frame), "layer": layer,

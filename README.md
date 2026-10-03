@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **152 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **155 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -113,7 +113,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 152 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 155 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -574,6 +574,7 @@ deterministic scaffolding, no AI generation.
 | --- | --- |
 | `create_character_sprite` | Transparent canvas + body/details layers + a generated shading ramp + an outlined placeholder. |
 | `make_4_frame_idle_animation` | Turn a 1-frame sprite into a 4-frame idle "bob" loop with a tag. |
+| `scaffold_cycle` | Scaffold a named cycle (`walk`, `run`, `idle`, `attack`, `hurt`, `death`) at its conventional frame count, one tag per phase (`walk_contactL`, `walk_downL`, ...), durations shaped by a timing curve rather than uniform, and loop or one-shot set correctly: attack, hurt and death are one-shots. |
 | `create_tileset_project` | Canvas + tilemap layer + a starter tileset (grass/dirt/water/stone, or your own). |
 | `create_icon_set` | Grid sheet of icon cells, each a placeholder inside a named slice (`icon_0`, …). |
 | `create_rpg_item_sheet` | Grid sheet with a named slice per item (sword/shield/potion/…). |
@@ -822,6 +823,8 @@ satisfied by a tool that wrote the right number of pixels in the wrong places.
 | `extract_palette` | Collect the unique colours used in a sprite/image. |
 | `sort_palette` | Sort by hue/luminance/saturation/value (remaps indexed pixels). |
 | `quantize_palette` | Derive a palette from the artwork itself, reduced to at most N colours. |
+| `list_palette_usage` | Which palette indices the art actually draws with, as runs of consecutive entries, so the run worth cycling is visible before you cycle it. Indexed sprites only, because an RGB pixel carries no index. |
+| `cycle_palette` | Animate an indexed sprite by rotating a run of palette indices across new frames, the classic palette-cycling effect for water, fire and glows. Aseprite's Lua API exposes no per-frame palette, so the rotation is applied to the pixels' own indices and the result says so (`method: "pixel_remap"`). |
 | `generate_ramp` | Build a hue-shifted shading ramp from a base colour. Says how many steps came back distinct, since lightness clamps at both ends. |
 | `ramp_between` | Build a ramp from its two ends, the cool shadow and the warm highlight, interpolated in Oklab so the middle is a blend rather than a hue rotation. |
 | `ramp_from_art` | Recover the ramp a sprite is already painted with, ordered dark to light, with the share of the art each step covers. |

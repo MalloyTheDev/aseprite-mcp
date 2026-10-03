@@ -577,3 +577,77 @@ def shift_table(
             per_colour[raw] = {"r": red, "g": green, "b": blue}
         table[int(shift)] = per_colour
     return table
+
+
+def shift_table_targets(table: dict[int, dict[int, dict]]) -> list[dict]:
+    """The distinct target colours a shift table resolves to, in a stable order.
+
+    This is what Lua is asked to measure against an indexed palette. The *targets*, not
+    the declared ramp: the ramp is already consumed by the time the table exists, and a
+    ramp step the palette cannot hold is harmless if no plot shifts that far. A subject
+    sitting on step 4 of a five-colour ramp and shifted by 1, 3 and 4 asks the palette
+    for three colours, not five (#173).
+
+    Ordered by shift and then by raw pixel value rather than by iteration order, because
+    the index of a colour in this list is how the measurement is joined back onto the
+    table and a dict's order is not a thing to key a join on.
+    """
+    seen: dict[tuple[int, int, int], int] = {}
+    out: list[dict] = []
+    for shift in sorted(table):
+        for raw in sorted(table[shift]):
+            colour = table[shift][raw]
+            key = (colour["r"], colour["g"], colour["b"])
+            if key not in seen:
+                seen[key] = len(out)
+                out.append({"r": key[0], "g": key[1], "b": key[2]})
+    return out
+
+
+def shift_table_collisions(
+    table: dict[int, dict[int, dict]], resolved: list[int]
+) -> list[dict]:
+    """Which of a shift table's levels land on one palette entry, per subject colour.
+
+    `resolved[i]` is the palette index that `shift_table_targets(table)[i]` was measured
+    to resolve to. Grouped per subject colour, because that is the pair the table
+    actually contains: two shifts whose targets share an entry draw *that colour's*
+    pixels identically, and a subject with two materials in it can band in one and not
+    the other.
+
+    Returns one record per group of two or more shifts, `{"px", "index", "shifts",
+    "wants"}`, in shift order. Nothing here resolves a colour: the resolving was done by
+    the prelude's `nearest_index`, through the sprite's own palette, and this only reads
+    the answer back.
+    """
+    order = {
+        (colour["r"], colour["g"], colour["b"]): position
+        for position, colour in enumerate(shift_table_targets(table))
+    }
+    # px -> palette index -> the shifts that landed there.
+    landed: dict[int, dict[int, list[int]]] = {}
+    wants: dict[tuple[int, int], str] = {}
+    for shift in sorted(table):
+        for raw, colour in table[shift].items():
+            position = order[(colour["r"], colour["g"], colour["b"])]
+            if position >= len(resolved):
+                # Short measurement. Reported as no collision rather than guessed at: a
+                # partial answer about which copies merge is worse than none.
+                continue
+            index = resolved[position]
+            landed.setdefault(int(raw), {}).setdefault(index, []).append(int(shift))
+            wants[(int(raw), int(shift))] = "#{:02x}{:02x}{:02x}".format(
+                colour["r"], colour["g"], colour["b"]
+            )
+    out: list[dict] = []
+    for raw in sorted(landed):
+        for index in sorted(landed[raw]):
+            shifts = landed[raw][index]
+            if len(shifts) > 1:
+                out.append({
+                    "px": raw,
+                    "index": index,
+                    "shifts": shifts,
+                    "wants": [wants[(raw, shift)] for shift in shifts],
+                })
+    return out

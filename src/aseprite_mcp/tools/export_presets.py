@@ -75,6 +75,11 @@ def export_godot_spriteframes(
 
     info = inspect.get_sprite_info(filename)
     anim_count = len((sheet_data.get("meta") or {}).get("frameTags") or []) or 1
+    # No `counters=`: #201 put the harness's pixel report at a manifest's top level and
+    # asked that every manifest-returning tool carry it. This one reads the sprite and
+    # writes a sheet, a JSON and a .tres; it never offers a pixel to `img_set`, so there
+    # is no report to carry and a `pixels_written: 0` would be a claim about pixels where
+    # none were in play.
     return workflow_manifest(
         "engine_preset",
         sprite=sprite_summary(info),
@@ -135,6 +140,8 @@ def export_slice_metadata(
 
     n = len(metadata["slices"])
     warnings = ["No slices found in the sprite."] if n == 0 else []
+    # No `counters=`, for the same reason as `export_godot_spriteframes` above: one read
+    # of the sprite and one JSON written, and not a pixel touched (#201).
     return workflow_manifest(
         "engine_metadata",
         sprite=sprite_summary(info),
