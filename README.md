@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **155 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **156 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -93,6 +93,16 @@ Aseprite GUI.
   would not have. `dither_band` names the two colours its 1-based steps resolved to.
   Every one of those exists because its absence cost a debugging session, and the
   [showcase generators](scripts/showcase/README.md) are where they were spent.
+  Pixel art is authored, not rendered, and the server now takes it that way:
+  `draw_pixel_map` accepts the same character grid `get_pixels(format="map")` emits, so
+  per-pixel intent can be written down and read back. A caller handed only a
+  thousand-entry coordinate list does not write a thousand considered pixels, it writes a
+  formula that emits them, and a formula produces the smooth monotone surfaces that make
+  generated pixel art look generated.
+  The shape is uniform rather than nearly uniform: **every result that describes a
+  sprite carries `ok`**, which thirty of them did not until the key moved into the one
+  function they all return through, and a workflow manifest reports the same pixel
+  counters at its top level as a bare call does, so one check reads both.
 - **Sandboxed file access**: by default the file capability is scoped to the workspace
   (relative paths only; absolute/`..` paths rejected unless you opt in).
 - **No-clobber by default**: output-writing tools refuse to overwrite an existing file;
@@ -113,7 +123,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 155 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 156 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -377,6 +387,128 @@ brass pass that had already repainted the straps, only 3 pixels of the chest wer
 colour it was given. It runs before that pass now and reports 102 darkened wood pixels,
 which the generator asserts is not zero.
 
+### Animate a palette, not the pixels
+
+<img src="docs/assets/showcase/lava.gif" width="384" alt="A lava cavern: a cataract falls
+into a molten pool while the stone stays still" align="right">
+
+Every other animation here moves something. This one moves nothing: there is **one drawn
+frame**, and the lava flows because its *indices* rotate. `cycle_palette` generates the
+timeline from that single frame, and the twenty-four frames of the loop contain no new
+drawing at all.
+
+The technique constrains the art rather than the other way round, and
+[`lava.py`](scripts/showcase/lava.py) records the three drafts it took to learn how. A
+rotation can only translate a pattern that is **monotone in index space**, so the lava has
+to be painted as a sawtooth of consecutive indices laid across the direction of travel; a
+triangle would reflect instead of flowing. The run has to **close**, because a one-way dark
+to white ramp puts a bright-to-black seam at every wrap, which reads as a moving staircase.
+And it has to be **long and weighted**: with eight entries the bright one recurs every eight
+pixels, which is a bright line every eight pixels however the brightnesses are arranged, so
+the fall came out as a drill thread. This run is twenty-four entries of which twelve are
+crust that barely differ, built by three `ramp_between` calls joined at shared ends, and
+what travels is the crack.
+
+**The direction is a sign, and not the one you would reason to.** `step=1` puts frame two's
+row *y* where frame one's row *y - 1* was, so the pattern travels down and the cataract
+falls. The first draft had it running uphill.
+
+The cataract and the pool drift differently, and **both come out of the same call**: the
+fall is banded by row and the pool across the flow, so one rotation moves one down and the
+other sideways. Nothing in the generator says "move this down and that right".
+
+The stone is the control, and the generator holds it to that: it reads the same rock window
+on all twenty-four frames and requires it unchanged, which is what separates "the colours
+rotated" from "the picture was redrawn". It also checks the flow by comparing two frames
+through a *shifted* window, which is how the backwards `step` was caught. Aseprite's Lua API
+exposes no per-frame palette (measured on 1.3.18.6 and written down in `cycle_palette`'s own
+docstring), so the rotation is applied to the pixels' own indices and the result says which
+mechanism ran: `method: "pixel_remap"`. On an indexed sprite the two are the same picture,
+and the move never routes a colour through a nearest-entry match, so the palette comes back
+byte for byte.
+
+### Scaffold a one-shot, and let the timing do the hitting
+
+<img src="docs/assets/showcase/attack_sheet.png" width="400" alt="Five frames of a sword
+attack: anticipation, swing, impact, recoil, recover">
+
+A one-shot is where a scaffolded animation goes wrong in three ways at once: the frame count
+is a guess, the frames are numbered instead of named, and the whole thing is tagged as a loop
+with uniform timing. `scaffold_cycle(kind="attack")` settles all three before a pixel is
+drawn, and [`attack.py`](scripts/showcase/attack.py) is the drawing laid over what it built.
+
+**The timing is the part worth looking at, and it is not the timing you would guess.** The
+curve puts the 24-millisecond frame on the **swing**, not on the impact:
+
+| phase | duration | why |
+| --- | --- | --- |
+| anticipation | 240 ms | the wind-up, held long enough to read as intent |
+| swing | **24 ms** | one frame you barely see, which is what makes it a snap |
+| impact | 200 ms | **held**, because the hit has to land rather than flash past |
+| recoil | 80 ms | |
+| recover | 80 ms | |
+
+That ordering is the craft: the fast frame is the blur *between* poses, and the pose that has
+to be understood is the one that holds. Uniform timing at 80 ms would run the same five
+drawings in the same order and read as a shove. The generator pins the snap to frame two for
+exactly that reason, because "the shortest frame is the impact" is the plausible wrong answer
+and a test that only checked for non-uniformity would accept it.
+
+Each phase gets a tag named for the pose (`attack_anticipation` through `attack_recover`,
+plus `attack` over the whole cycle), and **every one is written with `repeats=1`** rather than
+left at 0, which means "play forever" in the file format. That field is what `validate_loop`
+reads, so a one-shot tagged as a loop makes the checker report a duplicated seam frame on an
+animation that has no seam. The per-phase tags matter as much as the whole-cycle one, since a
+single-frame tag left looping says "hold this pose forever".
+
+`validate_loop` also found an art bug here, which is the kind of thing this server is for: it
+reported the drawn content's bottom row moving 4px across the phases, because the recover
+blade was swinging clean through the floor. Fixing the arc did not end it either, since the
+centreline then cleared the ground and the blade's own *thickness* still did not. The
+generator checks that directly now, because a background was added and the contact
+measurement stopped being able to say so.
+
+### Make fast movement read as speed, in colours the sprite already had
+
+<img src="docs/assets/showcase/smear_stages.png" width="300" alt="Three stages: no smear,
+a stretch smear, an echo smear" align="right">
+
+Two frames of something moving quickly are two frames of it being in two places, which the
+eye reads as teleportation. A **smear** is the frame an animator draws to fix that, and
+`smear_frame` takes the movement vector from the cels themselves, so there is nothing to
+keep in sync with the drawing. Top to bottom: the movement as it arrives, the `stretch`
+smear that elongates the subject back along its path, and the `echo` smear that draws it
+several times.
+
+**The trail is made of colours the sprite already had.** Each pixel of it is the nearest
+ramp entry to the subject's own colour there, stepped toward the dark end and clamped, so
+the smear never invents a colour and `palette_conformance` stays at 1.0.
+[`smear.py`](scripts/showcase/smear.py) asserts that directly: every colour in the trail is
+on the ramp it was given, the trail lies between the two positions, and the subject's own
+pixels are untouched because the trail goes behind it.
+
+This piece is **indexed** on purpose, because `smear_frame` was the one ramp-taking tool
+with no reading of what its ramp becomes on a palette: it resolves the ramp in Python into a
+lookup table and never passes a ramp to Lua, so the harness that measures that had nothing
+to see. The reading exists now, and building this piece immediately taught three things the
+docstring does not say.
+
+A stretch trail asks for **one shift level per ramp entry**, so it is as long as the ramp,
+and it measures its room by where the *subject's lightest* colour sits. Two drafts went into
+lengthening the ramp and shortening the movement before the message was read properly: what
+fixed it was giving the sphere a **specular highlight**, so a pixel finally sat on the
+ramp's top step. A highlight turned out to be load-bearing.
+
+And on a *shaded* subject the reading then fires anyway, in both modes, because the darker
+pixels run out of ramp before the trail ends and clamp at the dark entry. That is not
+avoidable by drawing better: the only subject that cannot clamp is one painted in a single
+colour. The warning is right that those copies come out the same colour, and wrong about
+why, which is filed as
+[#226](https://github.com/MalloyTheDev/aseprite-mcp/issues/226): it blames the palette and
+suggests adding colours while its own numbers say the palette holds every target exactly.
+So the generator asserts on `trail_on_palette`'s counts rather than on the sentence, and
+those counts are what separate a clamped ramp from a palette that is genuinely too small.
+
 ### Scaffold a whole asset in one call
 
 <p align="center">
@@ -599,8 +731,19 @@ Every workflow tool returns a standardized **`workflow_manifest.v1`** object (de
 [`core/manifest.py`](src/aseprite_mcp/core/manifest.py)) so the asset layer stays
 consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created_files[]`,
 `suggested_next_actions[]`, `warnings[]`. Included when relevant: `sprite{}`, `exports[]`,
-`palette{}`, `animation{}`, `tilemap{}`. File/export entries are
-`{role, path, format, metadata_path?}`.
+`palette{}`, `animation{}`, `tilemap{}`, `tiling{}`, `validation{}`, `operations[]`,
+`plan[]` and `dry_run`. File/export entries are `{role, path, format, metadata_path?}`.
+
+**A manifest also reports what it wrote**, at the top level beside `ok`:
+`pixels_written`, `pixels_clipped`, `pixels_skipped`, `pixels_outside_selection`,
+`selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
+section of their own, because the sections above each describe the *product* while these
+are a verdict on the *call*, and because every other result in this server reports them
+there: one rule reads them across all 156 tools. They are **absent rather than zero**, so a
+key that is present at all means there is something to read, and a tool that writes no
+pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
+them, which let a batch report `status: applied` for an op whose every pixel an active
+selection had refused.
 
 ```json
 {
@@ -611,6 +754,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
               "frames": 1, "layers": ["body", "details"], "tags": [] },
   "created_files": [ { "role": "source_sprite", "path": "...", "format": "aseprite" } ],
   "palette": { "colors": ["#1b1f2a", "..."], "count": 5 },
+  "pixels_written": 437,
   "suggested_next_actions": ["Draw the character on the 'body' layer", "..."],
   "warnings": []
 }
@@ -727,6 +871,7 @@ and says so rather than doing it quietly.
 | Tool | Description |
 | --- | --- |
 | `draw_pixels` | Plot individual pixels (per-pixel or shared colour). |
+| `draw_pixel_map` | Draw from a **character grid**, one character per pixel, with a legend of symbol to colour. The write side of `get_pixels(format="map")` and the same shape it returns, so a read, an edit and a write round-trip. A ragged map is refused rather than padded, and a character the legend does not define is refused rather than skipped: a typo in a grid would otherwise paint nothing and report success. |
 | `draw_line` · `draw_polyline` | Line / connected segments; `pixel_perfect` & `antialias` options. |
 | `draw_curve` | Quadratic Bézier curve. |
 | `draw_rectangle` · `draw_ellipse` | Outline or filled rectangle / ellipse; ellipse has `antialias`. |
@@ -828,6 +973,16 @@ satisfied by a tool that wrote the right number of pixels in the wrong places.
 | `generate_ramp` | Build a hue-shifted shading ramp from a base colour. Says how many steps came back distinct, since lightness clamps at both ends. |
 | `ramp_between` | Build a ramp from its two ends, the cool shadow and the warm highlight, interpolated in Oklab so the middle is a blend rather than a hue rotation. |
 | `ramp_from_art` | Recover the ramp a sprite is already painted with, ordered dark to light, with the share of the art each step covers. |
+
+Palette cycling is the one animation technique here that moves no pixels: rotate a run of
+indices and water flows, lava creeps, a portal turns. `list_palette_usage` is the step
+before it, because the run worth cycling is a property of the art rather than of the
+palette: an index the drawing never uses contributes nothing, and a run of two is a flicker
+rather than a flow. One measured limitation shapes the tool: **Aseprite's Lua API exposes
+no per-frame palette**, so the rotation is applied to the pixels' own indices instead and
+the result says which it did (`method: "pixel_remap"`). On an indexed sprite the two are
+the same picture, and the move is exact because it never resolves a colour to a nearest
+entry.
 
 ### Transform & export
 | Tool | Description |

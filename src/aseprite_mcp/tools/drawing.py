@@ -10,6 +10,7 @@ from __future__ import annotations
 import inspect
 
 from ..app import mcp
+from ..core import pixelmap
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_CURVE_STEPS,
@@ -87,6 +88,21 @@ def _geometry_tool(fn):
     return mcp.tool()(fn)
 
 
+# The per-pixel write loop, shared by `draw_pixels` and `draw_pixel_map` so there is one
+# definition of it. Both go through `img_set`, which is where the selection mask is
+# consulted and where an off-canvas write is clipped and counted, so a map inherits every
+# guarantee the dictionary form already had rather than growing a second write path.
+_PIXEL_WRITE_LUA = """
+    local default = nil
+    if ARG.color ~= nil then default = to_pixel(spr, ARG.color) end
+    for _, p in ipairs(ARG.pixels) do
+      local px = default
+      if p.c ~= nil then px = to_pixel(spr, p.c) end
+      img_set(img, p.x, p.y, px)
+    end
+    """
+
+
 @_geometry_tool
 def draw_pixels(
     filename: str,
@@ -128,16 +144,73 @@ def draw_pixels(
         "color": default,
         "pixels": lua_pixels,
     }
-    snippet = """
-    local default = nil
-    if ARG.color ~= nil then default = to_pixel(spr, ARG.color) end
-    for _, p in ipairs(ARG.pixels) do
-      local px = default
-      if p.c ~= nil then px = to_pixel(spr, p.c) end
-      img_set(img, p.x, p.y, px)
-    end
+    return _draw(args, _PIXEL_WRITE_LUA)
+
+
+@_geometry_tool
+def draw_pixel_map(
+    filename: str,
+    rows: list[str],
+    legend: dict,
+    x: int = 0,
+    y: int = 0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Draw from a character grid, one character per pixel: the way pixel art is authored.
+
+    This is the write side of `get_pixels(format="map")` and takes exactly the shape that
+    returns, a `legend` plus one string per row, so a read, an edit and a write
+    round-trip. Until this existed the server could *show* a caller per-pixel intent and
+    could not receive it: the only way to author a figure was a list of
+    `{"x", "y", "color"}` dictionaries, one per pixel.
+
+    That asymmetry shaped the art it produced, which is the real reason this is here. A
+    caller reaching for a thousand-entry dictionary list does not write a thousand
+    considered pixels, it writes a formula that emits them, and a formula produces smooth
+    monotone surfaces. Hand-placed pixel art is the opposite of that: a highlight nudged
+    two pixels off the geometric centre, an outline that thickens on the shadow side,
+    three pixels clustered to imply a chip in the stone. A grid is the notation those
+    decisions can be written in, and it is about a tenth the size: a 16x16 of three
+    colours is roughly 3,400 characters as dictionaries and 350 as a map.
+
+    Args:
+        rows: One string per row, one character per pixel, **every row the same length**.
+            A ragged map is refused rather than padded, because padding would shift every
+            pixel after the short row.
+        legend: Symbol to colour, as `{"a": "#1b2b4a", "b": "red"}`. `"."` means leave
+            that pixel alone and needs no entry; any other character can say the same
+            with the value `"transparent"`, which is what the read side emits. A
+            character the legend does not define is **refused**, not skipped: a typo in a
+            grid would otherwise paint nothing and report success.
+        x, y: Where the map's top-left corner lands on the canvas. Defaults to the
+            canvas origin.
+        layer: Target layer name or 1-based index (default: top layer).
+        frame: Target frame, 1-based (default 1).
+
+    Transparent cells are left untouched rather than erased, so a map can be stamped over
+    existing art; clear the layer first if you want the map to be the whole of it.
+
+    Returns the usual write counters plus `map_width`, `map_height`,
+    `pixels_transparent` (cells deliberately left alone) and `colors_used`.
     """
-    return _draw(args, snippet)
+    plan = pixelmap.expand(rows, legend, int(x), int(y))
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "color": None,
+        # Colours are parsed here rather than in `core.pixelmap`, which stays free of
+        # anything that knows what a colour is.
+        "pixels": [{"x": p["x"], "y": p["y"], "c": parse_color(p["color"])}
+                   for p in plan["pixels"]],
+    }
+    result = _draw(args, _PIXEL_WRITE_LUA)
+    result["map_width"] = plan["width"]
+    result["map_height"] = plan["height"]
+    result["pixels_transparent"] = plan["transparent"]
+    result["colors_used"] = len(plan["colors_used"])
+    return result
 
 
 @_geometry_tool

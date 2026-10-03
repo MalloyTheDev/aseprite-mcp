@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **155 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **156 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -13,7 +13,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Animation (motion, timing, checks)](#animation-motion-timing-checks) (5)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (10)
-- [Drawing](#drawing) (10)
+- [Drawing](#drawing) (11)
 - [Brushes & symmetry](#brushes--symmetry) (4)
 - [Shading & light](#shading--light) (7)
 - [Selections](#selections) (6)
@@ -1376,6 +1376,74 @@ against what you asked for rather than trusting ok.
 | `color` | string | yes |  |
 | `pixel_perfect` | boolean | no | False |
 | `antialias` | boolean | no | False |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `draw_pixel_map`
+
+Draw from a character grid, one character per pixel: the way pixel art is authored.
+
+This is the write side of `get_pixels(format="map")` and takes exactly the shape that
+returns, a `legend` plus one string per row, so a read, an edit and a write
+round-trip. Until this existed the server could *show* a caller per-pixel intent and
+could not receive it: the only way to author a figure was a list of
+`{"x", "y", "color"}` dictionaries, one per pixel.
+
+That asymmetry shaped the art it produced, which is the real reason this is here. A
+caller reaching for a thousand-entry dictionary list does not write a thousand
+considered pixels, it writes a formula that emits them, and a formula produces smooth
+monotone surfaces. Hand-placed pixel art is the opposite of that: a highlight nudged
+two pixels off the geometric centre, an outline that thickens on the shadow side,
+three pixels clustered to imply a chip in the stone. A grid is the notation those
+decisions can be written in, and it is about a tenth the size: a 16x16 of three
+colours is roughly 3,400 characters as dictionaries and 350 as a map.
+
+Args:
+    rows: One string per row, one character per pixel, **every row the same length**.
+        A ragged map is refused rather than padded, because padding would shift every
+        pixel after the short row.
+    legend: Symbol to colour, as `{"a": "#1b2b4a", "b": "red"}`. `"."` means leave
+        that pixel alone and needs no entry; any other character can say the same
+        with the value `"transparent"`, which is what the read side emits. A
+        character the legend does not define is **refused**, not skipped: a typo in a
+        grid would otherwise paint nothing and report success.
+    x, y: Where the map's top-left corner lands on the canvas. Defaults to the
+        canvas origin.
+    layer: Target layer name or 1-based index (default: top layer).
+    frame: Target frame, 1-based (default 1).
+
+Transparent cells are left untouched rather than erased, so a map can be stamped over
+existing art; clear the layer first if you want the map to be the whole of it.
+
+Returns the usual write counters plus `map_width`, `map_height`,
+`pixels_transparent` (cells deliberately left alone) and `colors_used`.
+
+Coordinates: (0, 0) is the top-left pixel. x grows right, y grows DOWN. A span given as
+position plus size covers x .. x + width - 1, so width is a count of pixels, not an
+offset to the far edge.
+
+Centring differs between primitives, so check this when aligning two shapes:
+  * draw_rectangle(x, width) spans x .. x+width-1, centred on x + (width-1)/2. An even
+    width therefore centres on a half pixel.
+  * draw_ellipse(center, radius) spans center-radius .. center+radius, which is always
+    an ODD 2*radius+1 pixels wide and always centred on a whole pixel.
+  * draw_ellipse_in_box(x, y, width, height) takes the same bounding box as
+    draw_rectangle and fills it exactly, so it is the one to use for an even diameter, a
+    disc centred on an even canvas, or a circle that has to line up with a rectangle.
+  * draw_symmetric_pixels mirrors about the canvas, not about either of the above.
+
+Writes falling outside the canvas are dropped rather than raising. Every drawing tool
+reports pixels_written, and pixels_clipped when anything was dropped, so compare those
+against what you asked for rather than trusting ok.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `rows` | array<string> | yes |  |
+| `legend` | object | yes |  |
+| `x` | integer | no | 0 |
+| `y` | integer | no | 0 |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
