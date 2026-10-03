@@ -237,8 +237,32 @@ good, in the ways that can be counted.
 Reports how many colours are in use and roughly how many ramps they form, pixels with
 no neighbour of their own colour (noise), jagged corners on diagonals, the drawn
 bounding box, how much of the canvas it fills, whether it sits centred, and how far
-the silhouette is from its own mirror. Each measurement that is worth acting on comes
-back with a line saying why, so the numbers do not have to be interpreted.
+the silhouette is from its own mirror.
+
+It also reports five things about whether the drawing has *form*, which were added
+because every measurement above passed on a figure that read as one grey slab:
+
+* `row_structure`: how many drawn rows have background between two parts of the
+  silhouette, how many are a single run across most of the width, and the widest run.
+  A creature reads because air cuts between its limbs, and nothing else here notices
+  when it does not.
+* `edge_contact`: drawn pixels sitting on the canvas border, where a silhouette is cut
+  off and cannot take an outline.
+* `tone_shares`: the most-used colour and what share of the drawing it covers. One
+  tone over a large share of a surface is a fill, not a form.
+* `separator`: what share of the drawing is its darkest colour, and how dark that is.
+  In this medium the dark keyline is structural rather than a fallback.
+* `ramp_chroma`, when a `ramp` is declared: its hue span, its saturation floor, and
+  how many of its steps are below the chroma at which hue is visible at all. A ramp
+  interpolated between two endpoints on opposite sides of the colour wheel routes
+  through the neutral axis, so it can rotate hue a long way and render as greys.
+
+The silhouette and form readings are withheld for art that fills its canvas (a scene
+has no silhouette) and for art using fewer than three colours (a flat shape is not a
+surface without form), because a reading that cannot be acted on is noise.
+
+Each measurement that is worth acting on comes back with a line saying why, so the
+numbers do not have to be interpreted.
 
 Args:
     ramp: Declare the ramp the art should be on and the report adds palette
