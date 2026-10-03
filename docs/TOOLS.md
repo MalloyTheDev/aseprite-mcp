@@ -2303,14 +2303,32 @@ Args:
 
 ### `add_outline`
 
-Add a pixel outline around the artwork on a layer.
+Add a pixel outline around the artwork on a layer, optionally weighted by light.
 
 Args:
     color: Outline colour.
-    thickness: Outline width in pixels (default 1).
+    thickness: Outline width in pixels (default 1). With `light_angle`, this is the
+        width on the edges that face away from the light.
     connectivity: 4 (orthogonal only) or 8 (includes diagonals, default).
     where: "outside" (grow into transparency, default) or "inside"
         (recolour the shape's border pixels).
+    light_angle: Degrees, 0 from the right and 90 from above, as the shading tools
+        state it. Given, the outline's width varies by which way each edge faces:
+        `thickness` where the form turns away from the light, `lit_thickness` where
+        it faces into it.
+    lit_thickness: Width on the edges facing the light. 0 drops the outline there
+        entirely. Defaults to one pixel less than `thickness`. A value above
+        `thickness` is allowed and puts the weight on the lit side instead, which is
+        a rim light rather than a weighted outline.
+
+A constant-width border is the single thing that most reliably makes a sprite read as
+a die-cut sticker: nothing lit has an edge of uniform darkness, so the eye sees card
+stamped out with a punch rather than a form in light. Hand-drawn work in this style
+gathers the weight where the surface turns away and lets it vanish on the lit top
+faces. `thickness=2, light_angle=135, lit_thickness=0` is that look.
+
+For an outline in colours taken from the artwork's own ramp rather than one flat
+colour, see `outline_smart`, which varies hue instead of width.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2319,6 +2337,8 @@ Args:
 | `thickness` | integer | no | 1 |
 | `connectivity` | integer | no | 8 |
 | `where` | string | no | outside |
+| `light_angle` | number | no | _none_ |
+| `lit_thickness` | integer | no | _none_ |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 

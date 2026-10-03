@@ -37,9 +37,14 @@ commit_image(spr, layer, framenum, img)
 save_sprite(spr)
 RESULT = { ok = true, filename = spr.filename, layer = layer.name,
            frame = framenum, width = spr.width, height = spr.height }
--- A snippet that counted something it wants reported sets `_stray_replaced`; the harness
--- passes it through rather than every drawing tool growing its own RESULT block.
-if _stray_replaced ~= nil then RESULT.replaced = _stray_replaced end
+-- A snippet that measured something it wants reported sets `_extra`, a table of fields
+-- merged in here, rather than every drawing tool growing its own RESULT block. Leaving a
+-- field out of `_extra` leaves it out of the result, which is the convention the counters
+-- already follow: absent rather than zero, so a count that is present means the work it
+-- describes was actually attempted.
+if type(_extra) == "table" then
+  for field, value in pairs(_extra) do RESULT[field] = value end
+end
 """
 
 

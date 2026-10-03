@@ -152,31 +152,86 @@ def add_outline(
     thickness: int = 1,
     connectivity: int = 8,
     where: str = "outside",
+    light_angle: float | None = None,
+    lit_thickness: int | None = None,
     layer: str | None = None,
     frame: int = 1,
 ) -> dict:
-    """Add a pixel outline around the artwork on a layer.
+    """Add a pixel outline around the artwork on a layer, optionally weighted by light.
 
     Args:
         color: Outline colour.
-        thickness: Outline width in pixels (default 1).
+        thickness: Outline width in pixels (default 1). With `light_angle`, this is the
+            width on the edges that face away from the light.
         connectivity: 4 (orthogonal only) or 8 (includes diagonals, default).
         where: "outside" (grow into transparency, default) or "inside"
             (recolour the shape's border pixels).
+        light_angle: Degrees, 0 from the right and 90 from above, as the shading tools
+            state it. Given, the outline's width varies by which way each edge faces:
+            `thickness` where the form turns away from the light, `lit_thickness` where
+            it faces into it.
+        lit_thickness: Width on the edges facing the light. 0 drops the outline there
+            entirely. Defaults to one pixel less than `thickness`. A value above
+            `thickness` is allowed and puts the weight on the lit side instead, which is
+            a rim light rather than a weighted outline.
+
+    A constant-width border is the single thing that most reliably makes a sprite read as
+    a die-cut sticker: nothing lit has an edge of uniform darkness, so the eye sees card
+    stamped out with a punch rather than a form in light. Hand-drawn work in this style
+    gathers the weight where the surface turns away and lets it vanish on the lit top
+    faces. `thickness=2, light_angle=135, lit_thickness=0` is that look.
+
+    For an outline in colours taken from the artwork's own ramp rather than one flat
+    colour, see `outline_smart`, which varies hue instead of width.
     """
     if connectivity not in (4, 8):
         raise ValidationFailed("connectivity must be 4 or 8")
     if where not in ("outside", "inside"):
         raise ValidationFailed('where must be "outside" or "inside"')
+    if lit_thickness is not None and light_angle is None:
+        raise ValidationFailed(
+            "lit_thickness needs light_angle: which edges are lit is not knowable "
+            "without a light direction. Pass light_angle=135 for the usual key light."
+        )
+    shadow_side = check_count(
+        "thickness", max(1, int(thickness)), MAX_OUTLINE_THICKNESS, minimum=1,
+        remedy="Each pixel of thickness is another full-canvas pass; outline in "
+               "several calls if you really need more.",
+    )
+    if light_angle is None:
+        lit_side = shadow_side
+    elif lit_thickness is None:
+        if shadow_side == 1:
+            # Accepting this would take a light direction and draw exactly the border it
+            # drew before, which is the kind of silent no-op this project treats as worse
+            # than an error.
+            raise ValidationFailed(
+                "light_angle with thickness=1 has nothing to redistribute: one pixel on "
+                "the shadow side and one on the lit side is the uniform outline it would "
+                "have drawn anyway. Raise thickness to 2 so the shadow side is heavier, "
+                "or pass lit_thickness=0 to drop the outline on the lit side instead."
+            )
+        lit_side = shadow_side - 1
+    else:
+        lit_side = check_count(
+            "lit_thickness", int(lit_thickness), MAX_OUTLINE_THICKNESS, minimum=0,
+            remedy="Each pixel of thickness is another full-canvas pass; outline in "
+                   "several calls if you really need more.",
+        )
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
         "color": parse_color(color),
-        "thickness": check_count(
-            "thickness", max(1, int(thickness)), MAX_OUTLINE_THICKNESS, minimum=1,
-            remedy="Each pixel of thickness is another full-canvas pass; outline in "
-                   "several calls if you really need more.",
-        ),
+        "thickness": shadow_side,
+        "lit_thickness": lit_side,
+        # The loop has to follow the larger of the two, or a rim light's extra passes
+        # never run and `lit_thickness` above `thickness` would silently clamp.
+        "passes": max(shadow_side, lit_side),
+        # Built here rather than in Lua so the angle convention has one definition, in
+        # core, shared with every other tool that takes a light angle. z=0 because this
+        # is a question about the screen plane: an edge faces left, not toward the viewer.
+        "light": (None if light_angle is None
+                  else list(lighting.light_vector(light_angle, 0.0)[:2])),
         "connectivity": connectivity,
         "where": where,
     }
@@ -190,23 +245,83 @@ def add_outline(
       end
       return n
     end
-    for _pass = 1, ARG.thickness do
+    local W, H = img.width, img.height
+    local done = {}
+    local function key(x, y) return y * W + x end
+
+    -- An outside outline grows: what a pass lays down is solid, so the next pass finds
+    -- the next ring out by itself. An inside one does not, because recolouring a border
+    -- pixel leaves it just as opaque as it was. Every pass therefore used to re-mark the
+    -- same border, and `thickness` had no effect at all beyond the first pixel: an inside
+    -- outline came out one pixel wide whatever was asked for. Carrying `done` forward and
+    -- treating it as already-outlined is what makes the second pass step inward.
+    local function is_seed(x, y)
+      if ARG.where == "inside" then
+        return (not img_solid(spr, img, x, y)) or done[key(x, y)] == true
+      end
+      return img_solid(spr, img, x, y)
+    end
+    local function is_candidate(x, y)
+      if ARG.where == "inside" then
+        return img_solid(spr, img, x, y) and done[key(x, y)] ~= true
+      end
+      return not img_solid(spr, img, x, y)
+    end
+
+    -- Which way the boundary faces here, as the sum of the directions to the neighbours
+    -- across it. Summed rather than taken from the first one found: a pixel in a concave
+    -- corner is seeded from two sides at once, and the average is the direction the edge
+    -- actually faces there. Without the sum the weight would change along a curve
+    -- according to which neighbour happened to be visited first, which is a visible
+    -- stagger rather than a rounding difference.
+    local function boundary(xx, yy)
+      local sx, sy, seen = 0, 0, 0
+      for _, nb in ipairs(neighbors(xx, yy)) do
+        if is_seed(nb[1], nb[2]) then
+          sx = sx + (nb[1] - xx); sy = sy + (nb[2] - yy); seen = seen + 1
+        end
+      end
+      return sx, sy, seen
+    end
+    -- An outside outline's seeds are the shape, so its outward normal is the negation of
+    -- the direction to them; an inside outline's seeds are already outside the shape, so
+    -- there it is that direction itself.
+    local nsign = 1
+    if ARG.where == "outside" then nsign = -1 end
+
+    local lit_laid, shadow_laid = 0, 0
+    for _pass = 1, ARG.passes do
       local mark = {}
-      for yy = 0, img.height - 1 do
-        for xx = 0, img.width - 1 do
-          local solid = img_solid(spr, img, xx, yy)
-          if ARG.where == "inside" and solid then
-            for _, nb in ipairs(neighbors(xx, yy)) do
-              if not img_solid(spr, img, nb[1], nb[2]) then mark[#mark+1] = {xx, yy}; break end
-            end
-          elseif ARG.where == "outside" and not solid then
-            for _, nb in ipairs(neighbors(xx, yy)) do
-              if img_solid(spr, img, nb[1], nb[2]) then mark[#mark+1] = {xx, yy}; break end
+      for yy = 0, H - 1 do
+        for xx = 0, W - 1 do
+          if is_candidate(xx, yy) then
+            local sx, sy, seen = boundary(xx, yy)
+            if seen > 0 then
+              -- Directions that cancel exactly mean the facing is not determinate: a
+              -- one-pixel sliver has background on both sides at once. Such a pixel is
+              -- still an edge and still gets outlined, at the heavier weight, because
+              -- the alternative is dropping it and breaking the silhouette.
+              local lit = false
+              if ARG.light ~= nil and not (sx == 0 and sy == 0) then
+                lit = (nsign * sx) * ARG.light[1] + (nsign * sy) * ARG.light[2] > 0
+              end
+              local allowed = ARG.thickness
+              if lit then allowed = ARG.lit_thickness end
+              if _pass <= allowed then
+                mark[#mark+1] = {xx, yy}
+                if lit then lit_laid = lit_laid + 1 else shadow_laid = shadow_laid + 1 end
+              end
             end
           end
         end
       end
-      for _, p in ipairs(mark) do img_set(img, p[1], p[2], oc) end
+      for _, p in ipairs(mark) do
+        img_set(img, p[1], p[2], oc)
+        done[key(p[1], p[2])] = true
+      end
+    end
+    if ARG.light ~= nil then
+      _extra = { outline_lit = lit_laid, outline_shadow = shadow_laid }
     end
     """
     return _draw(args, snippet)
@@ -1259,14 +1374,6 @@ def fill_checkerboard(
 # counter for every tool that uses it. Erasing is a second count and a different promise,
 # so it is attached here, after that harness has built RESULT, rather than by widening a
 # block every drawing tool shares for the sake of one of them.
-_STRAY_TAIL = """
-if _stray_erased ~= nil then
-  RESULT.erased = _stray_erased
-  RESULT.erased_clusters = _stray_erased_clusters
-end
-"""
-
-
 @mcp.tool()
 def remove_stray_pixels(
     filename: str,
@@ -1537,10 +1644,10 @@ def remove_stray_pixels(
       if gone == #members then clusters = clusters + 1 end
     end
 
-    _stray_replaced = replaced
+    _extra = { replaced = replaced }
     if ARG.erase_isolated then
-      _stray_erased = erased
-      _stray_erased_clusters = clusters
+      _extra.erased = erased
+      _extra.erased_clusters = clusters
     end
     """
-    return run_lua(_OPEN + LANDED_LUA + snippet + _CLOSE + _STRAY_TAIL, args)
+    return run_lua(_OPEN + LANDED_LUA + snippet + _CLOSE, args)
