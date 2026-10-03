@@ -1347,3 +1347,56 @@ def test_an_undrawable_pixel_does_not_move_the_anchor(request):
     assert result["anchor"]["y"] == 5, "a bottom anchor must sit on the art, not under it"
     # And the two numbers in one result now agree about that pixel.
     assert result["source_pixels"] == 16
+
+
+def test_a_tweens_drawn_pixels_agree_with_what_it_wrote(request):
+    """Two numbers in one result that have to add up.
+
+    Each step's `drawn_pixels` was tallied where the resample was offered, not where it
+    landed, and `img_set` refuses a write outside the active selection silently. The
+    `bounds` beside it come from the committed image and were always honest, so the pair
+    disagreed: a selection covering half the canvas had `drawn_pixels` claiming pixels
+    that were never in the frame.
+    """
+    from aseprite_mcp.tools import selection
+
+    name = _ball(f"a/{request.node.name}.aseprite", 4)
+    selection.select_region(name, "rect", x=0, y=0, width=32, height=64)
+    try:
+        result = animation.tween_cels(name, "Layer 1", [1, 2, 3, 4], scale_to=1.4)
+    finally:
+        selection.deselect(name)
+
+    assert result["pixels_outside_selection"] > 0, (
+        "the mask has to have refused something or this proves nothing"
+    )
+    assert sum(s["drawn_pixels"] for s in result["steps"]) == result["pixels_written"]
+
+
+def test_a_smear_says_whether_a_selection_scoped_it(request):
+    """`smear_frame` assembles its result field by field, so it lost the harness's keys.
+
+    Both halves pinned here: present when a mask was active, and absent when none was, so
+    an unscoped call cannot grow a key that reads as a claim about a selection.
+    """
+    from aseprite_mcp.tools import selection
+
+    name = _ball(f"a/{request.node.name}.aseprite", 2)
+    cels.copy_cel(name, "Layer 1", 1, 2)
+    animation.offset_cels(name, "Layer 1", [1, 2], dx=10)
+
+    unscoped = animation.smear_frame(name, "Layer 1", frame=2)
+    assert "selection_applied" not in unscoped
+    assert "pixels_outside_selection" not in unscoped
+
+    name2 = _ball(f"a/{request.node.name}_sel.aseprite", 2)
+    cels.copy_cel(name2, "Layer 1", 1, 2)
+    animation.offset_cels(name2, "Layer 1", [1, 2], dx=10)
+    selection.select_region(name2, "rect", x=0, y=0, width=40, height=64)
+    try:
+        scoped = animation.smear_frame(name2, "Layer 1", frame=2)
+    finally:
+        selection.deselect(name2)
+
+    assert scoped["selection_applied"] is True
+    assert scoped["pixels_outside_selection"] > 0

@@ -485,13 +485,23 @@ def create_rpg_item_sheet(
 @mcp.tool()
 def make_8_direction_walk_template(
     filename: str,
-    frames_per_direction: int = 4,
+    frames_per_direction: int = 8,
     frame_duration_ms: int = 120,
     directions: list[str] | None = None,
 ) -> dict:
     """Scaffold an 8-direction walk-cycle template on an existing sprite: enough frames
     for `frames_per_direction` per direction, with one animation tag per direction
     (N, NE, E, SE, S, SW, W, NW by default).
+
+    Args:
+        frames_per_direction: 8 is the convention for a walk, and it is what this
+            defaults to: contact, down, pass, up for each leg. 6 is the budget option and
+            4 only reads as a walk mirrored on a side view, which an 8-direction sheet by
+            definition is not. The default was 4 until this was fixed (#91), so a sprite
+            scaffolded before then has half the frames a walk needs.
+        frame_duration_ms: Set on every frame. Shape the timing afterwards with
+            `apply_timing_curve`: a walk holds its contacts.
+        directions: Override the eight compass tags.
 
     Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifest
     (kind "walk_template") with an animation block listing the directions/tags.

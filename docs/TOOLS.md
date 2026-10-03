@@ -436,6 +436,25 @@ Duplicate a layer (including its cels) as a new layer on top.
 
 Merge a layer down into the layer directly beneath it.
 
+Refuses rather than doing nothing when there is nothing to merge into. Aseprite's
+`MergeDownLayer` is a no-op in five cases, and it raises in none of them, so this used
+to report a result indistinguishable from a merge that happened. Measured, naming the
+layer stack before and after:
+
+    bottom layer of the sprite        ['only']                   -> ['only']
+    lowest layer inside a group       ['Layer 1', 'grp/a', 'b']  -> unchanged
+    the layer below is a group        ['Layer 1', 'grp', 'a']    -> unchanged
+    the layer named is a group        ['Layer 1', 'grp/a']       -> unchanged
+    the layer below is a tilemap      ['Layer 1', 'tiles', 'px'] -> unchanged
+
+All five returned sprite info describing the stack they had failed to change, which is
+the same shape a successful merge returns. Only the ordinary case worked, so an agent
+flattening a stack by merging downward in a loop was told the loop had finished when it
+had stopped.
+
+Returns `merged_into`, the name of the layer the artwork went into, so the result says
+what happened rather than only what the sprite now looks like.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -1618,8 +1637,28 @@ Args:
         form is actually touching something.
     tolerance: How close a pixel must be to a ramp entry to be darkened. Pixels
         further away are left alone, so this does not spill onto other materials.
+    occluder_tolerance: How close a pixel must be to `occluder_color` to count as the
+        occluder, as a weighted RGB distance. Defaults to `tolerance`, which is what
+        this did before it was a separate argument. It wants to be **tight**: the
+        occluder is a flat fill you named, while `tolerance` has to stay loose enough
+        for shaded art that varies, and one number cannot be both. At the shared
+        default of 24 a ground colour within 24 of the subject's own ramp makes the
+        subject its own occluder: measured on a 24x24 sprite with a subject painted
+        `#5a5a7a` and ground `#60607e`, `occluder_pixels` came back as 312 (the 144
+        ground pixels plus all 168 of the subject) and nothing was darkened at all.
+        The result carries a warning naming any ramp entry this cannot be told apart
+        from, because that overlap is invisible otherwise.
     layer: Target layer (default: top layer).
     frame: Target frame, 1-based.
+
+Refuses a pass that darkened nothing rather than reporting `darkened_pixels: 0` as a
+success, and the refusal carries the three counts that say which of the possible
+causes it was. A contact shadow that changed no pixel is not a contact shadow.
+
+Run this **before** the passes that repaint the occluder, not after. The occluder is
+found by colour, so a `shade_region_by_light` or `shift_along_ramp` that has already
+moved the ground off `occluder_color` leaves this matching a handful of pixels and
+reporting the handful as a success.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -1630,6 +1669,7 @@ Args:
 | `depth` | integer | no | 1 |
 | `direction` | number | no | _none_ |
 | `tolerance` | number | no | 24.0 |
+| `occluder_tolerance` | number | no | _none_ |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
@@ -1890,6 +1930,10 @@ Args:
 Returns `pixels_written` and `pixels_skipped`. A high skip count usually means the
 ramp does not match the artwork, not that the sprite was already correct.
 
+`pixels_matched` counts the pixels that both matched the ramp and were written, so it
+agrees with `pixels_written` rather than counting matches an active selection then
+refused.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -2062,7 +2106,7 @@ Args:
 
 ### `select_by_color`
 
-Select every pixel matching a colour, the magic-wand selection.
+Select every pixel of one layer matching a colour, the magic-wand selection.
 
 The usual way to scope an edit to one material: select the armour's base colour and
 every later operation touches only the armour. Pair it with `shift_along_ramp` to
@@ -2073,9 +2117,26 @@ Args:
     tolerance: 0 matches exactly. Higher values also catch nearby colours, which is
         useful on artwork that was anti-aliased or converted from a photo.
     frame: Which frame to sample, 1-based.
+    layer: Which layer to match on. Defaults to the top layer, which is the layer the
+        drawing and shading tools also default to, so a selection made here scopes
+        the call that follows it.
 
-Matching is done on the composited image, so what is selected is what you see rather
-than what happens to be on the active layer.
+**One layer, not the composite**, and that is deliberate for the same reason
+`get_pixels` takes a layer: the tools this selection is for write to one layer, so a
+pixel selected on a different one is selected and unreachable. Select on the layer you
+are about to edit.
+
+This used to run Aseprite's `MaskByColor` without saying which layer it meant, and the
+layer it got was whichever one Aseprite made active on opening the file, which is the
+*bottom* one. Measured on an 8x8 sprite with red on the bottom layer and an opaque
+blue square over half of it on the layer above: matching red selected all 64 pixels,
+including the 32 nothing can see, and matching blue (32 pixels, plainly visible, and
+on the layer every drawing tool writes to) selected nothing at all.
+
+Refuses when no pixel matches, rather than reporting a success with no selection. The
+old behaviour cleared the sidecar on the way through, so a mistyped colour silently
+unscoped every edit that followed it, which is the opposite of what asking for a
+selection means. A refusal leaves the previous selection as it was.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2083,6 +2144,7 @@ than what happens to be on the active layer.
 | `color` | string | yes |  |
 | `tolerance` | integer | no | 0 |
 | `frame` | integer | no | 1 |
+| `layer` | string | no | _none_ |
 
 
 ### `select_region`
@@ -2587,6 +2649,9 @@ Args:
 ### `fill_tile`
 
 Fill an existing tile's artwork with a solid colour.
+
+Returns `pixels` (the tile's area, all of which is written) so the result says the fill
+reached the tile rather than only that the call returned.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -3662,13 +3727,23 @@ Scaffold an 8-direction walk-cycle template on an existing sprite: enough frames
 for `frames_per_direction` per direction, with one animation tag per direction
 (N, NE, E, SE, S, SW, W, NW by default).
 
+Args:
+    frames_per_direction: 8 is the convention for a walk, and it is what this
+        defaults to: contact, down, pass, up for each leg. 6 is the budget option and
+        4 only reads as a walk mirrored on a side view, which an 8-direction sheet by
+        definition is not. The default was 4 until this was fixed (#91), so a sprite
+        scaffolded before then has half the frames a walk needs.
+    frame_duration_ms: Set on every frame. Shape the timing afterwards with
+        `apply_timing_curve`: a walk holds its contacts.
+    directions: Override the eight compass tags.
+
 Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifest
 (kind "walk_template") with an animation block listing the directions/tags.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
-| `frames_per_direction` | integer | no | 4 |
+| `frames_per_direction` | integer | no | 8 |
 | `frame_duration_ms` | integer | no | 120 |
 | `directions` | array<string> | no | _none_ |
 

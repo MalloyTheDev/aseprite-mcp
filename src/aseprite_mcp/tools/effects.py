@@ -25,7 +25,7 @@ from ..core.limits import (
 )
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
-from .common import lua_path, parse_color, resolve_path, run_ramp_lua
+from .common import LANDED_LUA, lua_path, parse_color, resolve_path, run_ramp_lua
 from .drawing import _CLOSE, _OPEN, _draw
 from .shading import _FIELD_LUA
 
@@ -238,7 +238,7 @@ def add_drop_shadow(
         "color": parse_color(color),
         "opacity": max(0, min(255, int(opacity))),
     }
-    body = FRAME_GUARD_LUA + """
+    body = FRAME_GUARD_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local target = find_layer(spr, ARG.layer)
     if target.isGroup then error("Cannot shadow a group layer: " .. target.name) end
@@ -246,10 +246,26 @@ def add_drop_shadow(
     local src = get_draw_image(spr, target, framenum)
     local shadow = Image(spr.spec); shadow:clear()
     local sc = to_pixel(spr, ARG.color)
+    local mark = landed()
     for yy = 0, src.height - 1 do
       for xx = 0, src.width - 1 do
         if img_solid(spr, src, xx, yy) then img_set(shadow, xx + ARG.dx, yy + ARG.dy, sc) end
       end
+    end
+    -- A layer with nothing on it is not a shadow. The counters were honest here (0 written
+    -- beside 64 refused), but the layer still went in, and `cast_shadow` and `glow` refuse
+    -- the same situation, so this answering with a success was the odd one out.
+    if landed() == mark then
+      if _sel ~= nil then
+        error("The shadow landed entirely outside the active selection, so nothing was " ..
+              "written and no layer was added. deselect, or select a region the " ..
+              "offset silhouette falls in.", 0)
+      end
+      error(string.format(
+        "The shadow landed entirely off the canvas: layer '%s' offset by %d,%d on a " ..
+        "%dx%d canvas leaves nothing on it, so no layer was added. Lower the offset, " ..
+        "or resize_canvas to leave room.",
+        target.name, ARG.dx, ARG.dy, spr.width, spr.height), 0)
     end
     local slayer = spr:newLayer()
     slayer.name = target.name .. " shadow"
@@ -584,7 +600,7 @@ def cast_shadow(
         "new_layer": new_layer,
         "max_points": MAX_SHADOW_ELLIPSE_POINTS,
     }
-    body = FRAME_GUARD_LUA + _EFFECT_LAYER_LUA + """
+    body = FRAME_GUARD_LUA + _EFFECT_LAYER_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local subject = find_layer(spr, ARG.layer)
     if subject.isGroup then
@@ -734,7 +750,8 @@ def cast_shadow(
 
     local out = Image(spr.spec)
     out:clear()
-    local painted, clipped = 0, 0
+    local mark = landed()
+    local clipped = 0
     for y = 0, H - 1 do
       for x = 0, W - 1 do
         local step = idx_at[y][x]
@@ -746,13 +763,24 @@ def cast_shadow(
           else
             local c = ramp[step]
             img_set(out, x, y, rgba_to_px(spr, c.r, c.g, c.b, 255))
-            painted = painted + 1
           end
         end
       end
     end
+    -- What landed, not what was offered. Counting beside the loop meant an active
+    -- selection that the ellipse never reaches took every write and still let this
+    -- report `shadow_pixels: 95`, add a shadow layer with nothing on it, and sail past
+    -- the refusal below, which is the one thing here that could have caught it.
+    local painted = landed() - mark
 
     if painted == 0 then
+      if _sel ~= nil then
+        error(string.format(
+          "The shadow landed entirely outside the active selection: an ellipse %dx%d " ..
+          "centred on %d,%d, with every one of its pixels masked out. Nothing was " ..
+          "written and no layer was added. deselect, or select a region the shadow " ..
+          "falls in.", rx * 2, ry * 2, cx, cy), 0)
+      end
       if ground_mask ~= nil then
         error(string.format(
           "There is no surface for this shadow to land on: layer '" ..
@@ -893,7 +921,7 @@ def glow(
         "tolerance": float(tolerance),
         "new_layer": new_layer,
     }
-    body = FRAME_GUARD_LUA + _FIELD_LUA + _EFFECT_LAYER_LUA + """
+    body = FRAME_GUARD_LUA + _FIELD_LUA + _EFFECT_LAYER_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local subject = find_layer(spr, ARG.layer)
     if subject.isGroup then
@@ -960,7 +988,8 @@ def glow(
     local out = Image(spr.spec)
     out:clear()
     local ramp, rings = ARG.ramp, ARG.rings
-    local painted, per_ring = 0, {}
+    local mark = landed()
+    local per_ring = {}
     for i = 1, ARG.radius do per_ring[i] = 0 end
 
     for y = 0, H - 1 do
@@ -979,16 +1008,30 @@ def glow(
             end
             if draw then
               local c = ramp[rings[ring]]
+              -- Tallied from what landed. `img_set` refuses a write outside the active
+              -- selection, and counting the offer instead let a selection in a corner
+              -- the glow never reaches produce `glow_pixels: 56`, `per_ring: [36, 20]`,
+              -- `pixels_written: 0` and a glow layer with nothing at all on it.
+              local before = landed()
               img_set(out, x, y, rgba_to_px(spr, c.r, c.g, c.b, 255))
-              painted = painted + 1
-              per_ring[ring] = per_ring[ring] + 1
+              if landed() > before then
+                per_ring[ring] = per_ring[ring] + 1
+              end
             end
           end
         end
       end
     end
 
+    local painted = landed() - mark
     if painted == 0 then
+      if _sel ~= nil then
+        error(string.format(
+          "The glow landed entirely outside the active selection: every pixel of the " ..
+          "%d-pixel ring around the %d matching pixels was masked out. Nothing was " ..
+          "written and no layer was added. deselect, or select a region the glow " ..
+          "reaches.", ARG.radius, seeds), 0)
+      end
       error(string.format(
         "The glow had nowhere to go: every pixel within %d of the %d matching pixels " ..
         "is either part of the subject or off the canvas. Trim or resize the canvas to " ..
@@ -1327,7 +1370,10 @@ def remove_stray_pixels(
     -- directions and to nothing else: every neighbour of the whole run is transparent.
     -- That is what dirt outside the art is, and it is what keeps this off the artwork at
     -- any min_cluster, since the artwork is joined to itself and so is never a cluster.
-    local erase, erased, clusters = {}, 0, 0
+    -- `erase` is the membership test the stray pass needs; `erase_groups` keeps the same
+    -- pixels grouped, because a cluster counts as erased only when all of it went and
+    -- that cannot be asked of a flattened map.
+    local erase, erase_groups = {}, {}
     if ARG.erase_isolated then
       -- The pixels joined to (x0,y0), or nil once there are more of them than dirt has.
       -- It pops at most min_cluster + 1 pixels before giving up, so a wrong guess costs a
@@ -1385,10 +1431,9 @@ def remove_stray_pixels(
                 if protected[img:getPixel(p[1], p[2])] then keep = true end
               end
               if not keep then
-                clusters = clusters + 1
+                erase_groups[#erase_groups + 1] = members
                 for _, p in ipairs(members) do
                   erase[p[2] * w + p[1]] = p
-                  erased = erased + 1
                 end
               end
             end
@@ -1432,7 +1477,7 @@ def remove_stray_pixels(
 
     -- Read first, write after: a stray replaced mid-pass would become a neighbour that
     -- rescues the next one, and the result would depend on scan order.
-    local replacements, count = {}, 0
+    local replacements = {}
     for y = 0, h - 1 do
       for x = 0, w - 1 do
         if stray[y * w + x] then
@@ -1460,27 +1505,42 @@ def remove_stray_pixels(
           -- No staying neighbour means nothing to take, which is the same situation as a
           -- stray on empty canvas: left alone here, and erased by `erase_isolated`.
           if best ~= nil then
-            count = count + 1
-            replacements[count] = { x = x, y = y, px = best }
+            replacements[#replacements + 1] = { x = x, y = y, px = best }
           end
         end
       end
     end
 
+    -- Both counts are taken from what landed rather than from what was offered: an
+    -- active selection refuses a write silently, so a tally kept beside the loop claims
+    -- speckle was cleaned in pixels this call was never allowed to touch.
+    local mark_r = landed()
     for _, item in ipairs(replacements) do
       img_set(img, item.x, item.y, item.px)
     end
+    local replaced = landed() - mark_r
+
     -- rgba_to_px with no alpha is the transparent pixel in every colour mode, including
     -- the sprite's transparent index on indexed art, so this erases rather than writing
     -- a black that happens to look like a hole in RGB.
     local blank = rgba_to_px(spr, 0, 0, 0, 0)
-    for _, p in pairs(erase) do
-      img_set(img, p[1], p[2], blank)
+    local erased, clusters = 0, 0
+    for _, members in ipairs(erase_groups) do
+      local before = landed()
+      for _, p in ipairs(members) do
+        img_set(img, p[1], p[2], blank)
+      end
+      local gone = landed() - before
+      erased = erased + gone
+      -- Only a cluster that went entirely. Half a speck left behind is not a speck
+      -- removed, and a selection edge can cut one in two.
+      if gone == #members then clusters = clusters + 1 end
     end
-    _stray_replaced = count
+
+    _stray_replaced = replaced
     if ARG.erase_isolated then
       _stray_erased = erased
       _stray_erased_clusters = clusters
     end
     """
-    return run_lua(_OPEN + snippet + _CLOSE + _STRAY_TAIL, args)
+    return run_lua(_OPEN + LANDED_LUA + snippet + _CLOSE + _STRAY_TAIL, args)

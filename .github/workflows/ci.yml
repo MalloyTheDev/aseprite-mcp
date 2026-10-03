@@ -29,7 +29,16 @@ jobs:
     steps:
       # Actions are pinned to commit SHAs (supply-chain hardening); Dependabot keeps
       # them current and annotates the version (see .github/dependabot.yml).
+      #
+      # persist-credentials: false because checkout otherwise leaves the job's
+      # GITHUB_TOKEN in .git/config for every later step to read, and the steps after
+      # this one execute third-party code: `uv sync` runs the build backends of whatever
+      # the lock resolves to. The top-level `permissions: contents: read` already makes
+      # that token nearly useless, which is why this is defence in depth rather than a
+      # fix; nothing in this workflow pushes, so there is no cost to dropping it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -37,8 +46,13 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
+      # --locked, so the committed uv.lock is what gets installed and a stale lock is a
+      # CI failure instead of a silent re-resolution. Plain `uv sync` updates the lock
+      # when pyproject.toml has moved on, which means a PR that loosens a constraint is
+      # tested against versions nobody reviewed and the lock in the repository stops
+      # describing what passed.
       - name: Install dependencies
-        run: uv sync --python ${{ matrix.python-version }}
+        run: uv sync --locked --python ${{ matrix.python-version }}
 
       - name: Lint (ruff)
         run: uv run --python ${{ matrix.python-version }} ruff check src tests scripts

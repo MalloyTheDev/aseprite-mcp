@@ -13,16 +13,19 @@ Every case here fires *before* Aseprite is launched, which is the point: these a
 pre-flight checks, so they are testable (and enforced) on a machine with no Aseprite.
 """
 
+import ast
 import io
+import os
+import pathlib
 import sys
 
 import pytest
 
-from aseprite_mcp.core import config, limits
+from aseprite_mcp.core import config, limits, metadata
 from aseprite_mcp.core.errors import ExportError, ValidationFailed, WorkspaceError
 from aseprite_mcp.core.paths import ensure_output_pattern, expansion_matches
 from aseprite_mcp.core.runner import _run_bounded, _truncate
-from aseprite_mcp.tools import export, image, sprite, text
+from aseprite_mcp.tools import cels, export, image, slices, sprite, text
 
 
 @pytest.fixture
@@ -441,3 +444,462 @@ def test_scale_sprite_passes_the_aggregate_cel_budget_to_lua(ws, monkeypatch):
     assert seen["args"]["max_total_pixels"] == limits.MAX_SPRITE_TOTAL_PIXELS
     assert "max_total_pixels" in seen["body"]
     assert "spr.cels" in seen["body"]
+
+
+# ============ error-message hygiene on the paths that carry raw output ======
+def test_no_result_branch_strips_our_temp_script_location():
+    """A Lua *compile* error never reaches the pcall harness, so no sentinel is printed
+    and `_parse_result` falls through to the raw interpreter line. That line names the
+    temp script this server wrote, an absolute host path carrying the account name, for
+    a failure that is entirely ours. `strip_script_location` existed and was applied
+    only in `_decode_error`, the branch that handles a *caught* Lua error.
+    """
+    import subprocess
+
+    from aseprite_mcp.core.errors import LuaToolError
+    from aseprite_mcp.core.runner import _parse_result
+
+    leak = (
+        r"C:\Users\someone\AppData\Local\Temp\asemcp_abcd1234.lua:12: "
+        "unexpected symbol near one of the delimiters"
+    )
+    for stdout, stderr in (("", leak), (leak, "")):
+        proc = subprocess.CompletedProcess(["aseprite"], 1, stdout, stderr)
+        with pytest.raises(LuaToolError) as caught:
+            _parse_result(proc, nonce="deadbeefdeadbeef")
+        message = str(caught.value)
+        assert "asemcp_" not in message, message
+        assert "AppData" not in message, message
+        assert "unexpected symbol" in message, message
+
+
+def test_cli_failure_strips_our_temp_script_location(monkeypatch):
+    """Same hygiene on the CLI route, which builds its message from raw stderr too."""
+    import subprocess
+
+    from aseprite_mcp.core import runner as runner_module
+    from aseprite_mcp.core.errors import AsepriteCLIError
+
+    leak = "/tmp/asemcp_zz99.lua:3: the layer was not found"
+    monkeypatch.setattr(runner_module.config, "find_aseprite", lambda: "aseprite")
+
+    def stub(code):
+        # Bound per iteration rather than closed over the loop variable: both exit codes
+        # are error paths here (Aseprite's CLI exits 0 for arguments it rejected), and a
+        # late-binding lambda would test the last one twice.
+        def run(*a, **k):
+            return subprocess.CompletedProcess(["aseprite"], code, "", leak)
+        return run
+
+    for exit_code in (1, 0):
+        monkeypatch.setattr(runner_module, "_run_bounded", stub(exit_code))
+        with pytest.raises(AsepriteCLIError) as caught:
+            runner_module.run_cli(["--version"])
+        assert "asemcp_" not in str(caught.value), str(caught.value)
+        assert "layer was not found" in str(caught.value)
+
+
+# ===================== the generated script is always removed ==============
+def test_a_script_that_cannot_be_removed_is_retried_on_the_next_run(tmp_path):
+    """The unlink used to be a lone call inside `contextlib.suppress(OSError)`.
+
+    On Windows that is a likely failure, not a rare one: unlinking a file another
+    process still holds raises PermissionError, and a killed Aseprite has not always
+    released its handle by the time the timeout path gets here. Measured at v0.10.0:
+    ten `asemcp_*.lua` scripts left in the system temp directory over four days, each
+    carrying the caller's resolved paths and colours. Suppressing the error is still
+    right, because failing a successful call over cleanup would be worse; never trying
+    again was not.
+    """
+    from aseprite_mcp.core import runner as runner_module
+
+    stubborn = tmp_path / "asemcp_stuck.lua"
+    stubborn.write_text("local ARG = {}")
+    later = tmp_path / "asemcp_fine.lua"
+    later.write_text("local ARG = {}")
+
+    real_unlink = os.unlink
+    refuse = {"on": True}
+
+    def flaky_unlink(target):
+        if refuse["on"] and str(target) == str(stubborn):
+            raise PermissionError(32, "being used by another process")
+        real_unlink(target)
+
+    runner_module._PENDING_UNLINK.clear()
+    try:
+        os.unlink = flaky_unlink
+        runner_module._drop_script(str(stubborn))
+        assert stubborn.exists(), "the stubborn script should still be there"
+        assert str(stubborn) in runner_module._PENDING_UNLINK, (
+            "a failed removal has to be remembered, or the file is leaked silently"
+        )
+
+        refuse["on"] = False
+        runner_module._drop_script(str(later))
+    finally:
+        os.unlink = real_unlink
+        runner_module._PENDING_UNLINK.clear()
+
+    assert not later.exists()
+    assert not stubborn.exists(), "the next run must retry what the last one could not"
+
+
+def test_dropping_a_script_that_is_already_gone_is_not_an_error(tmp_path):
+    from aseprite_mcp.core import runner as runner_module
+
+    runner_module._drop_script(str(tmp_path / "never_existed.lua"))
+
+
+# ======================= the selection sidecar is injective ================
+_SIDECAR_NAMES = (
+    "hero.aseprite", "hero.png", "hero.gif", "hero", "hero.v2.aseprite",
+    ".hidden", ".aseprite", ".png", "sub.dir/hero", "sub.dir/hero.png",
+)
+
+
+def test_two_sprites_of_one_stem_do_not_share_a_selection(tmp_path):
+    """`with_suffix(".msk")` mapped `hero.aseprite` and `hero.png` onto one `hero.msk`.
+
+    Three things came out of that single name. A selection set on the sprite scoped
+    every edit to the PNG beside it, measured against the wrong sprite's dimensions, and
+    both calls reported `selection_applied: true`. `save_sprite_as("hero.aseprite",
+    "hero.png")` deleted the *source's* sidecar while the comment at that call site said
+    the source was untouched. And the Lua derivation, which stripped the last extension,
+    disagreed with `with_suffix` for a dotfile name.
+    """
+    from aseprite_mcp.core.paths import selection_sidecar
+
+    sidecars = {n: selection_sidecar(tmp_path / n) for n in _SIDECAR_NAMES}
+    assert len(set(sidecars.values())) == len(sidecars), (
+        "two sprites share one sidecar: "
+        + repr({n: str(p) for n, p in sidecars.items()})
+    )
+    assert selection_sidecar(tmp_path / "hero.aseprite").name == "hero.aseprite.msk"
+
+
+def test_the_prelude_derives_the_sidecar_exactly_as_python_does():
+    """The write side is derived in Python and the read side in Lua, so the two
+    derivations are one invariant in two languages. They disagreed for any name whose
+    final component begins with a dot: `.hidden` was saved to `.hidden.msk` and loaded
+    from `.msk`, so the selection was written and then never read.
+
+    Transcribed rather than executed, because there is no Lua here. The literal is
+    asserted too, so the prelude's half cannot change without this test noticing.
+    """
+    import pathlib as _pathlib
+
+    from aseprite_mcp.core import luagen
+    from aseprite_mcp.core.paths import SELECTION_SUFFIX, selection_sidecar
+
+    assert 'local mask_path = tostring(path) .. ".msk"' in luagen.PRELUDE, (
+        "the prelude no longer appends the suffix to the whole filename; if that was "
+        "deliberate, core.paths.selection_sidecar has to make the same change"
+    )
+    assert SELECTION_SUFFIX == ".msk"
+
+    for name in _SIDECAR_NAMES:
+        sprite_path = _pathlib.PurePosixPath("/ws") / name
+        # The Lua half is `tostring(path) .. ".msk"` on the forward-slashed path that
+        # `lua_path` hands the prelude.
+        lua_half = str(sprite_path) + SELECTION_SUFFIX
+        python_half = str(selection_sidecar(sprite_path)).replace("\\", "/")
+        assert lua_half == python_half, name
+
+
+# ===================== drawing extents are bounded in the prelude ==========
+def test_the_draw_extent_cap_reaches_the_prelude():
+    """A shape's cost is the extent it was given, not the canvas it lands on: `img_set`
+    discards the off-canvas writes, but only after the loop has run. Measured at
+    v0.10.0, `draw_rectangle(width=1000000, height=1000000, filled=True)` was accepted
+    and asked Lua for 1e12 `img_set` calls, and `draw_ellipse(radius_x=1000000,
+    radius_y=1000000, filled=True)` for about 3.1e12 point tables, which is memory
+    rather than patience. The number lives in core.limits; this pins that the Lua the
+    editor runs carries the same one rather than a copy that can drift.
+    """
+    from aseprite_mcp.core import luagen
+
+    assert f"local MAX_DRAW_EXTENT = {limits.MAX_DRAW_EXTENT_PIXELS}" in luagen.PRELUDE
+    assert "local function check_extent(" in luagen.PRELUDE
+
+
+@pytest.mark.parametrize("primitive", [
+    "bresenham_points", "draw_line_img", "draw_rect_img", "ellipse_offsets",
+    "aa_line_img", "aa_ellipse_fill_img",
+])
+def test_every_extent_driven_primitive_checks_its_extent(primitive):
+    """The guard sits in the shared primitives rather than at each tool's entry, because
+    six primitives serve a dozen drawing tools and a new tool reaching one of them has
+    to inherit the bound instead of having to remember it. One missing call puts the
+    hole back for every tool that reaches that primitive.
+    """
+    from aseprite_mcp.core import luagen
+
+    start = luagen.PRELUDE.index(f"local function {primitive}(")
+    end = luagen.PRELUDE.index("\nend\n", start)
+    assert "check_extent(" in luagen.PRELUDE[start:end], (
+        f"{primitive} derives its work from a caller-supplied extent and no longer "
+        "bounds it"
+    )
+
+
+def test_a_full_canvas_shape_still_fits_under_the_cap():
+    """The cap has to refuse the attack without refusing the picture: a filled rectangle
+    and a filled ellipse covering a maximum-size canvas are both legitimate requests.
+    """
+    import math
+
+    area = limits.MAX_CANVAS_PIXELS
+    assert area <= limits.MAX_DRAW_EXTENT_PIXELS
+    radius = math.isqrt(area) // 2
+    assert math.ceil(math.pi * (radius + 1) ** 2) <= limits.MAX_DRAW_EXTENT_PIXELS
+    assert (2 * radius + 3) ** 2 <= limits.MAX_DRAW_EXTENT_PIXELS
+    assert limits.MAX_CANVAS_DIMENSION <= limits.MAX_DRAW_EXTENT_PIXELS
+
+
+# ================= a property value too deep to store is typed =============
+# Which guard catches an over-deep value is a property of the platform and not of the
+# value: `json` walks the nesting in C, and how much of that walk fits before the
+# interpreter gives up differs, so a 5,000-deep *text* is caught by the depth cap on the
+# CI runners and by the RecursionError branch on Windows. The first version of this test
+# asserted the Windows wording and so passed here and failed on all five runners. Both
+# refusals lead with the clause below, and these assert that rather than whichever
+# branch happened to run.
+DEPTH_REFUSAL = f"nests more than {metadata.MAX_PROPERTY_DEPTH} levels deep"
+
+
+@pytest.mark.parametrize("depth", [9, 1200, 5000])
+def test_a_property_value_too_deep_is_a_typed_refusal_as_json_text(depth):
+    """`json.loads` walks the nesting itself, so a value nested past the interpreter's
+    recursion limit never reached `_check_tree`. RecursionError is a RuntimeError, not a
+    ValueError, so the invalid-JSON branch did not catch it either, and
+    `set_properties(value='{"a":' * 5000 + ..., as_json=True)` surfaced as an untyped
+    internal failure with no remedy in it.
+    """
+    deep = '{"a":' * depth + "0" + "}" * depth
+    with pytest.raises(ValidationFailed, match=DEPTH_REFUSAL):
+        metadata.parse_property_value(deep, as_json=True)
+
+
+@pytest.mark.parametrize("depth", [9, 1200, 5000])
+def test_a_property_value_too_deep_is_a_typed_refusal_arriving_pre_parsed(depth):
+    """The other side of the same cap. Some clients parse a JSON-looking argument before
+    the server sees it, so the value arrives as a dict and is encoded on the way in, and
+    that encode was a second recursive walk which ran *before* the cap.
+
+    `_check_tree` stops descending at nine levels and so cannot recurse away itself,
+    which is why it now runs first: this refusal names the path at depth nine on every
+    platform, however deep the value actually goes.
+    """
+    deep = 0
+    for _ in range(depth):
+        deep = {"a": deep}
+    with pytest.raises(ValidationFailed, match=DEPTH_REFUSAL):
+        metadata.parse_property_value(deep)
+    with pytest.raises(ValidationFailed, match=DEPTH_REFUSAL):
+        cels._coerce_property_value(deep)
+
+
+def test_slice_user_data_too_deep_to_encode_is_a_typed_refusal(monkeypatch):
+    """`_coerce_slice_data` holds the same unguarded `json.dumps`, one layer earlier: it
+    runs as a `BeforeValidator`, so it failed ahead of any cap.
+
+    The RecursionError is injected rather than provoked with a deep value, because the
+    depth at which `json.dumps` gives up is the platform-dependent part. What is under
+    test is the translation into a typed refusal, which is not.
+    """
+
+    def boom(*_args, **_kwargs):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(slices.json, "dumps", boom)
+    with pytest.raises(ValidationFailed, match=r"too deeply to encode"):
+        slices._coerce_slice_data({"type": "hitbox", "id": "body"})
+
+
+# ======================= supply chain: the lock and the workflows ==========
+def _repo_root():
+    import pathlib as _pathlib
+
+    return _pathlib.Path(__file__).resolve().parents[1]
+
+
+def test_uv_lock_records_the_version_in_pyproject():
+    """A release that bumps `pyproject.toml` and forgets `uv.lock` leaves the lock
+    describing a version that no longer exists. v0.10.0 shipped exactly that: the lock
+    still said 0.9.0, so `uv lock --check` failed on a clean checkout of `main` while CI
+    stayed green, because `uv sync` silently re-resolves instead of refusing.
+
+    Parsed with regular expressions rather than `tomllib`, which arrived in 3.11, so
+    this runs on every interpreter in the matrix.
+    """
+    import re
+
+    root = _repo_root()
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    lock = (root / "uv.lock").read_text(encoding="utf-8")
+
+    declared = re.search(r'(?m)^version = "([^"]+)"', pyproject)
+    assert declared, "could not find the project version in pyproject.toml"
+    locked = re.search(
+        r'(?ms)^\[\[package\]\]\nname = "aseprite-mcp"\nversion = "([^"]+)"', lock)
+    assert locked, "could not find the aseprite-mcp entry in uv.lock"
+    assert declared.group(1) == locked.group(1), (
+        f"pyproject.toml says {declared.group(1)} and uv.lock says "
+        f"{locked.group(1)}; run `uv lock`"
+    )
+
+
+def test_ci_installs_from_the_committed_lock():
+    """Without `--locked`, `uv sync` updates the lock when pyproject has moved on, so a
+    PR that loosens a constraint is tested against versions nobody reviewed and the
+    committed lock stops describing what passed.
+    """
+    workflow = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8")
+    assert "uv sync --locked" in workflow, (
+        "CI must assert the committed uv.lock rather than letting uv re-resolve"
+    )
+
+
+@pytest.mark.parametrize("name", ["ci.yml", "codeql.yml"])
+def test_checkout_does_not_leave_the_token_in_the_checkout(name):
+    """`actions/checkout` writes the job's GITHUB_TOKEN into .git/config by default, and
+    the steps after it run third-party code: `uv sync` executes the build backends of
+    whatever the lock resolves to. The top-level `permissions: contents: read` makes
+    that token nearly useless, which is why this is defence in depth; the CodeQL job
+    also holds `security-events: write`, and neither workflow pushes anything.
+    """
+    workflow = (_repo_root() / ".github" / "workflows" / name).read_text(
+        encoding="utf-8")
+    assert "actions/checkout@" in workflow
+    assert "persist-credentials: false" in workflow, (
+        f"{name} checks out with the default credential persistence"
+    )
+
+
+# ===== no caller data reaches the Lua as code =========================================
+# The whole architecture rests on one property: a tool's Lua *body* is a static string, and
+# everything the caller supplied arrives through the `local ARG = {...}` table that `to_lua`
+# escapes. If a body were ever built by interpolation, the escaping would be bypassed and
+# the caller would be writing Lua that runs with the Aseprite process's privileges.
+#
+# An audit established that this holds across the repository. An audit is a measurement
+# taken once, and this is the measurement taken on every run: the property was true the day
+# it was checked and nothing was stopping the next edit from breaking it.
+
+RUNNERS = frozenset({"run_lua", "assemble_script", "run_ramp_lua", "_draw", "run_cli"})
+
+# The one f-string that legitimately becomes Lua. It injects a cap from `core.limits` so
+# the number is not duplicated in a Lua string where nothing imports it and no test can see
+# the two copies disagree. It is named here rather than pattern-matched so that adding a
+# second one is a deliberate edit to this test with a reason attached.
+LUA_FSTRING_ALLOWED = {("core/luagen.py", "_LIMITS_LUA")}
+
+
+def _source_files():
+    root = pathlib.Path(__file__).resolve().parents[1] / "src" / "aseprite_mcp"
+    return sorted(root.rglob("*.py")), root
+
+
+def _interpolation_kind(node):
+    """How this expression was built, if it was built out of parts at runtime."""
+    if isinstance(node, ast.JoinedStr):
+        return "an f-string"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        return "percent formatting"
+    if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "format":
+        return "str.format()"
+    if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "join":
+        return "str.join()"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        # Concatenating Lua constants is how every body in here is assembled, and is fine:
+        # the parts are module-level strings. What is not fine is a part built at runtime.
+        for side in (node.left, node.right):
+            kind = _interpolation_kind(side)
+            if kind:
+                return f"{kind} inside a concatenation"
+    return None
+
+
+def test_no_lua_body_is_built_by_interpolation():
+    """Every runner call is handed a static body, never one assembled from values.
+
+    Checked at the call site rather than by looking for Lua-shaped strings, because this
+    codebase has well over a hundred f-strings and every one of them is prose for an error
+    message. The call site is the place where the distinction is unambiguous: whatever is
+    handed to `run_lua` is what Aseprite executes.
+    """
+    files, root = _source_files()
+    offenders, sites = [], 0
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name not in RUNNERS:
+                continue
+            sites += 1
+            kind = _interpolation_kind(node.args[0])
+            if kind:
+                rel = path.relative_to(root).as_posix()
+                offenders.append(f"{rel}:{node.lineno} passes {name}() a body built by {kind}")
+
+    assert sites > 100, f"only found {sites} runner call sites, so this test is not looking"
+    assert not offenders, (
+        "a Lua body built out of parts bypasses the ARG table that `to_lua` escapes:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_only_f_string_that_becomes_lua_interpolates_an_integer_constant():
+    """The one exception, held to the reason it was allowed.
+
+    `_LIMITS_LUA` exists so a cap is not written out twice. That is a good reason and it
+    survives only while the holes in it are integers from `core.limits`: a hole that took a
+    caller's value would be the injection this file's sibling test exists to prevent, and it
+    would be invisible there because the interpolation happens at import rather than at the
+    call site.
+    """
+    files, root = _source_files()
+    found = set()
+    for path in files:
+        rel = path.relative_to(root).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.JoinedStr)):
+                continue
+            literal = "".join(
+                part.value for part in node.value.values
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            )
+            if not any(marker in literal for marker in ("local ", "function ", "--")):
+                continue
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                found.add((rel, target.id))
+                assert (rel, target.id) in LUA_FSTRING_ALLOWED, (
+                    f"{rel}:{node.lineno} builds Lua with an f-string assigned to "
+                    f"{target.id!r}. If that is deliberate, add it to "
+                    "LUA_FSTRING_ALLOWED with the reason."
+                )
+            for part in node.value.values:
+                if not isinstance(part, ast.FormattedValue):
+                    continue
+                assert isinstance(part.value, ast.Name), (
+                    f"{rel}:{node.lineno} interpolates an expression into Lua. Only a bare "
+                    "name holding an integer constant is allowed here."
+                )
+                value = getattr(limits, part.value.id, None)
+                assert isinstance(value, int) and not isinstance(value, bool), (
+                    f"{rel}:{node.lineno} interpolates {part.value.id!r} into Lua, which is "
+                    f"{type(value).__name__} rather than an int from core.limits."
+                )
+
+    assert found == LUA_FSTRING_ALLOWED, (
+        f"the allowlist names {LUA_FSTRING_ALLOWED} but the source has {found}. "
+        "Remove the stale entry, so the allowlist cannot outlive what it excuses."
+    )

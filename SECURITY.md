@@ -2,8 +2,10 @@
 
 ## Supported versions
 
-Security fixes target the latest released `0.9.x` line and `main`. Older tags are not
-patched; upgrade to the newest release.
+Security fixes target the latest released `0.10.x` line and `main`. Older tags are not
+patched; upgrade to the newest release. This line is part of the policy rather than a
+changelog entry, so it moves with each minor release: it still said `0.9.x` after
+v0.10.0 shipped, which left a reader unable to tell which line was actually patched.
 
 ## Threat model
 
@@ -61,6 +63,17 @@ a file you do not trust into the workspace as handing it to that parser.
     such a path without complaint, so on the newest interpreter the project supports the
     guard had already stopped holding. It is now a check of its own rather than a
     standard-library implementation detail.
+  - **What containment cannot see: hard links.** The check canonicalises with
+    `.resolve()` and then tests containment, which is what catches a symlink or a
+    junction aimed out of the workspace. A **hard link** is not that kind of indirection:
+    it is a second name for the same file, with no link target to resolve, so a hard link
+    placed inside the workspace pointing at a file elsewhere on the same volume reads and
+    writes that file and no path-based check can tell. This is stated rather than fixed
+    because it cannot be fixed at the path layer, and because placing one there already
+    requires write access to the workspace, which *Out of scope* below treats as trusted.
+    It is worth naming so that "nothing outside the workspace" is not read as a stronger
+    claim than it is. Measured: `os.link` into the workspace needs no privilege on NTFS,
+    and `config.resolve` accepts the resulting name as contained, which it is.
 - **Workspace default (v0.8.0).** With `ASEPRITE_MCP_WORKSPACE` unset, the default is a
   sibling `workspace/` directory *only* when the package runs from a source checkout.
   Installed (`uvx aseprite-mcp`), it is a per-user data directory
@@ -90,14 +103,44 @@ a file you do not trust into the workspace as handing it to that parser.
   after), **aggregate cel area** when scaling a sprite, and Aseprite's output, which is
   drained into a bounded buffer as it is read rather than captured whole and trimmed
   afterwards.
+  - **Drawing extents.** A shape's cost is the extent it was given, not the canvas it
+    lands on: the prelude's `img_set` discards an off-canvas write, but only after the
+    loop has already run, so the canvas caps above do not bound it. The shared drawing
+    primitives in `core/luagen.py` (`draw_rect_img`, `ellipse_offsets`,
+    `bresenham_points`, `draw_line_img`, and both anti-aliased variants) therefore refuse
+    an extent past `MAX_DRAW_EXTENT_PIXELS` before the first pixel. The bound lives in
+    the primitives rather than at each tool's entry so that a tool reaching one of them
+    inherits it. Before this, `draw_rectangle(width=1000000, height=1000000,
+    filled=True)` was accepted and asked Lua for 1e12 writes, which spent the whole
+    invocation timeout, and `draw_ellipse(radius_x=1000000, radius_y=1000000,
+    filled=True)` asked for ~3.1e12 point tables, which is an out-of-memory rather than
+    a slow call.
 - **Timeouts.** Every Aseprite invocation runs under `ASEPRITE_MCP_TIMEOUT` (default 90s,
-  clamped to 1-3600s so a hostile or fat-fingered value can't disable the guard).
+  clamped to 1-3600s so a hostile or fat-fingered value can't disable the guard). On
+  expiry the child is killed, not abandoned, and the generated script is removed.
+- **Error-message hygiene.** The generated Lua lives in a temp file, so an error the
+  interpreter prefixes with its own location names an absolute host path, with the
+  account name in it. `core/errors.strip_script_location` removes those, and it is
+  applied on **every** path that carries interpreter output to the caller: the caught-Lua
+  branch, the no-sentinel branch a Lua *compile* error takes, and both CLI failure
+  branches. The compile-error branch was the gap: it handed back
+  `C:\Users\<user>\AppData\Local\Temp\asemcp_<rand>.lua:12: ...` verbatim.
+- **Generated scripts are removed on every path.** The temp script is unlinked in a
+  `finally`, including on timeout and on an unexpected error. A removal that *fails*
+  (on Windows, unlinking a file a process still holds raises) is now retried by the next
+  run instead of being suppressed and forgotten; a hard kill of the server is the one
+  case nothing in-process can collect.
 - **Bring your own Aseprite.** The server only executes the Aseprite binary you point it
   at via `ASEPRITE_PATH` / PATH.
 - **Least-privilege CI.** Both GitHub Actions workflows declare `permissions: contents: read`
   at the top level and pin every action to a commit SHA. CodeQL (`security-extended`) scans
   `main`, every PR, and weekly on a schedule; its analysis job is the only thing granted a
   write scope, `security-events: write`, which is what uploading the SARIF results needs.
+  Neither workflow pushes, so both check out with `persist-credentials: false`: otherwise
+  the job's token sits in `.git/config` for every later step to read, and the steps after
+  checkout run third-party code (`uv sync` executes the build backends the lock resolves
+  to). Dependencies are installed with `uv sync --locked`, so the committed `uv.lock` is
+  what gets tested and a stale lock fails CI rather than being silently re-resolved.
 
 ## Out of scope (your responsibility)
 

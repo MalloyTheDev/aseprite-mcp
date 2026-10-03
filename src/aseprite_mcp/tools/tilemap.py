@@ -116,7 +116,11 @@ def add_tile(filename: str, layer: str, color: str | None = None, frame: int = 1
 
 @mcp.tool()
 def fill_tile(filename: str, layer: str, tile_index: int, color: str, frame: int = 1) -> dict:
-    """Fill an existing tile's artwork with a solid colour."""
+    """Fill an existing tile's artwork with a solid colour.
+
+    Returns `pixels` (the tile's area, all of which is written) so the result says the fill
+    reached the tile rather than only that the call returned.
+    """
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": FrameRef.arg("frame", frame),
@@ -124,9 +128,20 @@ def fill_tile(filename: str, layer: str, tile_index: int, color: str, frame: int
     }
     body = _TM + """
     if ARG.index < 0 or ARG.index >= #ts then error("No tile at index " .. ARG.index, 0) end
-    ts:tile(ARG.index).image:clear(to_pixel(spr, ARG.color))
+    -- Cleared on a copy and assigned back, rather than clearing the tile's live image in
+    -- place. `Image:clear` really does write the pixels (a fresh `ts:tile(i).image` reads
+    -- them back changed, so the accessor is a live reference and the colour argument is
+    -- being understood), but it does not mark the tile dirty, so `saveAs` wrote the file
+    -- without it: the tool returned `ok: true` and painted nothing, on any index. An
+    -- assignment to `.image` is what registers the change, which is why
+    -- `paint_tile_pixels` next door always worked and why a single `drawPixel` after the
+    -- clear used to rescue the whole fill.
+    local im = Image(ts:tile(ARG.index).image)
+    im:clear(to_pixel(spr, ARG.color))
+    ts:tile(ARG.index).image = im
     save_sprite(spr)
-    RESULT = { ok = true, index = ARG.index }
+    RESULT = { ok = true, index = ARG.index, pixels = im.width * im.height,
+               tile_size = { width = im.width, height = im.height } }
     """
     return run_lua(body, args)
 

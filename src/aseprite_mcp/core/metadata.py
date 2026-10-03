@@ -229,6 +229,23 @@ def _check_tree(value, path: str, depth: int) -> None:
             _check_tree(item, f"{path}[{index}]", depth + 1)
 
 
+def encode_property_value(value) -> str:
+    """JSON text for a property value that arrived already parsed.
+
+    Some clients parse a JSON-looking argument before the server ever sees it, so a
+    hitbox sent as `{"x": 8}` arrives as a dict and has to be encoded on the way in.
+    `json.dumps` walks the value recursively, so a structure nested past the
+    interpreter's limit raised RecursionError here, which is a RuntimeError and so
+    reached the client as an untyped internal failure with no remedy in it.
+
+    `_check_tree` is the cap that should have caught it. It stops descending at nine
+    levels and so cannot recurse away itself, which is why it runs first: the refusal
+    then names the path, and names it the same way on every platform.
+    """
+    _check_tree(value, "value", 0)
+    return json.dumps(value)
+
+
 def parse_property_value(value, *, as_json: bool = False):
     """The typed value to store, from the string that arrived on the wire.
 
@@ -254,7 +271,7 @@ def parse_property_value(value, *, as_json: bool = False):
         raise ValidationFailed(
             "value is required. Pass delete=True to remove a property instead."
         )
-    text = value if isinstance(value, str) else json.dumps(value)
+    text = value if isinstance(value, str) else encode_property_value(value)
     looks_structured = text.strip()[:1] in ("{", "[")
     if as_json or looks_structured:
         try:
@@ -267,6 +284,24 @@ def parse_property_value(value, *, as_json: bool = False):
                     'needs JSON syntax ({"x": 8, "y": 15}).'
                 ) from exc
             return text
+        except RecursionError as exc:
+            # `json.loads` walks the nesting itself, so a value nested past the
+            # interpreter's recursion limit never reaches `_check_tree`. RecursionError
+            # is a RuntimeError, not a ValueError, so the branch above does not see it
+            # either, and `set_properties(value='{"a":' * 5000 + ..., as_json=True)`
+            # surfaced as an untyped internal failure with no remedy in it.
+            #
+            # How much of that walk fits before the interpreter gives up is a property
+            # of the platform and not of the value, so which guard catches a 5,000-deep
+            # text differs: `_check_tree` below on the CI runners, this branch on
+            # Windows (measured across 3.10 to 3.14 at v0.10.0). Both lead with the
+            # same clause, so the caller reads one cap either way and a test can assert
+            # the refusal without asserting which branch ran.
+            raise ValidationFailed(
+                f"value nests more than {MAX_PROPERTY_DEPTH} levels deep, too deeply "
+                "for the parser to walk it. Properties hold game metadata, not "
+                "documents; flatten it."
+            ) from exc
         _check_tree(parsed, "value", 0)
         return parsed
     return text

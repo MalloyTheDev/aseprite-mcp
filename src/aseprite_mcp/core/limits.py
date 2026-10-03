@@ -232,6 +232,28 @@ MAX_CANVAS_PIXELS = 16_777_216  # 4096 * 4096
 # count (100 cels at 4096x4096 is ~1.7 Gpx, several GB of RGBA).
 MAX_SPRITE_TOTAL_PIXELS = 67_108_864  # 4x one max canvas
 
+# Pixels one *drawing primitive* may step over or build a point list for, which is a
+# different question from how big a canvas is. The canvas caps bound the image; this
+# bounds the shape, and a shape is not clipped to the image until it is written.
+#
+# The three shared primitives in `core.luagen` all derive their work directly from the
+# extent they are given: `draw_rect_img` loops w*h, `ellipse_offsets` emits one small
+# Lua table per pixel of a filled ellipse's area and returns the whole list, and
+# `bresenham_points` walks max(|dx|,|dy|). `img_set` discards the off-canvas writes, so
+# the picture is right, but the discarding happens after the iteration, so the cost is
+# the caller's number and not the canvas's. Measured against v0.10.0:
+# `draw_rectangle(x=0, y=0, width=1000000, height=1000000, filled=True)` is accepted and
+# asks for 1e12 `img_set` calls, and `draw_ellipse(radius_x=1000000, radius_y=1000000,
+# filled=True)` asks for ~3.1e12 point tables, which is memory rather than patience.
+# `cast_shadow` already refuses its own version of the ellipse case
+# (MAX_SHADOW_ELLIPSE_POINTS); nothing refused the plain drawing tools' version.
+#
+# Four times one maximum canvas, so every shape that could show on a legal canvas still
+# fits with headroom: a full-canvas filled rectangle at the cap is 16.7M steps and a
+# full-canvas filled ellipse about 13.2M, both comfortably inside, while an extent that
+# can only be a mistake or an attack is refused before the first pixel.
+MAX_DRAW_EXTENT_PIXELS = 67_108_864  # 4x one max canvas
+
 # --- Inline payloads ------------------------------------------------------- #
 # Maximum decoded size of an inline base64 image handed to draw_image_base64.
 MAX_IMAGE_BYTES = 32 * 1024 * 1024

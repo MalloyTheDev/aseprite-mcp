@@ -1021,3 +1021,63 @@ def test_specular_reports_the_region_its_normals_came_from(two_materials):
     assert glint["region_bounds"] == {"x": 2, "y": 2, "width": 12, "height": 12}
     x, y = glint["pixels"][0]
     assert 2 <= x < 14 and 2 <= y < 14, "the glint must be inside the region it reported"
+
+
+# ------------------------------------------- contact_shadow's two colour-distance tests
+
+
+def test_contact_shadow_refuses_a_pass_that_darkened_nothing(request):
+    """`ok: true, darkened_pixels: 0` is the result an agent reads as done.
+
+    The occluder match and the ramp match were one `tolerance`, and the occluder match
+    wants to be tight while the ramp match has to stay loose. With a ground colour inside
+    24 of the subject's own mid step, the subject was classified as the thing occluding
+    it: `occluder_pixels` came back as every opaque pixel on the canvas, nothing was
+    darkened, and the call reported success.
+    """
+    from aseprite_mcp.core.errors import AsepriteError
+
+    ramp = ["#2a2a3a", "#3f3f58", "#5a5a7a", "#7a7a9c", "#9c9cc0"]
+    ground = "#60607e"  # within 24 of ramp[2], which the subject is painted in
+    name = f"sh/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 24, 24)
+    drawing.draw_rectangle(name, 0, 18, 24, 6, ground, filled=True)
+    drawing.draw_rectangle(name, 6, 4, 12, 14, ramp[2], filled=True)
+    before = inspect.get_pixels(name, 0, 0, 24, 24)["pixels"]
+
+    with pytest.raises(AsepriteError, match="darkened nothing"):
+        shading.contact_shadow(name, ramp, occluder_color=ground, radius=2, depth=2)
+
+    assert inspect.get_pixels(name, 0, 0, 24, 24)["pixels"] == before
+
+    # And the way out is in the message: its own tolerance, tight.
+    result = shading.contact_shadow(
+        name, ramp, occluder_color=ground, radius=2, depth=2, occluder_tolerance=1.0
+    )
+    assert result["darkened_pixels"] > 0
+    assert result["occluder_pixels"] == 24 * 6, "only the ground is the ground"
+
+
+def test_contact_shadow_warns_when_the_occluder_match_covers_a_ramp_step(ball_on_ground):
+    """The overlap a caller cannot otherwise see.
+
+    `occluder_pixels` is a number with nothing to compare it against, so a pass that is
+    quietly reading part of the artwork as its own occluder looks exactly like one that
+    is not. The fixture's own ground, `#404040`, is 8.2 from `RAMP[1]`, which is the
+    hazard live in this file's test data rather than a constructed one.
+    """
+    result = shading.contact_shadow(
+        ball_on_ground, RAMP, occluder_color="#404040", radius=2, depth=2
+    )
+
+    assert result["darkened_pixels"] > 0, "this pass still does its job"
+    joined = " ".join(result["warnings"])
+    assert "occluder_tolerance" in joined, result.get("warnings")
+    assert RAMP[1] in joined, result.get("warnings")
+
+    # Tightened, there is nothing to say and no warning is invented.
+    tight = shading.contact_shadow(
+        ball_on_ground, RAMP, occluder_color="#404040", radius=2,
+        occluder_tolerance=1.0,
+    )
+    assert not any("occluder_tolerance" in w for w in tight.get("warnings", []))

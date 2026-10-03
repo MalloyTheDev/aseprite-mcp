@@ -233,3 +233,66 @@ def test_saving_under_a_name_does_not_inherit_that_name_s_selection(canvas):
 
     assert not mask_path_for(resolve_path(other)).exists()
     assert drawing.fill_layer(other, "#00ff00")["pixels_written"] == 16 * 16
+
+
+# ===== which layer the magic wand is looking at ======================================
+
+
+@pytest.fixture()
+def two_layers(request):
+    """Red filling the bottom layer, an opaque blue square over half of it on top.
+
+    Only 32 of the 64 red pixels are visible, and the blue ones sit on the layer every
+    drawing tool writes to when no layer is named.
+    """
+    from aseprite_mcp.tools import layers
+
+    name = f"sel/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 8, 8)
+    drawing.draw_rectangle(name, 0, 0, 8, 8, "#ff0000", filled=True, layer="Layer 1")
+    layers.add_layer(name, "top")
+    drawing.draw_rectangle(name, 0, 0, 8, 4, "#0000ff", filled=True, layer="top")
+    return name
+
+
+def test_select_by_color_matches_the_layer_the_drawing_tools_write_to(two_layers):
+    """It used to match whichever layer Aseprite made active, which is the bottom one.
+
+    `MaskByColor` follows `app.layer`, and nothing set it, so a freshly opened file gave
+    it `spr.layers[1]`. That is neither the composite the docstring promised nor the top
+    layer `find_layer(spr, nil)` hands every drawing tool. Measured before the fix:
+    matching blue selected nothing, and matching red selected all 64 pixels including the
+    32 that nothing can see.
+    """
+    result = selection.select_by_color(two_layers, "#0000ff")
+
+    assert result["layer"] == "top"
+    described = selection.get_selection(two_layers)
+    assert described["area"] == 32, described
+    assert described["bounds"] == {"x": 0, "y": 0, "width": 8, "height": 4}
+
+
+def test_select_by_color_can_be_pointed_at_a_named_layer(two_layers):
+    result = selection.select_by_color(two_layers, "#ff0000", layer="Layer 1")
+
+    assert result["layer"] == "Layer 1"
+    assert selection.get_selection(two_layers)["area"] == 64
+
+
+def test_a_colour_that_matches_nothing_leaves_the_selection_alone(two_layers):
+    """The dangerous half. The old code ran on and cleared the sidecar.
+
+    So a mistyped colour did not just fail to select: it unscoped every edit that
+    followed, which is the opposite of what asking for a selection means.
+    """
+    from aseprite_mcp.core.errors import AsepriteError
+
+    selection.select_by_color(two_layers, "#0000ff")
+    assert selection.get_selection(two_layers)["area"] == 32
+
+    with pytest.raises(AsepriteError, match="No pixel on layer 'top' matched"):
+        selection.select_by_color(two_layers, "#00ff00")
+
+    assert selection.get_selection(two_layers)["area"] == 32, (
+        "a refused match must leave the previous selection where it was"
+    )

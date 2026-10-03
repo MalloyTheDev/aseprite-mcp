@@ -389,3 +389,138 @@ def test_get_pixels_rejects_an_unknown_format():
     sprite.create_sprite(name, 4, 4)
     with pytest.raises(ValidationFailed, match="format"):
         inspect.get_pixels(name, 0, 0, 4, 4, format="ascii")
+
+
+# ===== merge_layer_down, which was a no-op in five shapes and loud in none ===========
+#
+# #203 found the bottom-layer case. Driving the other four turned up the same answer:
+# `MergeDownLayer` does nothing and raises nothing, and the result was sprite info
+# describing the stack it had failed to change, which is the same shape a successful
+# merge returns. An agent flattening a stack by merging downward in a loop was told the
+# loop had finished when it had stopped.
+
+
+def _stack(name: str) -> list[str]:
+    def walk(layers, out):
+        for lyr in layers:
+            out.append(lyr["name"])
+            if lyr.get("layers"):
+                walk(lyr["layers"], out)
+        return out
+    return walk(inspect.get_sprite_info(name)["layers"], [])
+
+
+@pytest.mark.parametrize(
+    "label,build,target,message",
+    [
+        ("the lowest layer of a group",
+         lambda n: (layers.add_group_layer(n, "grp"),
+                    layers.add_layer(n, "a", group="grp"),
+                    layers.add_layer(n, "b", group="grp")),
+         "a", "bottom layer of group 'grp'"),
+        ("a group layer underneath",
+         lambda n: (layers.add_group_layer(n, "grp"),
+                    layers.add_layer(n, "a", group="grp"),
+                    layers.add_layer(n, "above")),
+         "above", "above the group layer 'grp'"),
+        ("the named layer being a group",
+         lambda n: (layers.add_group_layer(n, "grp"),
+                    layers.add_layer(n, "a", group="grp")),
+         "grp", "Cannot merge down the group layer"),
+        ("a tilemap layer underneath",
+         lambda n: (tilemap.create_tilemap_layer(n, "tiles", 8, 8),
+                    layers.add_layer(n, "pix")),
+         "pix", "above the tilemap layer 'tiles'"),
+    ],
+)
+def test_a_merge_with_nothing_to_merge_into_is_refused(label, build, target, message):
+    name = f"r/merge_{target}_{abs(hash(label)) % 10000}.aseprite"
+    sprite.create_sprite(name, 8, 8, overwrite=True)
+    build(name)
+    before = _stack(name)
+
+    with pytest.raises(AsepriteError, match=message):
+        layers.merge_layer_down(name, target)
+
+    assert _stack(name) == before, f"a refused merge changed the stack: {label}"
+
+
+def test_a_merge_that_works_says_what_it_merged_into():
+    """The result used to be sprite info and nothing else, so there was no field a caller
+    could have checked. A merge inside a group is the case that does work."""
+    name = "r/merge_ok.aseprite"
+    sprite.create_sprite(name, 8, 8, overwrite=True)
+    layers.add_group_layer(name, "grp")
+    layers.add_layer(name, "a", group="grp")
+    layers.add_layer(name, "b", group="grp")
+
+    result = layers.merge_layer_down(name, "b")
+
+    assert result["ok"] is True
+    assert result["merged"] == "b"
+    assert result["merged_into"] == "a"
+    assert _stack(name) == ["Layer 1", "grp", "a"]
+
+
+# ===== the walk-cycle default, which was half a walk (#91) ===========================
+
+
+def test_a_walk_template_scaffolds_eight_frames_a_direction():
+    """8 is the convention: contact, down, pass, up for each leg.
+
+    The default was 4, which only reads as a walk mirrored on a side view, and an
+    8-direction sheet is by definition not that. Pinned because it is a number a caller
+    inherits silently: nothing in the old result said the sheet was half a walk.
+    """
+    from aseprite_mcp.tools import workflow
+
+    name = "r/walk8.aseprite"
+    sprite.create_sprite(name, 16, 16, overwrite=True)
+
+    manifest = workflow.make_8_direction_walk_template(name)
+
+    assert manifest["animation"]["frames_per_direction"] == 8
+    assert len(manifest["animation"]["directions"]) == 8
+    assert inspect.get_sprite_info(name)["frameCount"] == 64
+
+
+def test_mirror_layer_reports_the_mirror_that_fell_off_the_canvas():
+    """A dropped write has to be counted, which is the whole doctrine in _GEOMETRY_NOTE.
+
+    `mirror_layer` guarded the destination itself, inside the loop, so an off-canvas
+    mirror never reached `img_set` and never reached the clipped counter either. With
+    `axis=12` on a 16-wide canvas the first half spans x=0..11, so 96 writes are asked
+    for and only the 32 whose mirrors land at x=12..15 can arrive. The result said
+    `pixels_written: 32` and carried no `pixels_clipped` at all, so there was nothing to
+    compare against what was requested.
+    """
+    name = "r/mirror_axis.aseprite"
+    sprite.create_sprite(name, 16, 8, overwrite=True)
+    drawing.fill_layer(name, "#111111")
+    drawing.draw_rectangle(name, 0, 0, 4, 8, "#ff0000", filled=True)
+
+    result = brushes.mirror_layer(
+        name, "Layer 1", direction="horizontal", source_side="first", axis=12
+    )
+
+    assert result["pixels_written"] == 32
+    assert result["pixels_clipped"] == 64
+    assert result["pixels_written"] + result["pixels_clipped"] == 12 * 8
+
+
+def test_mirror_layer_about_the_canvas_centre_clips_nothing():
+    """The half that had to stay as it was: the default axis mirrors one half onto the
+    other exactly, so a clipped count appearing there would be the new bug."""
+    name = "r/mirror_centre.aseprite"
+    sprite.create_sprite(name, 16, 8, overwrite=True)
+    drawing.fill_layer(name, "#111111")
+    drawing.draw_rectangle(name, 0, 0, 4, 8, "#ff0000", filled=True)
+
+    result = brushes.mirror_layer(
+        name, "Layer 1", direction="horizontal", source_side="first"
+    )
+
+    assert result["pixels_written"] == 8 * 8
+    assert "pixels_clipped" not in result
+    rows = inspect.get_pixels(name, 0, 0, 16, 8)["pixels"]
+    assert {px[:7].lower() for row in rows for px in row[12:]} == {"#ff0000"}
