@@ -382,6 +382,12 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     `ramp`, and `run_ramp_lua` turns it into a warning. This test is why that convention
     is safe to rely on: a new shading tool that reaches for `run_lua` instead fails here
     rather than shipping shading that silently bands on indexed art.
+
+    Every registered tool with a `ramp` parameter is now held to one of three promises,
+    and none of them is "nothing". Most go through `run_ramp_lua`; `assess_sprite`
+    surfaces the same reading itself, beside the conformance number it qualifies; and
+    `smear_frame`, which resolves its ramp into a lookup table before the launch and has
+    no `ARG.ramp` for the harness to see, measures that table's targets instead (#173).
     """
     import asyncio
     import importlib
@@ -396,12 +402,15 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     # neither is something a caller can reach.
     registered = {t.name for t in asyncio.run(mcp.list_tools())}
 
-    # smear_frame takes a ramp and does not go through here, on purpose. It resolves the
-    # ramp in Python into a colour-to-colour lookup table (`inbetween.shift_table`) and
-    # never passes a ramp to Lua at all, so the harness has nothing to measure and the
-    # question for it is a different one: what the *table's* target colours resolve to.
-    # It already refuses an indexed sprite with no ramp, and the remaining gap is filed
-    # rather than papered over here.
+    # smear_frame takes a ramp and does not go through `run_ramp_lua`, on purpose, and
+    # that is now the whole of the exemption rather than a gap. It resolves the ramp in
+    # Python into a colour-to-colour lookup table (`inbetween.shift_table`) and never
+    # passes a ramp to Lua at all, so the harness has nothing to measure and routing it
+    # through `run_ramp_lua` would measure the wrong thing: the question for it is what
+    # the *table's* target colours resolve to, and a declared ramp step nothing shifts
+    # that far is not a finding. It calls the prelude's `ramp_palette_state` from its own
+    # write body with those targets and judges the answer with
+    # `indexed.shift_table_readings`, so it is held to that instead (#173).
     resolves_its_ramp_in_python = {"smear_frame"}
     # assess_sprite measures instead of writing, so its reading belongs in `readings`
     # beside the conformance number it qualifies, not in `warnings`. It passes the ramp
@@ -422,9 +431,17 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
                 continue
             if name not in registered or "ramp" not in signature.parameters:
                 continue
-            if name in resolves_its_ramp_in_python:
-                continue
             source = inspect_mod.getsource(target)
+            if name in resolves_its_ramp_in_python:
+                assert "shift_table_readings" in source, (
+                    f"{name} resolves its ramp in Python, so the harness cannot measure "
+                    "it, and it no longer calls indexed.shift_table_readings either: on "
+                    "an indexed sprite its trail will band onto one palette entry and "
+                    "report nothing. Measure the table's targets with the prelude's "
+                    "ramp_palette_state and judge them there."
+                )
+                checked.append(name)
+                continue
             if name in reports_it_as_a_reading:
                 assert "ramp_readings" in source, (
                     f"{name} takes a ramp and surfaces the reading itself, but no longer "
@@ -444,7 +461,7 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     assert sorted(checked) == [
         "assess_sprite", "cast_shadow", "contact_shadow", "dither_band", "glow",
         "gradient_map", "outline_smart", "shade_region_by_light", "shift_along_ramp",
-        "specular_highlight",
+        "smear_frame", "specular_highlight",
     ], f"the set of ramp tools changed: {sorted(checked)}"
 
 

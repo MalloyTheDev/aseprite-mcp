@@ -19,7 +19,7 @@ import math
 from itertools import pairwise
 
 from ..app import mcp
-from ..core import inbetween, loopcheck, motion, timing
+from ..core import inbetween, indexed, loopcheck, motion, timing
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_CANVAS_DIMENSION,
@@ -1244,6 +1244,29 @@ RESULT = {
   subject_bounds = { x = sb.x, y = sb.y, width = sb.width, height = sb.height },
   bounds = { x = b.x, y = b.y, width = b.width, height = b.height },
 }
+
+-- What the trail's colours become on this sprite's palette.
+--
+-- The harness's own ramp measurement cannot fire here, and must not: it keys on ARG.ramp,
+-- and this tool has no ramp to pass. The ramp was consumed into a colour-to-colour table
+-- in Python before the launch, so the question left for the palette is which of that
+-- *table's* targets resolve to one entry, not which of the declared ramp's steps the
+-- palette can hold. A step nothing shifts that far is not a finding (#173).
+--
+-- The prelude's `ramp_palette_state`, called with the targets rather than with a ramp,
+-- which is all that function needs: it takes a list of colours and resolves each through
+-- the sprite's own `nearest_index`, so there is no second resolver here to drift from
+-- where the pixels actually went.
+--
+-- After `save_sprite` and pcall'd, for the reason the harness pcalls its own copy: this
+-- runs once the write has succeeded, so an error raised in it would report a failure for
+-- a frame that is already on disk. A measurement that cannot be taken is worth less than
+-- the call it describes.
+if spr.colorMode == ColorMode.INDEXED and type(ARG.targets) == "table"
+   and #ARG.targets > 0 then
+  local _tok, _tstate = pcall(ramp_palette_state, spr, ARG.targets)
+  if _tok then RESULT.trail_on_palette = _tstate end
+end
 """)
 
 
@@ -1333,8 +1356,12 @@ def smear_frame(
 
     Returns the vector it measured and where it came from, the plots it drew, and the
     cel's bounds before and after, so the claim that the smear lies along the movement can
-    be checked. `validate_loop` will now report this frame as breaking the spacing series,
-    which is correct: a smear frame is one that legitimately does.
+    be checked. On an indexed sprite it also returns `trail_on_palette`: what the trail's
+    own target colours resolve to on this palette, and a warning naming the copies that
+    will come out the same colour because two of those targets landed on one entry. That
+    is a different finding from the ramp headroom one above it, which measures the art.
+    `validate_loop` will now report this frame as breaking the spacing series, which is
+    correct: a smear frame is one that legitimately does.
     """
     if mode not in inbetween.SMEAR_MODES:
         raise ValidationFailed(
@@ -1449,6 +1476,10 @@ def smear_frame(
         "src": src, "layer": layer, "frame": here, "plots": plots,
         "expect_bounds": measured["bounds"],
         "lut": None,
+        # The table's distinct target colours, for the palette measurement at the foot of
+        # the write body. Carried separately from `lut` because `lut` is keyed by raw pixel
+        # value and the measurement wants a plain list of colours.
+        "targets": None,
         "centre_x": None, "centre_y": None, "perp_x": None, "perp_y": None,
     }
     if ramp_rgb is None:
@@ -1472,6 +1503,7 @@ def smear_frame(
         args["lut"] = inbetween.shift_table(
             measured["colors"], ramp_rgb, sorted({p["shift"] for p in plots})
         )
+        args["targets"] = inbetween.shift_table_targets(args["lut"])
     if mode == "stretch":
         centre = inbetween.box_centre(measured["bounds"])
         axis = inbetween.perpendicular(vector)
@@ -1481,6 +1513,21 @@ def smear_frame(
         })
 
     applied = run_lua(_SMEAR_WRITE_LUA, args)
+
+    # The palette half of the colour judgement, which `ramp_headroom` above does not
+    # cover: that one measures the *art* (how many ramp steps exist below the subject's
+    # lightest colour) and is silent whenever the ramp reaches far enough. It reaches far
+    # enough and the palette still cannot hold what it reaches, which is a second,
+    # independent way for two trail copies to come out the same colour (#173).
+    trail_state = applied.get("trail_on_palette")
+    if isinstance(trail_state, dict):
+        warnings.extend(indexed.shift_table_readings(
+            trail_state,
+            inbetween.shift_table_collisions(
+                args["lut"] or {},
+                [step.get("index") for step in trail_state.get("steps") or []],
+            ),
+        ))
 
     return carry_harness_keys({
         "layer": applied["layer"],
@@ -1496,6 +1543,12 @@ def smear_frame(
         },
         "on_palette": ramp_rgb is not None,
         "ramp_size": 0 if ramp_rgb is None else len(ramp_rgb),
+        # Absent on an RGB or grayscale sprite, where a pixel carries its own colour and
+        # there is no palette to snap to, so the measurement is skipped rather than
+        # computed and found uninteresting. Named for the trail rather than for the ramp
+        # because that is what it measures: `ramp_on_palette` elsewhere reports the
+        # declared ramp, and these are different questions with different answers.
+        **({"trail_on_palette": trail_state} if isinstance(trail_state, dict) else {}),
         "subject_pixels": measured["drawn_pixels"],
         "subject_colors": measured["color_count"],
         "plots": [

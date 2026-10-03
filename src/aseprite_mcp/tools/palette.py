@@ -11,7 +11,7 @@ from ..core.limits import (
     check_count,
     check_list_length,
 )
-from ..core.models import FRAME_GUARD_LUA
+from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 
@@ -767,3 +767,463 @@ def ramp_from_art(
         "distinct_colors": len(histogram),
         "warnings": found["warnings"],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Palette cycling (issue #128)                                                #
+# --------------------------------------------------------------------------- #
+# Which palette index every pixel in scope carries, measured where the pixels are.
+#
+# Shared by `list_palette_usage`, which reports it, and by `cycle_palette`, which decides
+# against it: the indices a cycle rotates have to be checked against the palette the
+# sprite actually has, and that size is only knowable with the file open. Running the
+# measurement as its own launch is what lets the refusals be written in Python with real
+# numbers in them, and means nothing has been written when one of them fires.
+#
+# The empty/drawn split comes from the prelude's `clear_bytes` rather than from a test
+# written here, so this cannot disagree with `visible_count` and `visible_extent` about
+# what an empty pixel is. That disagreement is #172, and it cost one report a "4 drawn
+# pixels" beside a 5x5 box.
+_PALETTE_USAGE_LUA = FRAME_GUARD_LUA + """
+local spr = open_sprite(ARG.src)
+if spr.colorMode ~= ColorMode.INDEXED then
+  error("this sprite is " .. colormode_name(spr.colorMode) .. ", so its pixels carry " ..
+        "their own colour rather than an offset into a palette and there are no palette " ..
+        "indices to count or to cycle. extract_palette lists the colours an RGB sprite " ..
+        "uses and assess_sprite counts them; set_color_mode(..., \\"indexed\\") first if " ..
+        "you mean to cycle this one.", 0)
+end
+
+-- Every pixel layer, groups walked through rather than refused: a group holds no cels of
+-- its own, so there is nothing to count on it and nothing to skip either. Tilemap layers
+-- are left out because their cels are tile references and the indices in them are tile
+-- numbers, not palette offsets.
+local function collect(layers, out)
+  for _, lyr in ipairs(layers) do
+    if lyr.isGroup then
+      collect(lyr.layers, out)
+    elseif not lyr.isTilemap then
+      out[#out + 1] = lyr
+    end
+  end
+  return out
+end
+
+local scope, names = {}, {}
+if ARG.layer ~= nil then
+  local lyr = find_layer(spr, ARG.layer)
+  if lyr.isGroup then
+    error("'" .. lyr.name .. "' is a group layer and holds no cels of its own, so there " ..
+          "are no pixels on it to count; name one of the layers inside it, or leave " ..
+          "layer unset to count every pixel layer.", 0)
+  end
+  if lyr.isTilemap then
+    error("'" .. lyr.name .. "' is a tilemap layer: the numbers in its cels are tile " ..
+          "references rather than palette offsets. Read it with get_tilemap.", 0)
+  end
+  scope[1] = lyr
+else
+  collect(spr.layers, scope)
+end
+for i, lyr in ipairs(scope) do names[i] = lyr.name end
+
+local first, last = 1, #spr.frames
+if ARG.frame ~= nil then
+  local n = require_frame(spr, ARG.frame, "frame")
+  first, last = n, n
+end
+
+-- The cost is known before any of it is paid: a cel's image is only as big as its own
+-- bounds, so this is the real figure rather than canvas times frames.
+local area = 0
+for f = first, last do
+  for _, lyr in ipairs(scope) do
+    local cel = lyr:cel(f)
+    if cel ~= nil and cel.image ~= nil then
+      area = area + cel.image.width * cel.image.height
+    end
+  end
+end
+if area > ARG.max_scan_pixels then
+  error("counting palette indices here would read " .. area .. " pixels (" ..
+        #scope .. " layer(s) across " .. (last - first + 1) .. " frame(s)); maximum is " ..
+        ARG.max_scan_pixels .. ". Pass frame= or layer= to scope it down.", 0)
+end
+
+local pal = spr.palettes[1]
+local size = #pal
+local colors = {}
+for i = 0, size - 1 do colors[i + 1] = color_hex(pal:getColor(i)) end
+
+local stride, firstbyte, clear = clear_bytes(spr)
+local counts, scanned, out_of_range = {}, 0, 0
+local function tally(ix)
+  counts[ix] = (counts[ix] or 0) + 1
+  scanned = scanned + 1
+  if ix >= size then out_of_range = out_of_range + 1 end
+end
+
+for f = first, last do
+  for _, lyr in ipairs(scope) do
+    local cel = lyr:cel(f)
+    if cel ~= nil and cel.image ~= nil then
+      local img = cel.image
+      local s = img.bytes
+      if #s == img.width * img.height * stride then
+        -- One byte per pixel in indexed mode, and that byte *is* the index, so the whole
+        -- histogram is a pass over the buffer with no getPixel and no palette lookup.
+        -- Read in blocks because calling string.byte per byte dominates the cost, which
+        -- is the same trick `visible_count` uses.
+        local len, i = #s, 1
+        while i <= len do
+          local j = math.min(i + 511, len)
+          local t = table.pack(string.byte(s, i, j))
+          for k = firstbyte, t.n, stride do tally(t[k]) end
+          i = j + 1
+        end
+      else
+        -- Not the layout assumed above. Count the slow, certain way rather than a wrong
+        -- way, exactly as `visible_count` does.
+        for y = 0, img.height - 1 do
+          for x = 0, img.width - 1 do tally(img:getPixel(x, y)) end
+        end
+      end
+    end
+  end
+end
+
+-- A list of records rather than a table keyed by index. json_encode decides between an
+-- array and an object by looking at the keys, so a histogram that happened to be dense
+-- from 1 would arrive as an array and one with a gap as an object: the same measurement
+-- in two shapes, decided by the art. `draws` is the prelude's answer, not a second one.
+local entries, n = {}, 0
+for ix, count in pairs(counts) do
+  n = n + 1
+  entries[n] = { index = ix, pixels = count, draws = not clear[ix] }
+end
+table.sort(entries, function(a, b) return a.index < b.index end)
+
+RESULT = {
+  color_mode = colormode_name(spr.colorMode),
+  size = size,
+  transparent_index = spr.transparentColor,
+  colors = colors,
+  entries = entries,
+  scanned = scanned,
+  out_of_range = out_of_range,
+  canvas = { width = spr.width, height = spr.height },
+  frame_count = #spr.frames,
+  frames_scanned = { first = first, last = last },
+  layers = names,
+}
+"""
+
+
+def _usage_scope(filename: str, frame: int | None, layer: str | None) -> dict:
+    """Run the shared index measurement, with the arguments both callers share."""
+    if frame is not None:
+        frame = FrameRef.arg("frame", frame)
+    return run_lua(_PALETTE_USAGE_LUA, {
+        "src": lua_path(resolve_path(filename)),
+        "frame": frame,
+        "layer": layer,
+        # Paid per pixel, and in the fast path it is a byte read rather than the getPixel
+        # decode, so this ceiling is generous for what it buys: a million pixels is about
+        # a tenth of a second. The same cap `quantize_palette` scans under.
+        "max_scan_pixels": MAX_ASSESS_PIXELS,
+    })
+
+
+def _drawn_counts(measured: dict) -> dict[int, int]:
+    """Index to pixel count, for the indices that can actually draw a visible pixel.
+
+    Two separate things mean "nothing here" on an indexed sprite and both have to be
+    excluded: the sprite's transparent index, and an entry whose own alpha is 0. Testing
+    only the first is #138. The Lua side already answered it through `clear_bytes`; this
+    only reads `draws` back.
+    """
+    return {
+        int(entry["index"]): int(entry["pixels"])
+        for entry in measured.get("entries") or []
+        if entry.get("draws")
+    }
+
+
+@mcp.tool()
+def list_palette_usage(
+    filename: str, frame: int | None = None, layer: str | None = None
+) -> dict:
+    """Which palette indices the art is drawn with, how many pixels each covers, and
+    which runs of them are worth cycling.
+
+    Indexed sprites only: an RGB or grayscale pixel carries its own colour rather than an
+    offset into a palette, so there is no index to count. `extract_palette` lists the
+    colours such a sprite uses and `assess_sprite` counts them.
+
+    The answer `cycle_palette` needs and the answer `get_palette` cannot give. A palette
+    says what colours exist; this says which of them the picture actually uses, so a
+    256-entry palette on a sprite painted in nine colours stops being a wall of hex. The
+    only way to work this out before was to read every pixel through `get_pixels` and
+    count them by hand.
+
+    Args:
+        frame: Count only this frame. Default: every frame.
+        layer: Count only this layer. Default: every pixel layer, groups walked through.
+            Tilemap layers are skipped, because the numbers in their cels are tile
+            references rather than palette offsets.
+
+    Returns `used` (index, colour and pixel count, most pixels first), `unused`, `runs`
+    (the contiguous spans of used indices, longest first, which is what a cycle rotates),
+    the transparent index and how many pixels sit on it, and `out_of_range`: pixels
+    carrying an index past the end of the palette, which is what a palette resized
+    smaller than its art leaves behind and which no colour can be read for at all.
+    """
+    measured = _usage_scope(filename, frame, layer)
+    colors = measured["colors"]
+    drawn = _drawn_counts(measured)
+    transparent = measured["transparent_index"]
+
+    # Only the entries the art uses carry a colour here. A tool asked which indices are in
+    # use should not answer with the whole palette; `get_palette` is the tool for that.
+    used = [
+        {"index": index, "color": colors[index], "pixels": pixels}
+        for index, pixels in sorted(drawn.items(), key=lambda pair: (-pair[1], pair[0]))
+        if index < len(colors)
+    ]
+    result = {
+        "size": measured["size"],
+        "transparent_index": transparent,
+        "transparent_pixels": sum(
+            int(entry["pixels"]) for entry in measured["entries"]
+            if not entry.get("draws")
+        ),
+        "scanned_pixels": measured["scanned"],
+        "frames_scanned": measured["frames_scanned"],
+        "layers_scanned": measured["layers"],
+        "used": used,
+        "unused": [
+            index for index in range(measured["size"])
+            if index != transparent and index not in drawn
+        ],
+        "runs": indexed.usage_runs(sorted(drawn)),
+    }
+    if measured["out_of_range"]:
+        result["out_of_range"] = measured["out_of_range"]
+    notes = indexed.palette_usage_readings({
+        "size": measured["size"],
+        "drawn": drawn,
+        "out_of_range": measured["out_of_range"],
+    })
+    if notes:
+        result["readings"] = notes
+    return result
+
+
+# The pixel remap each generated frame is written with, applied where the pixels are.
+#
+# `img_set` rather than `drawPixel`, so an active selection scopes the cycle like every
+# other write here and the harness's `pixels_written` counts it. Read from a snapshot and
+# written to the live image, because the remap is a permutation over the cycled indices:
+# writing in place would let a pixel already moved to index 8 be read again as a source.
+_CYCLE_WRITE_LUA = FRAME_GUARD_LUA + """
+local spr = open_sprite(ARG.src)
+if spr.colorMode ~= ColorMode.INDEXED then
+  error("this sprite is no longer indexed, so its pixels are not palette offsets any " ..
+        "more and the cycle it was planned for does not describe them. Nothing was " ..
+        "written.", 0)
+end
+if #spr.frames ~= 1 then
+  error("the sprite has " .. #spr.frames .. " frames now and had 1 when this cycle was " ..
+        "planned, so another call added frames between the two passes of this one. " ..
+        "Nothing was written; try again.", 0)
+end
+
+local function collect(layers, out)
+  for _, lyr in ipairs(layers) do
+    if lyr.isGroup then collect(lyr.layers, out)
+    elseif not lyr.isTilemap then out[#out + 1] = lyr end
+  end
+  return out
+end
+
+local scope = {}
+if ARG.layer ~= nil then
+  scope[1] = find_layer(spr, ARG.layer)
+else
+  collect(spr.layers, scope)
+end
+
+-- The frames first, all duplicated from the one drawn frame, so every one of them starts
+-- as the art the caller drew and only the indices change afterwards. newFrame inserts
+-- after the frame it copies, so these arrive in reverse order; that costs nothing,
+-- because they are all identical until they are remapped by frame number below.
+for _ = 2, ARG.frame_count do
+  spr:newFrame(1)
+end
+
+local changed = {}
+for f = 2, ARG.frame_count do
+  local remap = ARG.remaps[f]
+  if remap == nil then
+    error("no remap was planned for frame " .. f .. "; nothing further was written. " ..
+          "This is a bug in cycle_palette rather than anything about the sprite.", 0)
+  end
+  for _, lyr in ipairs(scope) do
+    local cel = lyr:cel(f)
+    if cel ~= nil and cel.image ~= nil then
+      local img = get_draw_image(spr, lyr, f)
+      local snapshot = img:clone()
+      local moved = 0
+      for y = 0, img.height - 1 do
+        for x = 0, img.width - 1 do
+          local to = remap[snapshot:getPixel(x, y)]
+          if to ~= nil then
+            img_set(img, x, y, to)
+            moved = moved + 1
+          end
+        end
+      end
+      if moved > 0 then
+        commit_image(spr, lyr, f, img)
+        changed[#changed + 1] = { frame = f, layer = lyr.name, pixels = moved }
+      end
+    end
+  end
+end
+
+save_sprite(spr)
+RESULT = {
+  frame_count = #spr.frames,
+  remapped = changed,
+  -- Reported because it is the promise this tool makes and the easiest thing to get
+  -- wrong: what rotates is the pixels, and the palette comes back exactly as it went in.
+  palette_size = #spr.palettes[1],
+}
+"""
+
+
+@mcp.tool()
+def cycle_palette(
+    filename: str,
+    indices: list[int],
+    frame_count: int | None = None,
+    step: int = 1,
+    layer: str | None = None,
+) -> dict:
+    """Animate a sprite by cycling a run of palette colours, the oldest trick in the
+    medium: the pixels do not move, the colours do, and water flows.
+
+    **What this ships, and why.** Aseprite's file format carries a palette per frame, but
+    its Lua API does not expose one, so the real thing cannot be authored from here.
+    Measured on 1.3.18.6: `#spr.palettes` is 1 and stays 1, the collection is read-only
+    (`spr.palettes[2] = ...` and `table.insert` both raise "attempt to index a nil value
+    (field '__setters')"), `Palette` has no `frame` property, `Sprite:newPalette` does not
+    exist, and `Sprite:setPalette` replaces the single sprite-wide palette no matter which
+    frame `app.frame` is on, as does `app.command.LoadPalette`. So this is the fallback:
+    the frames are generated, it costs one frame of storage each, and it works everywhere
+    a frame does, including in a GIF or a PNG sequence.
+
+    What rotates is the pixels' own indices, not the palette. On an indexed sprite those
+    are the same picture, and the index move is exact: no colour matching, nothing routed
+    through `nearest_index`, and the palette comes back byte for byte as it went in, so
+    `get_palette` still shows the ramp that was authored.
+
+    Args:
+        indices: The palette indices to rotate, **in the order the colours travel**. At
+            least two, distinct, each one in the palette, and none of them an entry that
+            cannot draw (the sprite's transparent index, or an entry whose alpha is 0):
+            rotating one of those through the cycle would make drawn pixels vanish.
+            `list_palette_usage` reports the contiguous runs worth passing here.
+        frame_count: How many frames the cycle occupies. Defaults to `len(indices)`, which
+            is one frame per colour, and is capped there: past that the rotation repeats a
+            frame already written, so the extra frames cost storage and show nothing new.
+        step: How far the colours travel per frame. Positive moves them forward along
+            `indices`; negative moves them back. A multiple of `len(indices)` is refused
+            rather than silently producing identical frames.
+        layer: Cycle only this layer's pixels. Default: every pixel layer.
+
+    The sprite must have exactly one frame. A cycle generates the whole timeline from the
+    one drawn frame, so a sprite that already animates would have its timeline redefined,
+    and that is refused rather than guessed at: `duplicate_frame` the pose into a sprite
+    of its own first.
+
+    Refuses, before anything is written, an index outside the palette (it names the size),
+    an index that cannot draw, a repeated index, a step that is a whole number of laps, and
+    a cycle none of whose indices appear in the art, which would write identical frames and
+    animate nothing. That last refusal names the indices the art *is* drawn with.
+
+    Returns the frames it wrote and how many pixels moved on each, `closes` (whether the
+    rotation returns to where it started at the wrap), and `warnings` when the cycle does
+    not close, or when an index in it has no pixels to travel through. `warnings` is
+    absent rather than empty when there is nothing to say.
+    """
+    if not isinstance(indices, list):
+        raise ValidationFailed(
+            f"indices must be a list of palette indices; got {type(indices).__name__}."
+        )
+    check_list_length("indices", indices, MAX_COLOR_LIST_LENGTH,
+                      remedy=f"A palette holds at most {MAX_COLOR_LIST_LENGTH} colours.")
+
+    measured = _usage_scope(filename, None, layer)
+    if measured["frame_count"] != 1:
+        raise ValidationFailed(
+            f"this sprite has {measured['frame_count']} frames. A cycle generates the "
+            "whole timeline from one drawn frame, so writing it here would redefine the "
+            "animation that is already there. Draw the pose into a single-frame sprite of "
+            "its own and cycle that, or remove_frame down to one first."
+        )
+
+    drawn = _drawn_counts(measured)
+    wheel = indexed.cycle_indices(
+        indices, measured["colors"], measured["transparent_index"], drawn)
+    travel = indexed.cycle_step(step, len(wheel))
+    count = len(wheel) if frame_count is None else check_count(
+        "frame_count", frame_count, len(wheel), minimum=2,
+        remedy=f"The cycle has {len(wheel)} indices, so past {len(wheel)} frames the "
+               "rotation repeats a frame already written and the extra frames cost "
+               "storage without showing anything new.",
+    )
+
+    # Canvas times the frames about to be written, because every one of them is walked
+    # pixel by pixel. The measurement pass bounded its own scan against the cels; this is
+    # the larger figure and it is bounded before the first frame is added.
+    layers = max(1, len(measured["layers"]))
+    budget = (
+        measured["canvas"]["width"] * measured["canvas"]["height"] * (count - 1) * layers
+    )
+    if budget > MAX_ASSESS_PIXELS:
+        raise ValidationFailed(
+            f"this cycle would walk {budget} pixels ("
+            f"{measured['canvas']['width']}x{measured['canvas']['height']} times "
+            f"{count - 1} generated frame(s) times {layers} layer(s)); maximum is "
+            f"{MAX_ASSESS_PIXELS}. Nothing was written. Pass layer= to cycle one layer, "
+            "ask for fewer frames, or cycle a smaller canvas."
+        )
+
+    remaps = indexed.cycle_remaps(wheel, count, travel)
+    applied = run_lua(_CYCLE_WRITE_LUA, {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame_count": count,
+        # 1-based, keyed by the frame number the remap belongs to, so the Lua side looks
+        # a frame up rather than counting along a list and hoping the orders agree.
+        "remaps": {index + 1: remap for index, remap in enumerate(remaps)},
+    })
+
+    result = {
+        "ok": True,
+        "method": "pixel_remap",
+        "indices": wheel,
+        "step": travel,
+        "frame_count": applied["frame_count"],
+        "palette_size": applied["palette_size"],
+        "remapped": applied["remapped"],
+        "pixels_written": applied.get("pixels_written", 0),
+        "closes": (count * travel) % len(wheel) == 0,
+    }
+    # Absent rather than empty when there is nothing to say, which is what the rest of
+    # this module does: a `warnings` key here always means there is something in it.
+    notes = indexed.cycle_readings(wheel, count, travel, drawn)
+    if notes:
+        result["warnings"] = notes
+    return result
