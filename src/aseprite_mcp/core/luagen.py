@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import secrets
 
-from .limits import MAX_DRAW_EXTENT_PIXELS
+from .limits import MAX_DRAW_EXTENT_PIXELS, MAX_READ_REGION_PIXELS
 
 # Legacy un-nonced sentinels. Retained because `aseprite_mcp.luagen` re-exports them,
 # but no longer used to frame real output: see `new_nonce` for why.
@@ -117,6 +117,11 @@ _LIMITS_LUA = f"""
 -- Injected from core.limits.MAX_DRAW_EXTENT_PIXELS. See the three check_extent calls
 -- below for what it bounds and why the canvas caps do not already cover it.
 local MAX_DRAW_EXTENT = {MAX_DRAW_EXTENT_PIXELS}
+-- Injected from core.limits.MAX_READ_REGION_PIXELS, and read by `get_pixels` alone.
+-- That tool checks the same cap in Python before launching, so this is the backstop for
+-- the one case the pre-flight cannot see: an extent left unset, which the body derives
+-- from the canvas and the origin after every Python check has already run.
+local MAX_READ_REGION = {MAX_READ_REGION_PIXELS}
 """
 
 PRELUDE = _LIMITS_LUA + r"""
@@ -1136,6 +1141,19 @@ local function sprite_info(spr)
     slices[i] = s
   end
   return {
+    -- The verdict, so one registry has one result shape. Thirty tools returned this
+    -- table unwrapped and forty-one set `ok = true` in a table of their own, which left
+    -- a caller unable to write a single check: `add_layer` and `fill_layer` sit in the
+    -- same module and disagreed about whether the key exists. Reaching here means the
+    -- body ran to its end, which is exactly what `ok = true` already means at those
+    -- forty-one sites, and the bodies that cannot honestly claim success raise instead
+    -- of returning `ok = false`, so the key is accurate wherever it appears.
+    --
+    -- Safe to inherit because no body embeds this table where the key would read as
+    -- something else's verdict: `oplib`'s batch passes it through `sprite_summary`,
+    -- which copies eight named fields and not this one, and `list_slices` keeps only
+    -- `slices`. A new sub-table use needs checking; tests/test_result_shape.py does it.
+    ok = true,
     filename = spr.filename,
     width = spr.width,
     height = spr.height,
