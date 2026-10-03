@@ -39,15 +39,19 @@ def add_frame(
     duration_ms: int = 100,
     copy_from: int | None = None,
 ) -> dict:
-    """Append a new frame to the animation.
+    """Add a frame: appended when it is empty, inserted when it copies another.
 
     Args:
         duration_ms: Frame duration in milliseconds (default 100).
-        copy_from: If given (1-based), duplicate the content of that frame;
-            otherwise the new frame is empty. Must name an existing frame -- an
-            out-of-range number is rejected, not clamped.
+        copy_from: If given (1-based), duplicate the content of that frame; otherwise the
+            new frame is empty and goes at the end. Must name an existing frame: an
+            out-of-range number is rejected, not clamped. **A copy is inserted, not
+            appended**, so every frame from that point on is renumbered: on a two-frame
+            sprite, `copy_from=1` gives three frames whose second is the original first.
+            Pass no `copy_from` and the sprite's existing frames keep their numbers.
 
-    Returns the new frame number and updated frame count.
+    Returns the new frame number and updated frame count. With `copy_from`, `newFrame` is
+    where the copy landed, which is also the number the frames after it shifted from.
     """
     args = {
         "src": lua_path(resolve_path(filename)),

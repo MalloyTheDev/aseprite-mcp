@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **152 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **155 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -21,14 +21,14 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (2)
-- [Palette](#palette) (13)
+- [Palette](#palette) (15)
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
 - [Export & import](#export--import) (11)
 - [Engine export presets](#engine-export-presets) (2)
 - [Minecraft resource packs](#minecraft-resource-packs) (4)
 - [Reference / rotoscope](#reference--rotoscope) (2)
-- [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (8)
+- [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (9)
 - [Asset spec (declarative build)](#asset-spec-declarative-build) (3)
 - [Batch operations](#batch-operations) (1)
 - [GUI companion mode](#gui-companion-mode) (2)
@@ -514,15 +514,19 @@ Update one or more layer properties. Only the arguments you pass are changed.
 
 ### `add_frame`
 
-Append a new frame to the animation.
+Add a frame: appended when it is empty, inserted when it copies another.
 
 Args:
     duration_ms: Frame duration in milliseconds (default 100).
-    copy_from: If given (1-based), duplicate the content of that frame;
-        otherwise the new frame is empty. Must name an existing frame -- an
-        out-of-range number is rejected, not clamped.
+    copy_from: If given (1-based), duplicate the content of that frame; otherwise the
+        new frame is empty and goes at the end. Must name an existing frame: an
+        out-of-range number is rejected, not clamped. **A copy is inserted, not
+        appended**, so every frame from that point on is renumbered: on a two-frame
+        sprite, `copy_from=1` gives three frames whose second is the original first.
+        Pass no `copy_from` and the sprite's existing frames keep their numbers.
 
-Returns the new frame number and updated frame count.
+Returns the new frame number and updated frame count. With `copy_from`, `newFrame` is
+where the copy landed, which is also the number the frames after it shifted from.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -767,8 +771,12 @@ the whole point is that the unsmeared frames are untouched.
 
 Returns the vector it measured and where it came from, the plots it drew, and the
 cel's bounds before and after, so the claim that the smear lies along the movement can
-be checked. `validate_loop` will now report this frame as breaking the spacing series,
-which is correct: a smear frame is one that legitimately does.
+be checked. On an indexed sprite it also returns `trail_on_palette`: what the trail's
+own target colours resolve to on this palette, and a warning naming the copies that
+will come out the same colour because two of those targets landed on one entry. That
+is a different finding from the ramp headroom one above it, which measures the art.
+`validate_loop` will now report this frame as breaking the spacing series, which is
+correct: a smear frame is one that legitimately does.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2785,6 +2793,64 @@ Append a colour to the end of the palette.
 | `color` | string | yes |  |
 
 
+### `cycle_palette`
+
+Animate a sprite by cycling a run of palette colours, the oldest trick in the
+medium: the pixels do not move, the colours do, and water flows.
+
+**What this ships, and why.** Aseprite's file format carries a palette per frame, but
+its Lua API does not expose one, so the real thing cannot be authored from here.
+Measured on 1.3.18.6: `#spr.palettes` is 1 and stays 1, the collection is read-only
+(`spr.palettes[2] = ...` and `table.insert` both raise "attempt to index a nil value
+(field '__setters')"), `Palette` has no `frame` property, `Sprite:newPalette` does not
+exist, and `Sprite:setPalette` replaces the single sprite-wide palette no matter which
+frame `app.frame` is on, as does `app.command.LoadPalette`. So this is the fallback:
+the frames are generated, it costs one frame of storage each, and it works everywhere
+a frame does, including in a GIF or a PNG sequence.
+
+What rotates is the pixels' own indices, not the palette. On an indexed sprite those
+are the same picture, and the index move is exact: no colour matching, nothing routed
+through `nearest_index`, and the palette comes back byte for byte as it went in, so
+`get_palette` still shows the ramp that was authored.
+
+Args:
+    indices: The palette indices to rotate, **in the order the colours travel**. At
+        least two, distinct, each one in the palette, and none of them an entry that
+        cannot draw (the sprite's transparent index, or an entry whose alpha is 0):
+        rotating one of those through the cycle would make drawn pixels vanish.
+        `list_palette_usage` reports the contiguous runs worth passing here.
+    frame_count: How many frames the cycle occupies. Defaults to `len(indices)`, which
+        is one frame per colour, and is capped there: past that the rotation repeats a
+        frame already written, so the extra frames cost storage and show nothing new.
+    step: How far the colours travel per frame. Positive moves them forward along
+        `indices`; negative moves them back. A multiple of `len(indices)` is refused
+        rather than silently producing identical frames.
+    layer: Cycle only this layer's pixels. Default: every pixel layer.
+
+The sprite must have exactly one frame. A cycle generates the whole timeline from the
+one drawn frame, so a sprite that already animates would have its timeline redefined,
+and that is refused rather than guessed at: `duplicate_frame` the pose into a sprite
+of its own first.
+
+Refuses, before anything is written, an index outside the palette (it names the size),
+an index that cannot draw, a repeated index, a step that is a whole number of laps, and
+a cycle none of whose indices appear in the art, which would write identical frames and
+animate nothing. That last refusal names the indices the art *is* drawn with.
+
+Returns the frames it wrote and how many pixels moved on each, `closes` (whether the
+rotation returns to where it started at the wrap), and `warnings` when the cycle does
+not close, or when an index in it has no pixels to travel through. `warnings` is
+absent rather than empty when there is nothing to say.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `indices` | array<integer> | yes |  |
+| `frame_count` | integer | no | _none_ |
+| `step` | integer | no | 1 |
+| `layer` | string | no | _none_ |
+
+
 ### `extract_palette`
 
 Extract the unique colours used in a sprite (or another image).
@@ -2856,6 +2922,40 @@ Return the sprite's palette as a list of "#RRGGBBAA" colours.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
+
+
+### `list_palette_usage`
+
+Which palette indices the art is drawn with, how many pixels each covers, and
+which runs of them are worth cycling.
+
+Indexed sprites only: an RGB or grayscale pixel carries its own colour rather than an
+offset into a palette, so there is no index to count. `extract_palette` lists the
+colours such a sprite uses and `assess_sprite` counts them.
+
+The answer `cycle_palette` needs and the answer `get_palette` cannot give. A palette
+says what colours exist; this says which of them the picture actually uses, so a
+256-entry palette on a sprite painted in nine colours stops being a wall of hex. The
+only way to work this out before was to read every pixel through `get_pixels` and
+count them by hand.
+
+Args:
+    frame: Count only this frame. Default: every frame.
+    layer: Count only this layer. Default: every pixel layer, groups walked through.
+        Tilemap layers are skipped, because the numbers in their cels are tile
+        references rather than palette offsets.
+
+Returns `used` (index, colour and pixel count, most pixels first), `unused`, `runs`
+(the contiguous spans of used indices, longest first, which is what a cycle rotates),
+the transparent index and how many pixels sit on it, and `out_of_range`: pixels
+carrying an index past the end of the palette, which is what a palette resized
+smaller than its art leaves behind and which no colour can be read for at all.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `frame` | integer | no | _none_ |
+| `layer` | string | no | _none_ |
 
 
 ### `load_palette`
@@ -3620,7 +3720,8 @@ stack (body + details), an auto-generated shading palette ramp from `base_color`
 and (optionally) an outlined placeholder body to draw over.
 
 Returns a ``workflow_manifest.v1`` manifest (sprite summary, created files,
-palette, and suggested next actions).
+palette, and suggested next actions), plus `pixels_written` for the placeholder it
+drew. With `with_placeholder=False` nothing is drawn and the field is absent.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -3748,6 +3849,55 @@ Frames are placeholders to draw over. Returns a ``workflow_manifest.v1`` manifes
 | `directions` | array<string> | no | _none_ |
 
 
+### `scaffold_cycle`
+
+Scaffold one animation cycle: its frames, a tag per phase, and a shaped timing curve.
+
+`kind` is `walk`, `run`, `idle`, `attack`, `hurt` or `death`, and it settles the four
+things a scaffolded animation otherwise gets wrong:
+
+* **The frame count.** walk 8 (6 is the budget option, and 4 only reads as a walk
+  mirrored on a side view), run 6, idle 4, attack 5, hurt 2, death 6. A count outside
+  the kind's conventional range is accepted with a warning rather than refused.
+* **A tag per phase, named for the pose rather than numbered.** An 8-frame walk gets
+  `walk_contactL`, `walk_downL`, `walk_passL`, `walk_upL` and the same four for the
+  right step, plus a `walk` tag over the whole cycle, so the frame you are drawing on
+  says what it is meant to be.
+* **Non-uniform durations from the start**, via `apply_timing_curve`: a cycle holds
+  its extremes, an attack snaps through the strike, a hurt flashes and then holds the
+  recovery, a death slows to a stop on a held last pose. Uniform timing is the
+  placeholder every animation starts with and almost none should keep.
+* **Loop versus one-shot.** An attack, a hurt and a death do not wrap, so every tag
+  they get is written with `repeats=1` instead of being left at 0 ("play forever").
+  That field is what `validate_loop` reads, so a one-shot tagged as a loop makes the
+  checker report a duplicated seam frame on an animation that has no seam.
+
+Frames are copies of frame 1, there to draw over. Nothing already in the sprite is
+deleted, but Aseprite inserts a copied frame rather than appending it, so on a sprite
+that already has several frames the new ones land at the front and the existing ones
+end up at the end of the cycle; the manifest warns when that happens. Frames past the
+cycle are left untagged and untimed, with a warning saying which.
+
+Args:
+    kind: walk | run | idle | attack | hurt | death.
+    frames: Override the kind's default frame count.
+    base_ms: The duration of a passing frame; every other duration is a multiple of
+        it. Defaults per kind, because a run passes through its poses faster than an
+        idle breathes.
+
+Returns a ``workflow_manifest.v1`` manifest (kind ``animation_cycle``) whose
+`animation` section lists every phase with the frame, tag, duration, timing role and
+repeat count it ended up with, read back off the saved sprite rather than restated
+from what was asked for.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `kind` | string | yes |  |
+| `frames` | integer | no | _none_ |
+| `base_ms` | integer | no | _none_ |
+
+
 ### `validate_sprite_for_game_export`
 
 Check whether a sprite is game-ready against the criteria you specify.
@@ -3854,7 +4004,10 @@ Frames are 1-based, and an `arg=frame` argument must name a frame that already
 exists: an out-of-range frame is rejected with the sprite's valid range rather than
 clamped, so a per-op `summary` always describes the frames actually touched.
 
-Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list.
+Returns a `workflow_manifest.v1` (kind "batch") with a per-op `operations` list, and,
+when the ops touched pixels, the same `pixels_written` / `pixels_outside_selection` /
+`selection_applied` fields every other tool reports: a batch run under an active
+selection is clipped to it, and these say how much the mask refused.
 
 Operations and their arguments ('?' marks an optional argument):
   add_frame(duration_ms=int?, copy_from=frame?)
