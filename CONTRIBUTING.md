@@ -119,7 +119,7 @@ project is not published to PyPI.
 
 1. **Pass the gate on the release branch**, including `--run-aseprite`. Record the counts
    in the pull request; CI cannot run that tier.
-2. **Regenerate and verify the showcase.** All twelve generators in `scripts/showcase/` must
+2. **Regenerate and verify the showcase.** All thirteen generators in `scripts/showcase/` must
    reproduce their committed images byte for byte. A mismatch means a tool's output moved,
    and the cause goes in the changelog before the release, not after.
 3. **Consolidate `[Unreleased]`** in `CHANGELOG.md` into a dated `## [x.y.z]` section with

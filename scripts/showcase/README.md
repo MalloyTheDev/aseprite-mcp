@@ -25,6 +25,7 @@ uv run --no-sync python scripts/showcase/dungeon.py    # dungeon.png, dungeon.gi
 uv run --no-sync python scripts/showcase/lava.py       # lava.png, lava.gif        -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/attack.py     # attack_sheet.png, attack.gif -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/smear.py      # smear_stages.png, smear.gif -> docs/assets/showcase/
+uv run --no-sync python scripts/showcase/golem.py      # golem.png             -> docs/assets/showcase/
 ```
 
 Note that two of them are renamed on the way in, and that `tiles.py` and `skeleton.py`
