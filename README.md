@@ -138,10 +138,14 @@ them is real output from the same run.
 ### Shade a form, not a filter
 
 <p align="center">
-  <img src="docs/assets/showcase/shading_stages.png" width="640" alt="One disc shown three times: flat colour, then shaded by light direction, then outlined and dithered">
+  <img src="docs/assets/showcase/shading_stages.png" alt="One disc shown three times: flat colour, then shaded by light direction, then outlined">
 </p>
 <p align="center">
-  <sub>Flat fill, then <code>shade_region_by_light</code>, then <code>dither_band</code> and <code>outline_smart</code>.</sub>
+  <sub>Flat fill, then <code>shade_region_by_light</code>, then <code>outline_smart</code>.
+  The <code>dither_band</code> call below runs and changes almost nothing here: on a 24px
+  disc with a five-step ramp the chosen pair has no terminator wide enough for a two-pixel
+  Bayer cell to sit in, so the third panel differs from the second by its outline and five
+  pixels. This caption used to credit it anyway.</sub>
 </p>
 
 ```python
@@ -571,20 +575,14 @@ part, not on the right *side* of it.
 <summary>More examples</summary>
 
 <p align="center">
-  <img src="docs/assets/showcase/walk8.gif" width="110" alt="Animated sprite cycling through eight facing directions">
+  <img src="docs/assets/showcase/walk8.gif" width="128" alt="Animated sprite cycling through eight facing directions">
   &nbsp;
-  <img src="assets/slime.gif" width="110" alt="Animated bouncing slime">
-  &nbsp;
-  <img src="assets/skeleton.png" width="110" alt="Pixel-art skeleton">
-  &nbsp;
-  <img src="assets/tilemap_scene.png" width="180" alt="Tilemap scene with grass, dirt, water, and stone">
-  &nbsp;
-  <img src="assets/ramp.png" width="180" alt="Hue-shifted shading ramp from generate_ramp">
+  <img src="assets/skeleton.png" width="128" alt="Pixel-art skeleton">
 </p>
 <p align="center">
-  <sub>The eight-direction template playing through, a bouncing slime, a skeleton, a
-  tilemap scene built from four painted tiles, and a hue-shifted <code>generate_ramp</code>
-  palette.</sub>
+  <sub>The eight-direction template playing through, and a skeleton. Both are shown at
+  four times their native 32x32, because a pixel grid resampled by a fraction is a blurred
+  one: every width here is a whole multiple of the sprite's own size.</sub>
 </p>
 
 </details>
@@ -1058,7 +1056,9 @@ The agent's own "eyes" remain `render_preview`, which returns a PNG it can inspe
 4. `set_all_frame_durations("slime.aseprite", 120)` and
    `add_tag("slime.aseprite", "walk", 1, 3, "pingpong")`.
 5. `render_preview` to check it, iterate, then
-   `export_gif("slime.aseprite", "slime.gif", scale=8)`.
+   `export_gif("walk.aseprite", "walk.gif", scale=8)`. Pass `loop=False` for a
+   one-shot: an attack or a death is not a cycle, and a GIF declares that in its own
+   metadata rather than in a caption.
 
 ---
 

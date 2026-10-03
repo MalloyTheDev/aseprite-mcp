@@ -62,9 +62,18 @@ for _ in range(14):
 tilemap.paint_tile_pixels(NAME, LAYER, index["dirt"], dirt)
 
 # --- water: bands plus a couple of highlight dashes ----------------------------------
+# The band cycle has to divide the tile, or the tile does not tile. This was `y % 6` in a
+# 16-row tile: six does not divide sixteen, so the pattern restarted mid-cycle at every
+# vertical seam and the pond carried a wrong-value band straight across it every 16 rows.
+# At native y=63 the sequence ran #2b7aa8 then #1f5e86 where continuing would have given
+# #3f9ac6. A tiling demonstration with a tiling fault in it argues against the feature it
+# exists to show, and this one shipped that way. Four two-row bands make eight, which does.
+BANDS = (WATER[0], WATER[0], WATER[1], WATER[1], WATER[2], WATER[2], WATER[1], WATER[1])
+assert TS % len(BANDS) == 0, (
+    f"the band cycle is {len(BANDS)} rows and the tile is {TS}: it will not tile")
 water = []
 for y in range(TS):
-    band = WATER[0] if y % 6 in (0, 1) else (WATER[1] if y % 6 in (2, 3) else WATER[2])
+    band = BANDS[y % len(BANDS)]
     water += [{"x": x, "y": y, "color": band} for x in range(TS)]
 for y, x0 in ((3, 2), (3, 9), (9, 5), (9, 12), (14, 1)):
     water += [{"x": (x0 + d) % TS, "y": y, "color": WATER[3]} for d in range(3)]

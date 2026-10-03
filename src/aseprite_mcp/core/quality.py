@@ -636,6 +636,21 @@ def readings(metrics: dict, *, width: int, height: int) -> list[str]:
                 "spends on separating its masses. A thin or absent keyline is what makes "
                 "a silhouette dissolve on a light background. add_outline, or outline_smart."
             )
+        elif sep["share"] > high * 2:
+            # The other direction, which this reading shipped without and which cost it a
+            # real defect: a figure in this gallery spends 50.3 percent of its drawn pixels
+            # on a near-black outline, and passed silently because the band was only ever
+            # checked from below. An outline carrying half a sprite is not separating
+            # masses, it is replacing them, and the form then has to be read entirely from
+            # a keyline. Twice the top of the band rather than the top itself, because the
+            # band describes what is usual and this has to describe what is wrong.
+            out.append(
+                f"The darkest colour {sep['separator']} is {sep['share']:.0%} of the "
+                f"drawing, well past the {high:.0%} that work in this style spends on "
+                "separating its masses. An outline that heavy is doing the drawing: the "
+                "interior has no values left to describe form with. Thin it to one pixel "
+                "with add_outline, or spend the difference on mid tones."
+            )
         elif sep["lightness"] > 0.25 and sep["share"] > low:
             out.append(
                 f"The darkest colour {sep['separator']} has lightness "

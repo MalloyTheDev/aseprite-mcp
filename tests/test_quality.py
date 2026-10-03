@@ -383,3 +383,49 @@ def test_the_silhouette_readings_stay_silent_on_a_full_bleed_scene():
     sprite_lines = quality.readings(quality.score(sprite_shape), width=5, height=5)
     assert [line for line in sprite_lines if "fused" in line], (
         "a shaded shape with transparency is a silhouette and must still be judged")
+
+
+def test_an_outline_carrying_half_the_sprite_is_reported_too():
+    """The direction this reading shipped without.
+
+    It checked the dark separator's share only from below, so a keyline that was too thin
+    was reported and one doing the whole drawing was not. A figure in this project's own
+    gallery spends 50.3 percent of its drawn pixels on a near-black outline and passed
+    silently: its form is not described by its values at all, it is described by a ring,
+    and the interior is three near-white tones with no mid tone between them.
+    """
+    legend = {".": T, "k": "#141018ff", "a": "#8a8f9aff", "b": "#c8ccd4ff"}
+    # Articulated, shaded, and mostly outline: a thick ring with a thin interior.
+    heavy = _from_map([
+        "kkkkkkkk",
+        "kkkkkkkk",
+        "kkabbakk",
+        "kkabbakk",
+        "kkkkkkkk",
+        "kkk..kkk",
+        "kkk..kkk",
+        "kkkkkkkk",
+    ], legend)
+    measured = quality.separator_share(heavy)
+    assert measured["share"] > 0.5, measured
+    lines = quality.readings(quality.score(heavy), width=8, height=8)
+    hits = [line for line in lines if "doing the drawing" in line]
+    assert hits, f"a 50%+ keyline produced no reading: {lines}"
+
+    # And the balanced case stays quiet, so this is a reading and not a tax on outlines.
+    balanced = _from_map([
+        "..kkkk..",
+        ".kaabbk.",
+        "kaabbbbk",
+        "kaabbbbk",
+        "kaabbbbk",
+        ".kaabbk.",
+        "..k..k..",
+        "..k..k..",
+    ], legend)
+    # Tied to the threshold rather than to a number of my own, so the fixture cannot
+    # drift to the wrong side of it without this failing.
+    assert (quality.separator_share(balanced)["share"]
+            < quality.SEPARATOR_BAND[1] * 2)
+    quiet = quality.readings(quality.score(balanced), width=8, height=8)
+    assert not [line for line in quiet if "doing the drawing" in line], quiet

@@ -3386,7 +3386,15 @@ Tag *ranges* are honoured, but a tag's playback direction is not: a GIF is a fla
 frame sequence. A ping-pong tag exports forward, and the result says so in
 `warnings` rather than letting the caller find out in-engine.
 
-overwrite: Replace `output` if it already exists (default False = no-clobber).
+Args:
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+    loop: True (the default) repeats forever, which is what Aseprite writes and what
+        a cycle wants. False plays the animation once and stops.
+
+`loop=False` is the one a one-shot needs, and there was no way to ask for it. An attack
+or a death is not a cycle: built from tags at `repeats=1`, with `validate_loop`
+confirming it does not close, it still exported as an endless loop that snapped from
+the recovery pose back to the wind-up. Set this and the result reports `loops`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -3394,6 +3402,7 @@ overwrite: Replace `output` if it already exists (default False = no-clobber).
 | `output` | string | yes |  |
 | `scale` | integer | no | 1 |
 | `overwrite` | boolean | no | False |
+| `loop` | boolean | no | True |
 
 
 ### `export_layer`

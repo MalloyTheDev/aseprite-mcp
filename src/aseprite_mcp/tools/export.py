@@ -7,6 +7,7 @@ same workspace rules as everything else.
 from __future__ import annotations
 
 from ..app import mcp
+from ..core import gifmeta
 from ..core.errors import ExportError, ValidationFailed
 from ..core.models import FRAME_GUARD_LUA
 from ..core.paths import (
@@ -168,20 +169,33 @@ def export_png(
 
 
 @mcp.tool()
-def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = False) -> dict:
+def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = False,
+               loop: bool = True) -> dict:
     """Export the full animation as an animated GIF (honours frame durations).
 
     Tag *ranges* are honoured, but a tag's playback direction is not: a GIF is a flat
     frame sequence. A ping-pong tag exports forward, and the result says so in
     `warnings` rather than letting the caller find out in-engine.
 
-    overwrite: Replace `output` if it already exists (default False = no-clobber).
+    Args:
+        overwrite: Replace `output` if it already exists (default False = no-clobber).
+        loop: True (the default) repeats forever, which is what Aseprite writes and what
+            a cycle wants. False plays the animation once and stops.
+
+    `loop=False` is the one a one-shot needs, and there was no way to ask for it. An attack
+    or a death is not a cycle: built from tags at `repeats=1`, with `validate_loop`
+    confirming it does not close, it still exported as an endless loop that snapped from
+    the recovery pose back to the wind-up. Set this and the result reports `loops`.
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     scale = _require_scale(scale)
     run_cli([str(src), "--scale", str(scale), "--save-as", str(out)])
-    result = {"ok": True, "output": str(out), "scale": scale,
+    if not loop:
+        # After the CLI has written it, because Aseprite has no flag for this and always
+        # writes "repeat forever". Metadata only: every frame and delay is untouched.
+        out.write_bytes(gifmeta.strip_loop(out.read_bytes()))
+    result = {"ok": True, "output": str(out), "scale": scale, "loops": bool(loop),
               "bytes": _verify_written(out, "export_gif")}
     warnings = _unhonoured_tag_directions(src)
     if warnings:
