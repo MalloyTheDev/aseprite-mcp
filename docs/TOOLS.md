@@ -2996,9 +2996,22 @@ hue shifting: cool shadows / warm highlights) and scaling saturation by
 Args:
     filename: If set with apply, write the ramp into that sprite's palette.
     apply: "none" (just return), "append" (add to palette), or "replace".
+    chroma: The saturation the ramp holds, 0 to 1, in place of the base colour's own.
 
 Returns the ramp as a list of "#RRGGBB" colours (darkest first), with `distinct`, how
-many of them are different from each other.
+many of them are different from each other, and `hue_span`, `sat_floor` and
+`grey_steps` measuring whether the hue rotation can actually be seen.
+
+**`chroma` is usually the argument that matters, and it is easy to miss.** Every hue
+control here rotates hue; none of them creates saturation, which is inherited from
+`base_color` and only scaled from there. So a base picked for its *value*, the way a
+base is usually picked ("stone is grey", so `#8a7f74`), carries almost no saturation,
+and the ramp built from it rotates a hue that cannot be seen: the ramp this argument
+was added for turned 143 degrees of hue at a 0.08 saturation floor and rendered as
+eight greys, which is what `grey_steps` now says out loud. Reference work in this
+style runs its apparent greys at 0.17 to 0.30. Setting `chroma` is how a ramp gets
+that without the caller having to reverse-engineer a saturated base colour they did
+not want to name.
 
 **`distinct` is not always `steps`.** Lightness is clamped at both ends, so a base
 already near white or near black spends its outermost steps on the same colour: nine
@@ -3025,6 +3038,7 @@ success either way.
 | `light_hue` | string | no | _none_ |
 | `sat_curve` | string | no | linear |
 | `easing` | string | no | linear |
+| `chroma` | number | no | _none_ |
 
 
 ### `get_palette`
@@ -3138,6 +3152,15 @@ Args:
 Neither mode rotates hue. Interpolating hue between distant colours is what turns a
 blue-to-cream ramp magenta in the middle: at that distance both ways round the wheel
 are equally short, and neither is the blend anybody wanted.
+
+Comes back with `hue_span`, `sat_floor` and `grey_steps` alongside the colours. These
+are worth reading, because interpolation can only carry the chroma its ends supply: two
+endpoints that are themselves near-neutral produce a ramp of greys however it is eased,
+and `grey_steps` is how many of its interior steps fall below the saturation at which
+hue is visible at all. The ramp this reporting was added for came back with six of
+eight, and the figure painted from it read as grey stone for three drafts before anyone
+measured it. To hold a chroma that the ends do not supply, use `generate_ramp` with
+`chroma`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

@@ -484,6 +484,13 @@ def ramp_chroma(ramp: list[str]) -> dict:
     rotated 227 degrees end to end and fell to 2.4 percent saturation in the middle, so it
     rendered as eight greys. The number that matters is therefore not the hue span but the
     saturation floor, and both are reported so the two cannot be confused again.
+
+    The saturation figures cover the ramp's interior, not its ends, whenever it is long
+    enough to have an interior. A hand-built ramp desaturates both endpoints on purpose:
+    the highlight washes out toward the light and the deepest shadow toward ambient, which
+    is exactly what `sat_curve="peak"` is for. Counting those two steps against a ramp
+    would mark correct practice as a defect. What cannot be grey is the middle, because
+    that is where most of a sprite's pixels live.
     """
     if not ramp:
         return {"hue_span": 0.0, "sat_floor": 0.0, "grey_steps": 0}
@@ -497,10 +504,14 @@ def ramp_chroma(ramp: list[str]) -> dict:
     for a, b in itertools.combinations(hues, 2):
         gap = abs(a - b) % 360
         span = max(span, min(gap, 360 - gap))
+    # Four is the shortest ramp that still has two steps left after dropping its ends. A
+    # three-step ramp is shadow, midtone, light, and dropping the ends would leave the
+    # measurement resting on a single colour.
+    body = sats[1:-1] if len(sats) >= 4 else sats
     return {
         "hue_span": round(span, 1),
-        "sat_floor": round(min(sats), 3),
-        "grey_steps": sum(1 for s in sats if s < HUE_INVISIBLE_SAT),
+        "sat_floor": round(min(body), 3),
+        "grey_steps": sum(1 for s in body if s < HUE_INVISIBLE_SAT),
     }
 
 

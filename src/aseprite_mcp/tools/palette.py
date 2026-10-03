@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import indexed, quantization, ramps
+from ..core import indexed, quality, quantization, ramps
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_ASSESS_PIXELS,
@@ -479,6 +479,7 @@ def generate_ramp(
     light_hue: str | None = None,
     sat_curve: str = "linear",
     easing: str = "linear",
+    chroma: float | None = None,
 ) -> dict:
     """Generate a shading ramp from a base colour (dark -> light).
 
@@ -490,9 +491,22 @@ def generate_ramp(
     Args:
         filename: If set with apply, write the ramp into that sprite's palette.
         apply: "none" (just return), "append" (add to palette), or "replace".
+        chroma: The saturation the ramp holds, 0 to 1, in place of the base colour's own.
 
     Returns the ramp as a list of "#RRGGBB" colours (darkest first), with `distinct`, how
-    many of them are different from each other.
+    many of them are different from each other, and `hue_span`, `sat_floor` and
+    `grey_steps` measuring whether the hue rotation can actually be seen.
+
+    **`chroma` is usually the argument that matters, and it is easy to miss.** Every hue
+    control here rotates hue; none of them creates saturation, which is inherited from
+    `base_color` and only scaled from there. So a base picked for its *value*, the way a
+    base is usually picked ("stone is grey", so `#8a7f74`), carries almost no saturation,
+    and the ramp built from it rotates a hue that cannot be seen: the ramp this argument
+    was added for turned 143 degrees of hue at a 0.08 saturation floor and rendered as
+    eight greys, which is what `grey_steps` now says out loud. Reference work in this
+    style runs its apparent greys at 0.17 to 0.30. Setting `chroma` is how a ramp gets
+    that without the caller having to reverse-engineer a saturated base colour they did
+    not want to name.
 
     **`distinct` is not always `steps`.** Lightness is clamped at both ends, so a base
     already near white or near black spends its outermost steps on the same colour: nine
@@ -518,6 +532,16 @@ def generate_ramp(
     base = parse_color(base_color)
     r, g, b = base["r"] / 255, base["g"] / 255, base["b"] / 255
     h, lum, sat = colorsys.rgb_to_hls(r, g, b)
+    if chroma is not None:
+        if not 0.0 <= float(chroma) <= 1.0:
+            raise ValidationFailed(
+                f"chroma is {chroma}; it is a saturation from 0 to 1, not a percentage. "
+                "Reference work in this style runs its apparent greys at 0.17 to 0.30."
+            )
+        # Replaces the base's own saturation rather than scaling it, which is the whole
+        # point: scaling zero is zero, and a base chosen for its value usually has close
+        # to none. `saturation_shift` and `sat_curve` still shape the ramp around this.
+        sat = float(chroma)
     if sat_curve not in ("linear", "peak"):
         raise ValidationFailed('sat_curve must be "linear" or "peak".')
     if easing not in ("linear", "perceptual"):
@@ -572,7 +596,8 @@ def generate_ramp(
 
     colors = build(light_range)
     distinct = len(set(colors))
-    result = {"steps": steps, "colors": colors, "distinct": distinct}
+    result = {"steps": steps, "colors": colors, "distinct": distinct,
+              **quality.ramp_chroma(colors)}
     # Only when it happened. A ramp that came back whole should not grow a warning saying
     # so, for the same reason the pixel counters do not grow a "0".
     if distinct < steps:
@@ -667,6 +692,15 @@ def ramp_between(
     Neither mode rotates hue. Interpolating hue between distant colours is what turns a
     blue-to-cream ramp magenta in the middle: at that distance both ways round the wheel
     are equally short, and neither is the blend anybody wanted.
+
+    Comes back with `hue_span`, `sat_floor` and `grey_steps` alongside the colours. These
+    are worth reading, because interpolation can only carry the chroma its ends supply: two
+    endpoints that are themselves near-neutral produce a ramp of greys however it is eased,
+    and `grey_steps` is how many of its interior steps fall below the saturation at which
+    hue is visible at all. The ramp this reporting was added for came back with six of
+    eight, and the figure painted from it read as grey stone for three drafts before anyone
+    measured it. To hold a chroma that the ends do not supply, use `generate_ramp` with
+    `chroma`.
     """
     parsed_shadow = parse_color(shadow_color)
     parsed_light = parse_color(light_color)
@@ -684,7 +718,7 @@ def ramp_between(
         steps,
         easing,
     )
-    result = {"steps": steps, "colors": colors}
+    result = {"steps": steps, "colors": colors, **quality.ramp_chroma(colors)}
     applied = _apply_palette(filename, colors, apply)
     if applied is not None:
         result["applied"] = applied
