@@ -421,6 +421,47 @@ mechanism ran: `method: "pixel_remap"`. On an indexed sprite the two are the sam
 and the move never routes a colour through a nearest-entry match, so the palette comes back
 byte for byte.
 
+### Scaffold a one-shot, and let the timing do the hitting
+
+<img src="docs/assets/showcase/attack_sheet.png" width="400" alt="Five frames of a sword
+attack: anticipation, swing, impact, recoil, recover">
+
+A one-shot is where a scaffolded animation goes wrong in three ways at once: the frame count
+is a guess, the frames are numbered instead of named, and the whole thing is tagged as a loop
+with uniform timing. `scaffold_cycle(kind="attack")` settles all three before a pixel is
+drawn, and [`attack.py`](scripts/showcase/attack.py) is the drawing laid over what it built.
+
+**The timing is the part worth looking at, and it is not the timing you would guess.** The
+curve puts the 24-millisecond frame on the **swing**, not on the impact:
+
+| phase | duration | why |
+| --- | --- | --- |
+| anticipation | 240 ms | the wind-up, held long enough to read as intent |
+| swing | **24 ms** | one frame you barely see, which is what makes it a snap |
+| impact | 200 ms | **held**, because the hit has to land rather than flash past |
+| recoil | 80 ms | |
+| recover | 80 ms | |
+
+That ordering is the craft: the fast frame is the blur *between* poses, and the pose that has
+to be understood is the one that holds. Uniform timing at 80 ms would run the same five
+drawings in the same order and read as a shove. The generator pins the snap to frame two for
+exactly that reason, because "the shortest frame is the impact" is the plausible wrong answer
+and a test that only checked for non-uniformity would accept it.
+
+Each phase gets a tag named for the pose (`attack_anticipation` through `attack_recover`,
+plus `attack` over the whole cycle), and **every one is written with `repeats=1`** rather than
+left at 0, which means "play forever" in the file format. That field is what `validate_loop`
+reads, so a one-shot tagged as a loop makes the checker report a duplicated seam frame on an
+animation that has no seam. The per-phase tags matter as much as the whole-cycle one, since a
+single-frame tag left looping says "hold this pose forever".
+
+`validate_loop` also found an art bug here, which is the kind of thing this server is for: it
+reported the drawn content's bottom row moving 4px across the phases, because the recover
+blade was swinging clean through the floor. Fixing the arc did not end it either, since the
+centreline then cleared the ground and the blade's own *thickness* still did not. The
+generator checks that directly now, because a background was added and the contact
+measurement stopped being able to say so.
+
 ### Scaffold a whole asset in one call
 
 <p align="center">
