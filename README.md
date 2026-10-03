@@ -93,6 +93,10 @@ Aseprite GUI.
   would not have. `dither_band` names the two colours its 1-based steps resolved to.
   Every one of those exists because its absence cost a debugging session, and the
   [showcase generators](scripts/showcase/README.md) are where they were spent.
+  The shape is uniform rather than nearly uniform: **every result that describes a
+  sprite carries `ok`**, which thirty of them did not until the key moved into the one
+  function they all return through, and a workflow manifest reports the same pixel
+  counters at its top level as a bare call does, so one check reads both.
 - **Sandboxed file access**: by default the file capability is scoped to the workspace
   (relative paths only; absolute/`..` paths rejected unless you opt in).
 - **No-clobber by default**: output-writing tools refuse to overwrite an existing file;
@@ -599,8 +603,19 @@ Every workflow tool returns a standardized **`workflow_manifest.v1`** object (de
 [`core/manifest.py`](src/aseprite_mcp/core/manifest.py)) so the asset layer stays
 consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created_files[]`,
 `suggested_next_actions[]`, `warnings[]`. Included when relevant: `sprite{}`, `exports[]`,
-`palette{}`, `animation{}`, `tilemap{}`. File/export entries are
-`{role, path, format, metadata_path?}`.
+`palette{}`, `animation{}`, `tilemap{}`, `tiling{}`, `validation{}`, `operations[]`,
+`plan[]` and `dry_run`. File/export entries are `{role, path, format, metadata_path?}`.
+
+**A manifest also reports what it wrote**, at the top level beside `ok`:
+`pixels_written`, `pixels_clipped`, `pixels_skipped`, `pixels_outside_selection`,
+`selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
+section of their own, because the sections above each describe the *product* while these
+are a verdict on the *call*, and because every other result in this server reports them
+there: one rule reads them across all 155 tools. They are **absent rather than zero**, so a
+key that is present at all means there is something to read, and a tool that writes no
+pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
+them, which let a batch report `status: applied` for an op whose every pixel an active
+selection had refused.
 
 ```json
 {
@@ -611,6 +626,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
               "frames": 1, "layers": ["body", "details"], "tags": [] },
   "created_files": [ { "role": "source_sprite", "path": "...", "format": "aseprite" } ],
   "palette": { "colors": ["#1b1f2a", "..."], "count": 5 },
+  "pixels_written": 437,
   "suggested_next_actions": ["Draw the character on the 'body' layer", "..."],
   "warnings": []
 }
@@ -828,6 +844,16 @@ satisfied by a tool that wrote the right number of pixels in the wrong places.
 | `generate_ramp` | Build a hue-shifted shading ramp from a base colour. Says how many steps came back distinct, since lightness clamps at both ends. |
 | `ramp_between` | Build a ramp from its two ends, the cool shadow and the warm highlight, interpolated in Oklab so the middle is a blend rather than a hue rotation. |
 | `ramp_from_art` | Recover the ramp a sprite is already painted with, ordered dark to light, with the share of the art each step covers. |
+
+Palette cycling is the one animation technique here that moves no pixels: rotate a run of
+indices and water flows, lava creeps, a portal turns. `list_palette_usage` is the step
+before it, because the run worth cycling is a property of the art rather than of the
+palette: an index the drawing never uses contributes nothing, and a run of two is a flicker
+rather than a flow. One measured limitation shapes the tool: **Aseprite's Lua API exposes
+no per-frame palette**, so the rotation is applied to the pixels' own indices instead and
+the result says which it did (`method: "pixel_remap"`). On an indexed sprite the two are
+the same picture, and the move is exact because it never resolves a colour to a nearest
+entry.
 
 ### Transform & export
 | Tool | Description |
