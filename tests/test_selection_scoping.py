@@ -182,11 +182,15 @@ def test_mirror_layer_will_not_write_into_the_masked_half(request):
 def test_a_batched_replace_colour_is_clipped_too(half_masked):
     """`apply_operations` runs the ops through the same prelude, so it inherits the fix.
 
-    Its manifest does not carry the harness's counters, because `workflow_manifest` has a
-    fixed field list and adding one is a schema decision for every workflow tool rather
-    than this one. So this asserts the pixels, which is the claim that matters anyway.
+    Its manifest now carries the harness's report at the top level, which is what #201
+    settled, so `assert_scoped` reads it exactly as it reads the eighteen bare-dict
+    results above: that one shared helper working on a manifest is the whole argument for
+    the counters being top-level keys rather than a `pixels` section of their own.
+
+    Before that, the manifest reported `status: applied` for an op whose every offered
+    pixel the mask had refused, and the only thing this test could check was the canvas.
     """
-    batch.apply_operations(
+    manifest = batch.apply_operations(
         half_masked,
         [{"op": "replace_color", "args": {"from_color": BASE, "to_color": "#00ff00"}}],
     )
@@ -194,6 +198,16 @@ def test_a_batched_replace_colour_is_clipped_too(half_masked):
     left, right = halves(half_masked)
     assert left == {BASE}, f"the batch wrote outside the selection: {sorted(left)}"
     assert right == {"#00ff00"}
+
+    assert_scoped(half_masked, manifest)
+    # The whole canvas was offered to a colour replace and exactly half of it refused,
+    # which is the count the manifest used to drop. Asserted as the literal here because
+    # the fixture's geometry is what fixes it: 16x8 with the right half selected.
+    assert manifest["pixels_written"] == W * H // 2
+    assert manifest["pixels_outside_selection"] == W * H // 2
+    # And the manifest is still a manifest, not a bare result wearing one's name.
+    assert manifest["schema_version"] == "workflow_manifest.v1"
+    assert manifest["operations"][0]["status"] == "applied"
 
 
 # ===== and the other direction: no selection, nothing changes =========================
@@ -208,6 +222,11 @@ def test_a_batched_replace_colour_is_clipped_too(half_masked):
         ("invert_colors", lambda n: effects.invert_colors(n)),
         ("mirror_layer", lambda n: brushes.mirror_layer(
             n, "Layer 1", direction="horizontal", source_side="first")),
+        # A manifest answers this question the same way a bare result does, which is the
+        # other half of #201: the counters are absent, not zero, when nothing was masked.
+        ("batched replace_color", lambda n: batch.apply_operations(
+            n, [{"op": "replace_color",
+                 "args": {"from_color": PAINT, "to_color": "#00ff00"}}])),
     ],
 )
 def test_with_no_selection_nothing_is_scoped_and_nothing_is_reported(request, label, call):

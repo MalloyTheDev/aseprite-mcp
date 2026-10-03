@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+from typing import NamedTuple
 
 from ..app import mcp
 from ..core import validation
@@ -25,11 +26,18 @@ from ..core.limits import (
     check_count,
     check_list_length,
 )
-from ..core.manifest import export_entry, file_entry, sprite_summary, workflow_manifest
+from ..core.manifest import (
+    export_entry,
+    file_entry,
+    pixel_counters,
+    sprite_summary,
+    workflow_manifest,
+)
 from ..core.models import Rect
 from ..core.paths import ensure_output_path
 from ..core.runner import AsepriteError
 from . import (
+    animation,
     batch,
     cels,
     drawing,
@@ -64,7 +72,8 @@ def create_character_sprite(
     and (optionally) an outlined placeholder body to draw over.
 
     Returns a ``workflow_manifest.v1`` manifest (sprite summary, created files,
-    palette, and suggested next actions).
+    palette, and suggested next actions), plus `pixels_written` for the placeholder it
+    drew. With `with_placeholder=False` nothing is drawn and the field is absent.
     """
     filename = _aseprite_name(name)
     sprite.create_sprite(filename, width, height, "rgb")
@@ -74,11 +83,20 @@ def create_character_sprite(
     ramp = palette.generate_ramp(base_color, steps=5, hue_shift=30, light_range=0.6)["colors"]
     palette.set_palette(filename, ramp)
 
+    # Kept so the manifest can report what the placeholder cost. Measured on a 32x32
+    # scaffold: the ellipse writes 221 pixels and the outline 72. Everything else this
+    # tool calls (create_sprite, rename_layer, add_layer, set_palette) reports no pixel
+    # counters at all, so the total is these two.
+    drawn: list[dict] = []
     if with_placeholder:
         cx, cy = width // 2, height // 2
         rx, ry = max(2, width // 3), max(2, height // 3)
-        drawing.draw_ellipse(filename, cx, cy, rx, ry, ramp[2], filled=True, layer="body")
-        effects.add_outline(filename, ramp[0], thickness=1, where="outside", layer="body")
+        drawn.append(
+            drawing.draw_ellipse(filename, cx, cy, rx, ry, ramp[2], filled=True, layer="body")
+        )
+        drawn.append(
+            effects.add_outline(filename, ramp[0], thickness=1, where="outside", layer="body")
+        )
 
     final = inspect.get_sprite_info(filename)
     return workflow_manifest(
@@ -86,6 +104,7 @@ def create_character_sprite(
         sprite=sprite_summary(final),
         created_files=[file_entry("source_sprite", final["path"], "aseprite")],
         palette={"colors": ramp, "count": len(ramp)},
+        counters=pixel_counters(*drawn),
         suggested_next_actions=[
             f"Draw the character on the 'body' layer with the palette shades {ramp}.",
             "Add a face/features on the 'details' layer.",
@@ -123,6 +142,11 @@ def make_4_frame_idle_animation(
     tags.add_tag(filename, tag_name, 1, 4, "forward")
 
     final = inspect.get_sprite_info(filename)
+    # No `counters=`: measured, every call above (add_frame, set_cel_position,
+    # set_all_frame_durations, add_tag) comes back with no pixel counters, because none of
+    # them writes through `img_set`. Duplicating a frame copies a cel and moving one
+    # changes its position; neither paints. So the harness's report is absent here because
+    # there is nothing to report, not because this tool forgot to pass it (#201).
     return workflow_manifest(
         "idle_animation",
         sprite=sprite_summary(final),
@@ -187,6 +211,9 @@ def create_tileset_project(
         tilemap.fill_tilemap(filename, "tiles", created[0]["index"])
 
     final = inspect.get_sprite_info(filename)
+    # No `counters=`: measured, `add_tile` and `fill_tilemap` report no pixel counters.
+    # A tilemap write sets tile indices on a tilemap cel rather than pixels through
+    # `img_set`, so there is nothing for the harness to count (#201).
     return workflow_manifest(
         "tileset_project",
         sprite=sprite_summary(final),
@@ -259,6 +286,8 @@ def export_game_asset_bundle(
         exports.append(export_entry("tag_gif", out["output"], "gif"))
 
     manifest_path = resolve_path(manifest_rel)
+    # No `counters=`: a bundle only reads the sprite and writes export files, so it never
+    # offers a pixel to `img_set` and the harness's report is empty by construction (#201).
     manifest = workflow_manifest(
         "game_asset_bundle",
         sprite=sprite_summary(info),
@@ -370,6 +399,8 @@ def validate_sprite_for_game_export(
         if report["passed"]
         else [f"Fix: {e}" for e in report["errors"]]
     )
+    # No `counters=`, in any of this tool's three returns: it is in READ_ONLY_TOOLS and
+    # writes nothing, so there is no pixel report to carry (#201).
     return workflow_manifest(
         "validation",
         sprite=sprite_summary(info),
@@ -384,9 +415,11 @@ _DIRECTIONS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 
 def _grid_sheet(filename: str, cell: int, names: list[str], columns: int | None,
-                shape: str) -> dict:
+                shape: str) -> tuple[dict, dict]:
     """Scaffold a grid sheet: a cell per name, each with a placeholder + a named slice.
-    Returns the final get_sprite_info dict. (Shared by icon_set / rpg_item_sheet.)"""
+
+    Returns the final get_sprite_info dict and the merged pixel counters for the
+    placeholders it drew. (Shared by icon_set / rpg_item_sheet.)"""
     if len(set(names)) != len(names):
         raise ValidationFailed("Cell/slice names must be unique.")
     # Each cell costs a placeholder draw plus a slice, so the cell count is a
@@ -405,22 +438,26 @@ def _grid_sheet(filename: str, cell: int, names: list[str], columns: int | None,
     )["colors"]
     palette.set_palette(filename, ramp)
     inset = max(1, cell // 6)
+    # One placeholder draw per cell, and each one reports what it wrote, so the sheet can
+    # say what it covered in total rather than only that it returned (#201). `add_slice`
+    # reports nothing: a slice is a named region, not pixels.
+    drawn: list[dict] = []
     for i, nm in enumerate(names):
         row, col = divmod(i, cols)
         cell_rect = Rect.of(col * cell, row * cell, cell, cell)
         color = ramp[i % len(ramp)]
         if shape == "circle":
-            drawing.draw_ellipse(
+            drawn.append(drawing.draw_ellipse(
                 filename, cell_rect.x + cell // 2, cell_rect.y + cell // 2,
                 cell // 2 - inset, cell // 2 - inset, color, filled=True
-            )
+            ))
         else:
-            drawing.draw_rectangle(
+            drawn.append(drawing.draw_rectangle(
                 filename, cell_rect.x + inset, cell_rect.y + inset,
                 cell - 2 * inset, cell - 2 * inset, color, filled=True
-            )
+            ))
         slices.add_slice(filename, nm, cell_rect.x, cell_rect.y, cell_rect.width, cell_rect.height)
-    return inspect.get_sprite_info(filename)
+    return inspect.get_sprite_info(filename), pixel_counters(*drawn)
 
 
 @mcp.tool()
@@ -438,11 +475,14 @@ def create_icon_set(
         remedy="Scaffold a smaller sheet, or split it across several sprites.",
     )
     filename = _aseprite_name(name)
-    info = _grid_sheet(filename, icon_size, [f"icon_{i}" for i in range(count)], columns, "circle")
+    info, counters = _grid_sheet(
+        filename, icon_size, [f"icon_{i}" for i in range(count)], columns, "circle"
+    )
     return workflow_manifest(
         "icon_set",
         sprite=sprite_summary(info),
         created_files=[file_entry("source_sprite", info["path"], "aseprite")],
+        counters=counters,
         suggested_next_actions=[
             "Draw each icon inside its named slice region.",
             f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', "
@@ -468,11 +508,12 @@ def create_rpg_item_sheet(
     if not item_names:
         raise ValidationFailed("items must be non-empty when provided.")
     filename = _aseprite_name(name)
-    info = _grid_sheet(filename, item_size, list(item_names), columns, "rect")
+    info, counters = _grid_sheet(filename, item_size, list(item_names), columns, "rect")
     return workflow_manifest(
         "rpg_item_sheet",
         sprite=sprite_summary(info),
         created_files=[file_entry("source_sprite", info["path"], "aseprite")],
+        counters=counters,
         suggested_next_actions=[
             "Draw each item inside its named slice region.",
             f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', "
@@ -538,8 +579,14 @@ def make_8_direction_walk_template(
         }}
         for i, direction in enumerate(dirs)
     ]
-    for start in range(0, len(ops), MAX_BATCH_OPERATIONS):
+    # The batch manifests are kept rather than discarded so this scaffold reports whatever
+    # the ops wrote (#201). Today the ops are add_frame and add_tag, neither of which
+    # writes a pixel, so the counters come back empty and the fields stay absent; the
+    # merge is here so a scaffold that grows a drawing op cannot silently stop saying so.
+    batched = [
         batch.apply_operations(filename, ops[start:start + MAX_BATCH_OPERATIONS])
+        for start in range(0, len(ops), MAX_BATCH_OPERATIONS)
+    ]
     # Frames that already existed keep their own durations otherwise, so this still
     # runs. It stays a single Lua-side loop rather than one op per frame: one launch
     # either way, and it does not grow the batch with the sprite's existing frames.
@@ -556,9 +603,308 @@ def make_8_direction_walk_template(
             "duration_ms": frame_duration_ms,
             "tags": [t["name"] for t in final["tags"]],
         },
+        counters=pixel_counters(*batched),
         suggested_next_actions=[
             "Draw each direction's walk frames under its tag.",
             f"Validate it's game-ready: validate_sprite_for_game_export('{filename}', required_tags={dirs}).",
             f"Export per direction: export_tags('{filename}', 'walk/{{tag}}_{{frame}}.png').",
+        ],
+    )
+
+
+# ============================================================ scaffold_cycle (#91 item 2)
+class _Cycle(NamedTuple):
+    """One animation kind's conventions, as animators actually author it.
+
+    Every number is from the conventions recorded in #91 rather than from taste: `default`
+    is the first count the issue names for the kind and `convention` is the range it names,
+    which is the range the warning quotes.
+
+    `loops` is the one field that is a correctness claim rather than a preference. An
+    attack, a hurt and a death do not wrap, and the file's own answer to that is a tag's
+    `repeats` (0 means forever, 1 is a one-shot). `validate_loop` reads exactly that
+    field, so a one-shot scaffolded as a loop is not cosmetic: it makes the checker treat
+    a held final pose as a duplicated seam frame and report an error about a wrap that
+    does not exist.
+    """
+
+    default: int
+    convention: tuple[int, int]
+    loops: bool
+    curve: str
+    base_ms: int
+    # A walk and a run are the same poses twice, once per leg, so their pose list below is
+    # per step and gets an L/R suffix. Everything else runs straight through once.
+    stepped: bool
+    poses: tuple[str, ...]
+    extra_poses: tuple[tuple[str, int], ...]
+    # Shape the two curves that the curve itself cannot know about: a hurt is a flash and
+    # then a held recovery, a death slows to a stop on a pose that stays on screen.
+    snap_first: bool = False
+    hold_last: bool = False
+
+
+# `poses` is the kind's pose list at its default count; `extra_poses` are inserted one at a
+# time, in this order and at these indices into the list as it has grown so far, one per
+# frame above the default; and the list is trimmed from the tail for each frame below it.
+# So the default count gives exactly one frame per named pose, and every count in the
+# convention's range still gets its poses named from one small table. The tail is the right
+# end to trim, because the tail is what a shorter take loses: a 5-frame death drops
+# `settle`/`still`, not the impact.
+_CYCLES: dict[str, _Cycle] = {
+    # 8 is the convention: contact, down, pass, up for each leg. 6 is the budget option
+    # (it drops the `up` pose) and 4 only reads as a walk mirrored on a side view.
+    "walk": _Cycle(8, (4, 8), True, "hold_extremes", 100, True,
+                   ("contact", "down"), (("pass", 2), ("up", 3))),
+    # A run is quicker and shorter than a walk, and the flight pose is what makes it a
+    # run, so `air` is in the base list and `push` is what the 8-frame version adds.
+    "run": _Cycle(6, (6, 8), True, "hold_extremes", 70, True,
+                  ("contact", "air"), (("down", 1), ("push", 2))),
+    "idle": _Cycle(4, (4, 6), True, "hold_extremes", 150, False,
+                   ("rest", "rise", "peak", "fall"), (("hold", 3), ("settle", 5))),
+    "attack": _Cycle(5, (5, 7), False, "attack", 80, False,
+                     ("anticipation", "swing", "impact", "recoil", "recover"),
+                     (("windup", 1), ("hold", 4))),
+    "hurt": _Cycle(2, (2, 3), False, "ease_out", 80, False,
+                   ("impact", "recover"), (("reel", 1),), snap_first=True),
+    "death": _Cycle(6, (6, 10), False, "ease_out", 90, False,
+                    ("impact", "stagger", "fall", "land", "settle", "still"),
+                    (("reel", 2), ("bounce", 4), ("knees", 3), ("fade", 8)),
+                    hold_last=True),
+}
+
+
+def _poses(spec: _Cycle, count: int) -> list[str]:
+    """`count` pose names for one pass of `spec` (one step, for a stepped kind).
+
+    Past the table's own length the extras run out and the remaining poses are numbered,
+    which is the case the out-of-convention warning is about: a 12-frame walk is not a
+    walk anybody has named poses for.
+    """
+    names = list(spec.poses)
+    for name, at in spec.extra_poses:
+        if len(names) >= count:
+            break
+        names.insert(at, name)
+    while len(names) < count:
+        names.append(f"pose{len(names) + 1}")
+    return names[:count]
+
+
+def _phases(spec: _Cycle, count: int) -> list[str]:
+    """The phase name for each of `count` frames, in order."""
+    if not spec.stepped:
+        return _poses(spec, count)
+    # The left step takes the extra frame on an odd count, so a 7-frame walk is a 4-pose
+    # step followed by a 3-pose one rather than silently dropping a frame.
+    left = (count + 1) // 2
+    return ([f"{pose}L" for pose in _poses(spec, left)]
+            + [f"{pose}R" for pose in _poses(spec, count - left)])
+
+
+@mcp.tool()
+def scaffold_cycle(
+    filename: str,
+    kind: str,
+    frames: int | None = None,
+    base_ms: int | None = None,
+) -> dict:
+    """Scaffold one animation cycle: its frames, a tag per phase, and a shaped timing curve.
+
+    `kind` is `walk`, `run`, `idle`, `attack`, `hurt` or `death`, and it settles the four
+    things a scaffolded animation otherwise gets wrong:
+
+    * **The frame count.** walk 8 (6 is the budget option, and 4 only reads as a walk
+      mirrored on a side view), run 6, idle 4, attack 5, hurt 2, death 6. A count outside
+      the kind's conventional range is accepted with a warning rather than refused.
+    * **A tag per phase, named for the pose rather than numbered.** An 8-frame walk gets
+      `walk_contactL`, `walk_downL`, `walk_passL`, `walk_upL` and the same four for the
+      right step, plus a `walk` tag over the whole cycle, so the frame you are drawing on
+      says what it is meant to be.
+    * **Non-uniform durations from the start**, via `apply_timing_curve`: a cycle holds
+      its extremes, an attack snaps through the strike, a hurt flashes and then holds the
+      recovery, a death slows to a stop on a held last pose. Uniform timing is the
+      placeholder every animation starts with and almost none should keep.
+    * **Loop versus one-shot.** An attack, a hurt and a death do not wrap, so every tag
+      they get is written with `repeats=1` instead of being left at 0 ("play forever").
+      That field is what `validate_loop` reads, so a one-shot tagged as a loop makes the
+      checker report a duplicated seam frame on an animation that has no seam.
+
+    Frames are copies of frame 1, there to draw over. Nothing already in the sprite is
+    deleted, but Aseprite inserts a copied frame rather than appending it, so on a sprite
+    that already has several frames the new ones land at the front and the existing ones
+    end up at the end of the cycle; the manifest warns when that happens. Frames past the
+    cycle are left untagged and untimed, with a warning saying which.
+
+    Args:
+        kind: walk | run | idle | attack | hurt | death.
+        frames: Override the kind's default frame count.
+        base_ms: The duration of a passing frame; every other duration is a multiple of
+            it. Defaults per kind, because a run passes through its poses faster than an
+            idle breathes.
+
+    Returns a ``workflow_manifest.v1`` manifest (kind ``animation_cycle``) whose
+    `animation` section lists every phase with the frame, tag, duration, timing role and
+    repeat count it ended up with, read back off the saved sprite rather than restated
+    from what was asked for.
+    """
+    spec = _CYCLES.get(kind)
+    if spec is None:
+        raise ValidationFailed(
+            f"bad value for 'kind': {kind!r}; expected one of {', '.join(_CYCLES)}."
+        )
+    # MAX_FRAMES_PER_DIRECTION rather than a cap of its own: its comment is already about
+    # exactly this number ("a hand-drawn walk cycle is 4-12 frames; 32 covers the most
+    # detailed run cycle"), and a second constant carrying the same justification is a
+    # second thing to keep in step. Renaming it belongs in core/limits.py.
+    count = spec.default if frames is None else check_count(
+        "frames", frames, MAX_FRAMES_PER_DIRECTION, minimum=1,
+        remedy="Scaffold the cycle and extend it with add_frame if it really needs more.",
+    )
+    base = spec.base_ms if base_ms is None else int(base_ms)
+
+    warnings: list[str] = []
+    low, high = spec.convention
+    if not low <= count <= high:
+        warnings.append(
+            f"a {kind} is conventionally {low} to {high} frames and this one is {count}. "
+            f"The poses are named for {spec.default}; outside the range the extra phases "
+            f"come out numbered rather than named."
+        )
+
+    phases = _phases(spec, count)
+    phase_tags = [f"{kind}_{phase}" for phase in phases]
+    # Measured while checking the tables: `hold_extremes` holds frames 1 and count//2+1,
+    # and on a stepped kind the second contact is at (count+1)//2+1. Those agree only for
+    # an even count. A 5-frame walk therefore comes out with the hold on `passL` (frame 3)
+    # while the contacts are frames 1 and 4, which is the one case where the durations and
+    # the phase names disagree, so it is said out loud rather than left to be noticed.
+    if spec.stepped and count % 2:
+        warnings.append(
+            f"{count} frames is an odd count for a {kind}, so the two steps are uneven "
+            f"({(count + 1) // 2} frames then {count // 2}) and the held extremes land on "
+            f"frames 1 and {count // 2 + 1} while the contacts are frames 1 and "
+            f"{(count + 1) // 2 + 1}. Re-time with apply_timing_curve(..., "
+            f"hold_frames=[1, {(count + 1) // 2 + 1}]) if that matters."
+        )
+
+    info = inspect.get_sprite_info(filename)
+    # Aseprite will happily hold two tags with one name, and then neither can be addressed
+    # by it: `remove_tag`, `set_tag` and `export_tag_gif` each find a tag by name and
+    # would pick whichever came first. Refused rather than scaffolded into that state.
+    clash = sorted({t["name"] for t in info["tags"]}.intersection([kind, *phase_tags]))
+    if clash:
+        raise ValidationFailed(
+            f"the sprite already has tag(s) {clash}, which this scaffold would duplicate; "
+            "Aseprite allows two tags with one name and then neither can be addressed by "
+            "it. Remove them with remove_tag first, or scaffold into a new sprite."
+        )
+    if info["frameCount"] > count:
+        warnings.append(
+            f"the sprite has {info['frameCount']} frames and a {kind} is {count}, so "
+            f"frames {count + 1}-{info['frameCount']} are left untagged and untimed."
+        )
+    # Measured, and surprising enough to be worth saying out loud: `add_frame(copy_from=1)`
+    # does not append. Aseprite's `newFrame(n)` inserts at n, so the call reports
+    # `newFrame: 1` and every frame that was already there shifts right. On a sprite
+    # holding a red frame 1 and a blue frame 2, one `add_frame(copy_from=1)` produced
+    # red, red, blue. `make_8_direction_walk_template` has always behaved this way for the
+    # same reason, and the fix belongs in `tools/frames.py` and `core/oplib.py` rather
+    # than in a scaffold working around it, so this reports the consequence instead.
+    if info["frameCount"] > 1 and info["frameCount"] < count:
+        warnings.append(
+            f"the sprite already had {info['frameCount']} frames and the new ones are "
+            f"inserted at frame 1 (Aseprite's newFrame inserts rather than appends), so "
+            f"what was drawn is now at the end of the cycle. Reorder with move_frame, or "
+            f"scaffold onto a single-frame sprite."
+        )
+
+    # Launch count: one read, one batch for the frames, one per tag, two for the timing
+    # curve (it reads the spacing before it writes), and one read back. An 8-frame walk is
+    # 14 launches, measured end to end at 3.4s on this machine (0.234s a launch).
+    #
+    # The tags are a launch each because `core/oplib.py`'s `add_tag` operation takes
+    # name/from/to/direction/color and *not* `repeats`, so a one-shot cannot be written
+    # inside the batch at all. Writing every tag the same way is the price of not having
+    # two paths where only one of them can state the loop verdict: a cycle's `repeats=0`
+    # is then a fact this tool wrote rather than Aseprite's default inherited by accident.
+    # Adding `repeats` to that op spec would collapse all of them into the frame batch.
+    missing = max(0, count - info["frameCount"])
+    if missing:
+        batch.apply_operations(
+            filename,
+            [{"op": "add_frame", "args": {"duration_ms": base, "copy_from": 1}}
+             for _ in range(missing)],
+        )
+
+    repeats = 0 if spec.loops else 1
+    tags.add_tag(filename, kind, 1, count, "forward", repeats=repeats)
+    for number, phase_tag in enumerate(phase_tags, start=1):
+        tags.add_tag(filename, phase_tag, number, number, "forward", repeats=repeats)
+
+    timed = animation.apply_timing_curve(
+        filename,
+        curve=spec.curve,
+        frames=list(range(1, count + 1)),
+        base_ms=base,
+        hold_frames=[count] if spec.hold_last else None,
+        snap_frames=[1] if spec.snap_first else None,
+    )
+    warnings += timed["warnings"]
+
+    final = inspect.get_sprite_info(filename)
+    # Read back rather than restated: the repeat counts below are what the file says after
+    # the save, which is the only form of "this is a one-shot" an engine or `validate_loop`
+    # will ever see.
+    saved = {t["name"]: t for t in final["tags"]}
+    cycle_repeats = saved.get(kind, {}).get("repeats", 0)
+
+    # No `counters=`: a cycle scaffold adds frames, tags and durations. Copying a frame,
+    # naming a tag and setting a duration all leave `img_set` alone, so the harness has no
+    # pixels to report and the fields are absent by measurement (#201).
+    return workflow_manifest(
+        "animation_cycle",
+        sprite=sprite_summary(final),
+        created_files=[file_entry("source_sprite", final["path"], "aseprite")],
+        animation={
+            "kind": kind,
+            "tag": kind,
+            "frames": list(range(1, count + 1)),
+            "loops": cycle_repeats == 0,
+            "repeats": cycle_repeats,
+            "curve": spec.curve,
+            "base_ms": base,
+            "durations_ms": timed["durations_ms"],
+            "total_duration_ms": timed["total_duration_ms"],
+            "phases": [
+                {
+                    "frame": number,
+                    "phase": phase,
+                    "tag": phase_tag,
+                    "duration_ms": duration,
+                    "role": role,
+                    "repeats": saved.get(phase_tag, {}).get("repeats", 0),
+                }
+                for number, phase, phase_tag, duration, role in zip(
+                    range(1, count + 1), phases, phase_tags,
+                    timed["durations_ms"], timed["roles"], strict=True,
+                )
+            ],
+        },
+        warnings=warnings,
+        suggested_next_actions=[
+            f"Draw one pose per frame; the tags name them, {phase_tags[0]} to "
+            f"{phase_tags[-1]}.",
+            f"Move the character through it: offset_cels('{filename}', <layer>, "
+            f"{list(range(1, count + 1))}, dx=..., dy=...).",
+            f"Link a pose that genuinely repeats: link_cels('{filename}', <layer>, "
+            "[<frames>]).",
+            f"Re-time it once the poses exist: apply_timing_curve('{filename}', "
+            f"curve='{spec.curve}', tag='{kind}').",
+            # Not yet: every frame is a copy of frame 1, so a fresh scaffold fails this
+            # check on identical adjacent frames by construction. It is the check for
+            # after the poses are drawn, which is what makes it worth naming here.
+            f"Once the poses are drawn, check it: validate_loop('{filename}', "
+            f"tag='{kind}').",
         ],
     )
