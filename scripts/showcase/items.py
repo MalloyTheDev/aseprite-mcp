@@ -17,6 +17,7 @@ it were form. Several parts refuse a form and are lit by hand, and every one of 
 refusals is correct: a 2px shield rim, a 3px key shank and a 6px ward have no interior for
 a distance field to describe, and inventing one would be drawing rather than shading.
 """
+import colorsys
 import math
 
 from aseprite_mcp.tools import (
@@ -35,10 +36,34 @@ CELL, SIZE, COUNT = 40, 40, 5
 NAME = "items.aseprite"
 OUTLINE = "#191326"
 LIGHT = 128.0
+# One chroma rule for the whole sheet: no ramp runs below the reference band, and a ramp
+# whose base is already more saturated than that keeps its own saturation.
+#
+# `generate_ramp` rotates hue but never creates saturation, which it inherits from the
+# base colour. So a base picked for its *value*, which is how a base gets picked ("steel
+# is grey", so `#7d8aa8`), builds a ramp that rotates a hue nothing can see. Measured on
+# the draft: STEEL ran 0.353 HSV saturation down to 0.008, so its top three steps were
+# literally neutral grey and white, and it carried three of the five items including all
+# of the helm, while WOOD still held 0.521 at its top step. Half the sheet read as
+# hue-shifted wood and half as grey plastic, and that split was an accident of which base
+# colours happened to be saturated, not a decision anybody made.
+#
+# `chroma` is the fix: it sets the saturation the ramp holds, in place of the base's own.
+# Reference work in this style runs its apparent greys at 0.17 to 0.30, so the floor sits
+# at the middle of that band. A floor rather than a flat value on purpose: gold and paint
+# are *meant* to out-saturate steel, and pinning every ramp to one number would have cost
+# the crest and the shield face the only chroma on the sheet to fix a problem neither had.
+CHROMA_FLOOR = 0.26
+
+
+def saturation(colour):
+    """HLS saturation, which is the measure `chroma` and `sat_floor` both speak in."""
+    r, g, b = (int(colour[k:k + 2], 16) / 255.0 for k in (1, 3, 5))
+    return colorsys.rgb_to_hls(r, g, b)[2]
 
 
 def ramp(base, *, hue=-30.0, sat=-14.0, light=0.82, steps=9):
-    """A nine-step ramp, with the one check that matters: no step may clip.
+    """A nine-step ramp, with the two checks that matter: no step may clip or go grey.
 
     `generate_ramp` walks lightness out from the base in both directions and clamps at the
     ends, so a base already near white spends its top three steps on white. That is not a
@@ -46,14 +71,31 @@ def ramp(base, *, hue=-30.0, sat=-14.0, light=0.82, steps=9):
     sheet outright on the first run: a glint has to be brighter than the lit side, and a
     ramp whose lit side is already white leaves nowhere brighter to go. Every base below is
     mid-value for that reason, not for its own sake.
+
+    The second check is the chroma floor. The ends clamp to black and white by design and
+    carry no saturation at all once they do, so it is asserted over the seven interior
+    steps, which are the ones any of this art is actually drawn with.
     """
     colors = palette.generate_ramp(base, steps=steps, hue_shift=hue,
-                                   saturation_shift=sat, light_range=light)["colors"]
+                                   saturation_shift=sat, light_range=light,
+                                   chroma=max(CHROMA_FLOOR, saturation(base)))["colors"]
     assert len(set(colors)) == steps, f"{base} at light_range={light} clips: {colors}"
+    greyest = min(saturation(c) for c in colors[1:steps - 1])
+    assert greyest >= 0.17, f"{base} bottoms out at {greyest:.3f} saturation, a grey"
     return colors
 
 
-STEEL = ramp("#7d8aa8", hue=-22.0, sat=-26.0)
+# `light=0.70`, not the 0.82 the rest of the sheet takes, and the glints are the reason.
+# At 0.82 the top step is `#fafbfc`, relative luminance 251, and both the blade's lit edge
+# and the helm's lit side were painted with it; `specular_highlight` puts a glint where the
+# surface best faces the light, which is exactly there, so this sheet's steel "glints" were
+# `#ffffff` against 251. A 4-in-255 difference is not a glint, it is a rounding error.
+# Pulling the top step down to `#e7ecf0`, luminance 235, is worth doing here and nowhere
+# else because it is free: the helm sweep below measured light_range to have *no* effect on
+# how the form pass breaks into blocks, only on which colours those blocks get, so this
+# buys the helm's glint 20 points of contrast and the blade's 44 and costs the ramp
+# nothing but 12% of a span the helm was not using.
+STEEL = ramp("#7d8aa8", hue=-22.0, sat=-26.0, light=0.70)
 BRONZE = ramp("#8a6a3a", hue=-20.0, sat=-18.0, light=0.78)
 BRASS = ramp("#e0a33c", hue=-22.0)
 GOLD = ramp("#f2b632", hue=-24.0)
@@ -102,40 +144,91 @@ def band(points, keep):
 
 
 # ======================================================================= 1. longsword
-# A long blade with a seven-row taper. The guard overlaps its last two rows, so the blade
-# comes out of the guard rather than balancing on it.
+# A long blade with a six-row taper, ending on the guard's quillon row so it meets the
+# guard between the two tips rather than balancing on top of the bar.
+#
+# **The blade must stop above the bar, and the reason is the painting order, not the
+# drawing.** `BLADE_SECTION` in step 3 repaints every blade pixel at or below
+# `BLADE_FULL_FROM`, long after the guard went down over it, so a blade row that reaches
+# into the bar is a blade row that comes back out on top of it: run one row too far, and
+# seven columns of steel punch straight through the middle of the crossguard.
 # Narrower and much longer than the draft, which gave 22 rows of 9px blade to 18 rows of
 # hilt. 54% blade at a 1 to 2.3 aspect is a spearhead, and at inventory size it read as a
 # crystal shard on a stick. 27 rows to 11 is 71%, which is roughly what a longsword is, and
 # the hilt is as compact as three readable parts can be in a 40px cell.
+# Three rows lower at the top and three shorter at the bottom than the draft, which ran
+# rows 0 to 39 of a 40-row cell against 31, 33, 34 and 32 for the other four items: the
+# hero item was 6 to 9 rows taller than its neighbours and had no bleed margin at all, on
+# either edge. Nothing caught it, because the sheet asserted that the five items agree on
+# a centre line and never once asked how tall they are. They did agree on a centre, which
+# is how a sword touching both edges of its cell passed. `EXTENTS` at the bottom is that
+# missing assertion.
 BLADE = {
-    1: [(0, 0)], 2: [(-1, 1)], 3: [(-1, 1)], 4: [(-2, 2)], 5: [(-2, 2)], 6: [(-2, 2)],
-    **{y: [(-3, 3)] for y in range(7, 28)},
+    4: [(0, 0)], 5: [(-1, 1)], 6: [(-1, 1)], 7: [(-2, 2)], 8: [(-2, 2)], 9: [(-2, 2)],
+    **{y: [(-3, 3)] for y in range(10, 27)},
 }
 # The blade's cross section, by column, because a blade is a prism and not a dome.
 # `shade_region_by_light` describes a rounded form, and on the draft's blade it produced a
 # soft left-to-right gradient with no edge anywhere in it. These are ramp steps for dx -3
-# to 3: a bright lit edge, a lit bevel, a dark groove down the middle, a shadowed bevel and
-# a rim light catching the far edge. The groove is darker than the bevels either side,
-# which is what makes a fuller read as cut into the steel rather than drawn on it.
-BLADE_SECTION = {-3: 8, -2: 6, -1: 7, 0: 3, 1: 4, 2: 2, 3: 5}
-BLADE_FULL_FROM = 7
+# to 3: a bright lit edge, a lit bevel, the fuller's two walls either side of its floor, a
+# shadowed bevel and a rim light catching the far edge.
+#
+# **Every reversal in here has to name the geometry that causes it**, and the draft's did
+# not. Measured left to right, the draft read 251, 196, 224, 108, 137, 83, 167 in relative
+# luminance: three reversals in seven columns, and the first of them sat on the lit side,
+# between the lit edge and the groove, where the blade is one flat bevel with nothing to
+# turn. Repeated identically down twenty full-width rows, which is what made it read as a
+# pattern rather than as a surface. This section keeps two reversals and both are real: the
+# fuller is *concave*, so its far wall tips back toward the light and comes up a step from
+# the floor, and the far edge takes a rim light. The lit side now falls monotonically,
+# 211 to 187 to 134 to 87, because a flat plane turning away from a light does that.
+#
+# **It also stops one step short of the ramp.** The lit edge was `STEEL[8]`, `#fafbfc` at
+# luminance 251, and the glint `specular_highlight` lands on this blade is `#ffffff` at
+# 255: a 4-in-255 difference, which is not a glint, it is a rounding error. The top step
+# is reserved for the glint to be brighter than, here and on the helm, which is the
+# arrangement `specular_highlight` documents and the draft had quietly spent.
+BLADE_SECTION = {-3: 7, -2: 6, -1: 4, 0: 2, 1: 3, 2: 1, 3: 4}
+BLADE_FULL_FROM = 10
 # The taper is too narrow to carry seven columns, so it takes a two-tone split instead.
-TAPER_LIT, TAPER_DARK = 7, 4
+# A step below the full section's lit edge, for the same reason: the glint lands in the
+# taper, and the tip of a blade is not the brightest thing on it once a glint is there.
+TAPER_LIT, TAPER_DARK = 6, 3
 # Quillons: two pixels standing clear of the bar at each end, which is what turns a
 # crossbar into a guard.
+# A two-row bar rather than the draft's three, which is what buys the compressed hilt a
+# grip that still reads. The quillon rows above and below it carry the guard's height.
 GUARD = {
-    27: [(-11, -10), (10, 11)],
-    28: [(-11, 11)], 29: [(-11, 11)], 30: [(-11, 11)],
-    31: [(-11, -10), (10, 11)],
+    26: [(-11, -10), (10, 11)],
+    27: [(-11, 11)], 28: [(-11, 11)],
+    29: [(-11, -10), (10, 11)],
 }
 # The bar's own bottom row, darkened by hand. A guard is a slab seen edge on, and the
 # dome the shading pass describes has no reason to put a hard edge where the slab ends.
-GUARD_EDGE = {30: [(-9, 9)]}
-GRIP = {y: [(-2, 2)] for y in range(31, 36)}
-# The cord binding the grip, in the sheet's one accent colour.
-WRAP = {32: [(-2, 2)], 34: [(-2, 2)]}
-POMMEL = {36: [(-3, 3)], 37: [(-4, 4)], 38: [(-3, 3)]}
+#
+# **Broken around the grip's five columns, which is also a bug fix.** Ruled straight
+# across, this row put `BRASS[1]` directly above the grip, and the band-boundary cleanup
+# then found the grip's top right pixel surrounded on three sides by darker neighbours and
+# resolved it to the brass. The result was one orphan `#70590f` pixel at cell-local
+# (22,31), a brass drip running onto the leather, which `remove_stray_pixels` could not
+# remove because brass is on its protect list and the material assertion could not see
+# because brass is legal in the sword's cell. Breaking the row is the honest drawing
+# anyway: the grip's tang passes up through the guard, so the guard's bottom edge is
+# interrupted where it crosses rather than ruled behind it.
+GUARD_EDGE = {28: [(-9, -3), (3, 9)]}
+# Starting on the quillon row, **not** on a bar row. Started a row higher, the grip's five
+# columns overpaint the middle of the bar's bottom row, and a crossguard with a brown block
+# punched through the centre of it reads as damage rather than as a grip: the bar's whole
+# job is to be one unbroken horizontal, and the quillon row below it is where the grip is
+# meant to pass through.
+GRIP = {y: [(-2, 2)] for y in range(29, 33)}
+# The cord binding the grip, in the sheet's one accent colour. One band, not the two the
+# draft had: the hilt is three rows more compact now, and two dark bands across a four-row
+# grip left one row of visible leather between the guard and the pommel, so two brass
+# masses met across a dark smear and the grip stopped reading as a part at all. One band
+# leaves three, which is what the draft's taller grip showed.
+WRAP = {31: [(-2, 2)]}
+POMMEL = {33: [(-3, 3)], 34: [(-4, 4)], 35: [(-3, 3)]}
 
 # ======================================================================= 2. kite shield
 # A heater: a wide flat top, sides that fall straight and then draw in two pixels at a
@@ -195,8 +288,17 @@ BOW_HOLE = {8: [(-1, 1)], 9: [(-2, 2)], 10: [(-1, 1)]}
 SHANK_LIT = {y: [(-1, -1)] for y in range(16, 36)}
 SHANK_MID = {y: [(0, 0)] for y in range(16, 36)}
 SHANK_DARK = {y: [(1, 1)] for y in range(16, 36)}
-WARDS = {28: [(2, 7)], 29: [(2, 7)], 30: [(2, 7)],
-         32: [(2, 5)], 33: [(2, 5)], 34: [(2, 5)]}
+# Two wards, and they are declared as two shapes rather than one six-row dict, because
+# lighting them together is what went wrong. `hand_lit` takes the minimum and maximum y
+# over whatever it is handed, so one call covering both slabs lit the top of the upper ward
+# and darkened the bottom of the lower one and nothing else: rows 29, 30, 32 and 33, which
+# is 20 of the 30 ward pixels, stayed at the raw `#8a6a3a` flat fill. The lower ward had no
+# lit top edge and the upper no shadowed bottom, so the two teeth never separated in value
+# and the key read as one forked blob. `edge_lit`'s own docstring below calls this exact
+# failure damning when it happened to the shield's rim; the lesson was learned once, on
+# another part, and not carried across.
+WARD_UPPER = {28: [(2, 7)], 29: [(2, 7)], 30: [(2, 7)]}
+WARD_LOWER = {32: [(2, 5)], 33: [(2, 5)], 34: [(2, 5)]}
 
 # ======================================================================= 5. spell scroll
 # One roll at the top with the sheet hanging open below it, curling back on itself at the
@@ -208,7 +310,13 @@ TOP_ROLL = {4: [(-11, 11)], **{y: [(-13, 13)] for y in range(5, 8)}, 8: [(-11, 1
 # to a `WOOD` step, brightest a third of the way down, which is where the light hits a
 # cylinder and never at its top edge.
 ROLL_BANDS = {4: 3, 5: 6, 6: 7, 7: 4, 8: 2}
-ROLL_CAPS = {y: [(-13, -12), (12, 13)] for y in range(5, 8)}
+# The two end caps, and they are *not* the same colour, which the draft made them: one
+# `WOOD[2]` over both ends is mirror-symmetric lighting on a cylinder, and a cylinder lit
+# from 128 degrees has a near end turned toward the light and a far end turned away. Two
+# steps apart either side of the step the draft used, so the roll keeps its value and
+# gains an axis.
+ROLL_CAP_LIT = {y: [(-13, -12)] for y in range(5, 8)}
+ROLL_CAP_DARK = {y: [(12, 13)] for y in range(5, 8)}
 # Pinched where the ribbon binds it and flaring below, which is what a tied scroll does and
 # what finally gives this item an outline. Two drafts of it were a rectangle in a square
 # cell: every other item on this sheet is recognisable from its silhouette alone, and the
@@ -248,7 +356,7 @@ def flat(points, colour):
         drawing.draw_pixels(NAME, pts(points), colour)
 
 
-def form(base, band_ramp, *, rim=0.20, bulge=1.0, light_z=0.62):
+def form(base, band_ramp, *, rim=0.20, bulge=1.0, light_z=0.62, ambient=0.30):
     """One shading pass per part, scoped by the exact colour that part was filled with.
 
     `tolerance=1.0`, not the default 24, and that is the whole difference between this
@@ -260,21 +368,48 @@ def form(base, band_ramp, *, rim=0.20, bulge=1.0, light_z=0.62):
     One call can still cover several parts, and does: a mask with two disconnected parts
     gets a distance field that describes each on its own, so the sword's grip and the
     scroll's rolls come out as two rods rather than as one smear.
+
+    `ambient` is exposed because the helm needed it, and because the obvious fix for the
+    helm was measured and rejected. Its shadow side was one 4-connected region of 202
+    pixels with no second value anywhere inside it, and `shade_region_by_light` has a
+    `fill_angle` argument documented for exactly that complaint. Swept over 36 combinations
+    of ramp length, fill, rim and ambient against this silhouette alone, counting values
+    and the largest single-colour block each time, a fill light did not fix it. The three
+    that matter, on a 563-pixel helm:
+
+      rim 0.16, ambient 0.30, no fill   6 values, largest block 209 px, shadow 210 px / 1 value
+      rim 0.16, ambient 0.30, fill 0.40 5 values, largest block 173 px, shadow   0 px / 0 values
+      rim 0.32, ambient 0.22, no fill   7 values, largest block  89 px, shadow 188 px / 2 values
+
+    The fill shrank the flat block and cost a value doing it, and it did something worse
+    than that: at 0.40 there was no shadow side left at all, because a fill lifts the whole
+    unlit side by roughly a constant and every pixel of this one came up past the colour it
+    was filled with. A shadow that has been lifted out of existence is not a described
+    shadow. Raising the rim and lowering the ambient floor won on all three counts at once,
+    which is the honest reading of it: the bounce the helm wanted was a rim light, and the
+    room to put it in came from dropping the floor, not from adding a second lamp.
     """
     shading.shade_region_by_light(NAME, band_ramp, base_color=base, light_angle=LIGHT,
-                                  light_z=light_z, ambient=0.30, rim=rim, bulge=bulge,
+                                  light_z=light_z, ambient=ambient, rim=rim, bulge=bulge,
                                   tolerance=1.0)
 
 
-def hand_lit(points, band_ramp, *, lit=6, dark=2):
+def hand_lit(points, band_ramp, *, lit=7, mid=5, dark=2):
     """Light a slab with no interior: the top row takes the key, the bottom row loses it.
 
     Right for something flat seen edge on, like a ward on a key. Wrong for anything that
     wraps, which is what `edge_lit` is for.
+
+    **One slab per call.** This reads a global minimum and maximum y, so handing it two
+    disconnected slabs lights the top of the upper one and the bottom of the lower one and
+    leaves everything between them flat. `mid` is the other half of the same lesson: a
+    three-row slab whose middle row is left at the fill colour is two lit rows and a hole,
+    so every row of it gets a value and none of them is the colour it was filled with.
     """
     if not points:
         return
     top, bottom = min(y for _, y in points), max(y for _, y in points)
+    flat(band(points, set(range(top + 1, bottom))), band_ramp[mid])
     flat(band(points, {top}), band_ramp[lit])
     flat(band(points, {bottom}), band_ramp[dark])
 
@@ -348,7 +483,8 @@ crest = rows(HELM_X, CREST)
 
 bow = rows(KEY, BOW)
 shank = rows(KEY, SHANK_LIT) | rows(KEY, SHANK_MID) | rows(KEY, SHANK_DARK)
-wards = rows(KEY, WARDS)
+ward_upper, ward_lower = rows(KEY, WARD_UPPER), rows(KEY, WARD_LOWER)
+wards = ward_upper | ward_lower
 
 roll = rows(SCROLL, TOP_ROLL)
 parchment = rows(SCROLL, PARCHMENT)
@@ -369,7 +505,14 @@ flat(parchment | curl, PARCH[4])
 flat(ribbon, RIBBON[4])
 
 # 2. form, before any detail
-form(STEEL[3], STEEL, rim=0.16, light_z=0.5)
+# The helm, and the one pass here that is tuned rather than defaulted. It is the largest
+# single smooth surface on the sheet and the only one whose shadow side is big enough to
+# need describing rather than merely darkening: the shield's is broken up by its cross, and
+# the grip, the rolls and the bow are all small enough that `ambient` covers them in a
+# pixel or two. The twice-the-default rim is the bounce and the lowered ambient is the room
+# to put it in; `form`'s docstring has the sweep that chose those two numbers over the fill
+# light that looked like the right answer.
+form(STEEL[3], STEEL, rim=0.32, light_z=0.5, ambient=0.22)
 form(BRASS[4], BRASS, bulge=0.8)
 form(WOOD[4], WOOD, bulge=0.8)
 # `PAINT[:8]`, not the whole ramp. With the top step available, a 27px flat face at this
@@ -382,7 +525,9 @@ form(BRONZE[5], BRONZE, rim=0.22)
 # is lit by the direction its edges face; the wards are slabs, so the top row and the
 # bottom row is the whole of what they have to say.
 edge_lit(shield_rim, STEEL)
-hand_lit(wards, BRONZE)
+# One call per ward, for the reason `WARD_UPPER` gives.
+hand_lit(ward_upper, BRONZE)
+hand_lit(ward_lower, BRONZE)
 flat(rows(KEY, SHANK_LIT), BRONZE[6])
 flat(rows(KEY, SHANK_MID), BRONZE[4])
 flat(rows(KEY, SHANK_DARK), BRONZE[2])
@@ -407,20 +552,38 @@ flat(rows(SHIELD_X, RIVETS) & shield_rim, STEEL[8])
 flat(rows(HELM_X, VISOR), STEEL[0])
 flat(rows(HELM_X, BREATHS), STEEL[0])
 raised(crest, GOLD)
-# The roll banded by row, its end caps a step down so it reads as a cylinder with ends.
+# The roll banded by row, its near cap up a step and its far cap down two, so it reads as
+# a cylinder with ends rather than as a tube open at both.
 for y, step in ROLL_BANDS.items():
     flat(band(roll, {y}), WOOD[step])
-flat(rows(SCROLL, ROLL_CAPS) & roll, WOOD[2])
+flat(rows(SCROLL, ROLL_CAP_LIT) & roll, WOOD[3])
+flat(rows(SCROLL, ROLL_CAP_DARK) & roll, WOOD[1])
 # Paper is flat, so it gets four column bands and not a form. Given to
 # `shade_region_by_light`, the pinched silhouette splits the distance field into two lobes
 # and the sheet came out with a blotch of darker tan across its lower right that read as a
 # water stain. Same reasoning as the blade's columns: the tool describes a rounded form,
 # and neither a sheet of paper nor a sword blade is one.
-PAPER_BANDS = ((-7, 7), (-1, 6), (5, 5), (13, 4))
-for edge, step in PAPER_BANDS:
-    flat({(x, y) for x, y in parchment if x - SCROLL - 20 <= edge}, PARCH[step])
-# The curl, lighter than the sheet above it: it is the back of the paper catching the light.
-flat(curl, PARCH[7])
+#
+# **Exclusive ranges, which is the whole fix.** The draft selected `dx <= -7`, then
+# `dx <= -1`, then `dx <= 5`, then `dx <= 13`, so every band was a superset of the one
+# before it and each pass repainted everything its predecessor had just done. The last
+# pass selected the entire sheet and filled it with `PARCH[4]`, which is also the colour
+# the paper was flat-filled with, so four bands of work produced 325 pixels of one dead
+# value, 221 of them in a single connected region across rows 19 to 30, and `PARCH[5]` and
+# `PARCH[6]` appeared nowhere on the sheet at all. A band that selects "everything left of
+# here" has to be written widest-first or bounded on both sides; this one is bounded.
+#
+# Brightest band on the left, because the light is at 128 degrees and this is a flat
+# plane: the side of it facing the light is the side facing the light, and a sheet of paper
+# has no curvature to complicate that.
+PAPER_BANDS = ((-12, -7, 6), (-6, -1, 5), (0, 5, 4), (6, 12, 3))
+for lo, hi, step in PAPER_BANDS:
+    flat({(x, y) for x, y in parchment if lo <= x - SCROLL - 20 <= hi}, PARCH[step])
+# The curl, lighter than the shadow side of the sheet it folds back from: it is the back of
+# the paper catching the light. `PARCH[5]`, not the `PARCH[7]` the draft used. At `PARCH[7]`
+# the curl was 38 pixels of `#fefdfc` at rows 32 and 33, which made the brightest thing in
+# the cell the *bottom* edge of the item, under a light coming from above and to the left.
+flat(curl, PARCH[5])
 flat(band(curl, {min(y for _, y in curl)}), PARCH[2])
 flat(rows(SCROLL, WRITING) & parchment, PARCH[0])
 # The ribbon in flat bands, plus its tail.
@@ -444,6 +607,11 @@ for band_ramp in (PAINT,):
 
 # 5. clean the band boundaries, protecting the one-pixel details that are strays by the
 #    tool's own definition and are meant to be there
+#    The roll's two end caps are *not* on this list, though they are two pixels wide: each
+#    is a solid 2 by 3 block, so no pixel in one is isolated and the tool leaves them
+#    alone. Protecting them by colour instead would have cost more than it bought, because
+#    `WOOD[1]` and `WOOD[3]` are also steps the grip's own shading pass can land on, and
+#    protecting them there spared a single orphan wood pixel on the leather.
 effects.remove_stray_pixels(NAME, protect=[STEEL[8], STEEL[1], STEEL[0], STEEL[6],
                                            GOLD[2], GOLD[7], WOOD[2], WOOD[7],
                                            PARCH[0], PARCH[2], RIBBON[2], BRASS[1]])
@@ -464,7 +632,9 @@ effects.remove_stray_pixels(NAME, protect=[STEEL[8], STEEL[1], STEEL[0], STEEL[6
 #    128 degrees is the shadow side. A rectangle that holds one part and no other is enough
 #    to say which part should shine.
 GLINTS = (
-    ("blade", (SWORD, 0, CELL, 27), STEEL, "#ffffff", 2),
+    # Rows 0 to 25, which stops a row short of the guard's quillons: the rectangle has to
+    # hold the blade and no other part, and the assertion below is what says it does.
+    ("blade", (SWORD, 0, CELL, 26), STEEL, "#ffffff", 2),
     ("shield", (SHIELD_X, 0, CELL, SIZE), PAINT, "#ffffff", 3),
     ("helm", (HELM_X, 0, CELL, SIZE), STEEL, "#ffffff", 3),
     ("bow", (KEY, 0, CELL, 15), BRONZE, "#fff6e4", 2),
@@ -521,6 +691,19 @@ for ox, (item, *band_ramps) in MATERIALS.items():
     print(f"  {item:<7} {len(used):>2} colours, from {len(band_ramps)} "
           f"ramp{'s' if len(band_ramps) > 1 else ''} and nothing else")
 
+# Every paper band asserted present by colour, because the bug it replaces was silent: four
+# passes ran, every one of them reported the pixels it had written, and the sheet came out
+# one flat value with two of its four intended steps nowhere in the image. "The call
+# succeeded" and "the colour is on the canvas" are different claims, and only the second
+# one is worth anything here.
+paper = {p[:7].lower()
+         for row in inspect.get_pixels(NAME, SCROLL, 0, CELL, SIZE)["pixels"]
+         for p in row if not p.endswith("00")}
+missing = [s for *_edges, s in PAPER_BANDS if PARCH[s].lower() not in paper]
+assert not missing, f"paper bands PARCH{missing} were painted over: {sorted(paper)}"
+print("  paper   bands at PARCH steps "
+      + ", ".join(str(s) for *_edges, s in PAPER_BANDS) + ", every one of them present")
+
 # Two more things the eye cannot check, both of them a criterion a review set.
 #
 # The sword has to be mostly blade. The draft was 54% and read as a spearhead, and 54% is
@@ -543,6 +726,20 @@ spread = max(centres.values()) - min(centres.values())
 print("centres: " + "  ".join(f"{i}={c:.1f}" for i, c in centres.items())
       + f"   spread {spread:.1f}")
 assert spread <= 2.0, f"the items' centres span {spread:.1f} rows"
+
+# The check that was missing, and the hole the centre check leaves. Agreeing on a centre
+# says nothing about size: the draft's sword ran rows 0 to 39 of a 40-row cell against 31,
+# 33, 34 and 32 for the other four, so it was 6 to 9 rows taller than everything beside it
+# and touched both edges of its cell, and it centred on 19.5 while doing it. A centred
+# sprite with no bleed margin is the one that clips the moment anything is drawn around it,
+# and a row of items that disagree by nine rows on how big an item is has no scale.
+heights = {item: hi - lo + 1 for item, (lo, hi) in tops.items()}
+extent = max(heights.values()) - min(heights.values())
+margin = min(min(lo for lo, _ in tops.values()), SIZE - 1 - max(hi for _, hi in tops.values()))
+print("heights: " + "  ".join(f"{i}={h}" for i, h in heights.items())
+      + f"   spread {extent}   bleed margin {margin}")
+assert extent <= 4, f"the items' heights span {extent} rows, so the sheet has no scale"
+assert margin >= 1, f"an item reaches within {margin} rows of its cell edge"
 
 export.export_png(NAME, "items.png", scale=5, overwrite=True)
 print("\nwrote items.png")
