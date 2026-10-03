@@ -36,7 +36,7 @@ from pathlib import Path
 
 from ..app import mcp
 from ..core.errors import ValidationFailed
-from ..core.limits import MAX_PIXEL_LIST_LENGTH, check_list_length
+from ..core.limits import MAX_PIXEL_LIST_LENGTH, check_list_length, check_region_size
 from ..core.paths import selection_sidecar
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
@@ -112,6 +112,14 @@ def select_region(
         if not points or len(points) < 3:
             raise ValidationFailed("polygon needs at least 3 points.")
         check_list_length("points", points, MAX_PIXEL_LIST_LENGTH)
+    else:
+        # "rect" and "ellipse" are the shapes built from x/y/width/height, and a
+        # selection is the most expensive thing in this family to leave unbounded: the
+        # stored mask is one bit per pixel of the region *as asked for*, not of the
+        # canvas it is applied to. Measured on a 16x16 sprite, a 100000x4 region writes
+        # a 50,070-byte sidecar and a 100000x100 one writes 1,250,070, so the 1e6 x 1e6
+        # region that used to reach Aseprite was asking it for 125 GB.
+        check_region_size(width, height, x=x, y=y, field="selection region")
 
     src = resolve_path(filename)
     args = {

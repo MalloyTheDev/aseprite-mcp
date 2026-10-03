@@ -6,6 +6,53 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **A value nested past the parser's limit was refused differently on each platform, and
+  not at all when it arrived already parsed** (#215). `MAX_PROPERTY_DEPTH` is enforced by
+  `_check_tree`, which runs after `json.loads`, and `json` walks the nesting in C: how
+  much of that walk fits before the interpreter gives up is a property of the platform
+  rather than of the value, so the same 5,000-deep text was caught by the cap on the CI
+  runners and by a `RecursionError` on Windows. Two guards, two sentences. Both now lead
+  with the same clause, so a caller reads one cap either way.
+
+  The pre-parsed route was unguarded rather than merely worded differently. Some clients
+  parse a JSON-looking argument before the server sees it, so a hitbox sent as
+  `{"x": 8}` arrives as a dict and is encoded on the way in, and that `json.dumps` sat
+  outside the try: the value died as an untyped `RecursionError` with no remedy in it.
+  `_check_tree` stops descending at nine levels and so cannot recurse away itself, which
+  is why it now runs first, and both halves go through one `encode_property_value`.
+  `_coerce_slice_data` held the same unguarded encode one layer earlier, in a
+  `BeforeValidator`, where it failed ahead of any cap. Depth 8 still stores and depth 9
+  still raises the existing message.
+
+- **Three tools took a region with no bound on it, and a negative origin defeated the
+  bound on every tool that had one** (#212). `shift_along_ramp` was the filed case;
+  sweeping the family behaviourally found `gradient_map` with the identical
+  `for yy = ry, ry + rh - 1` loop and `select_region` with something worse. A selection's
+  stored mask is one bit per pixel of the region *as asked for*, not of the canvas it is
+  applied to: measured on a 16x16 sprite, a 100000x4 region writes a 50,070-byte sidecar
+  and a 100000x100 one writes 1,250,070, so the 1e6 x 1e6 region that reached Aseprite
+  was asking it for 125 GB.
+
+  `check_region_size` said that an omitted axis "is already bounded" because the canvas
+  supplies it. What the canvas supplies is `spr.width - rx`, bounded by the canvas *and
+  the origin*, and it is computed at run time, after the check: `x=-1000000` with `width`
+  unset is the same 1e6-wide loop by another route, and it reached Lua on every tool in
+  the family including the three that already called the check with their extent. The
+  origin is now bounded by the same distance, and a region may still overhang the canvas,
+  which is why the check is on a distance rather than on being on-canvas.
+
+  `assess_sprite` was the one route to a palette taking a `ramp` without the
+  `check_list_length` its seven siblings apply. The cost there is linear rather than
+  quadratic, so this is consistency and not a weakness: a cap that holds for seven of
+  eight call sites is a cap nobody can rely on.
+
+  Both families are now asserted registry-wide, because neither gap was introduced by
+  editing a tool. They arrived with new ones, so a new tool that takes a `ramp` or a
+  region fails the suite until it is given the cap or exempted with the reason it needs
+  none.
+
 ## [0.10.0] - 2026-10-02
 
 The release where the results started saying what the calls actually did. Six tools grew a

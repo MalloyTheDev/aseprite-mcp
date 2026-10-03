@@ -25,6 +25,7 @@ from ..core.limits import (
     MAX_SPECULAR_PIXELS,
     check_count,
     check_list_length,
+    check_region_size,
 )
 from ..core.models import FRAME_GUARD_LUA
 from .common import LANDED_LUA, lua_path, parse_color, resolve_path, run_ramp_lua
@@ -105,6 +106,7 @@ def shift_along_ramp(
         )
     if tolerance < 0:
         raise ValidationFailed("tolerance must not be negative.")
+    check_region_size(width, height, x=x, y=y, field="shade region")
 
     args = {
         "src": lua_path(resolve_path(filename)),
@@ -1500,6 +1502,7 @@ def gradient_map(
         raise ValidationFailed(f"bias must be between -1.0 and 1.0; got {bias}.")
     if dither is not None and dither not in ("bayer4", "bayer2", "checker"):
         raise ValidationFailed('dither must be "bayer4", "bayer2" or "checker".')
+    check_region_size(width, height, x=x, y=y, field="map region")
 
     args = {
         "src": lua_path(resolve_path(filename)),

@@ -104,7 +104,7 @@ def stamp_pattern(
         spacing_x, spacing_y: Gap between tiles.
         opacity, blend_mode: Compositing of each tile.
     """
-    check_region_size(width, height, field="pattern region")
+    check_region_size(width, height, x=x, y=y, field="pattern region")
     args = {
         "src": lua_path(resolve_path(filename)),
         "source": lua_path(resolve_path(source)),

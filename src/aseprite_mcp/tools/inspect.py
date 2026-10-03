@@ -12,7 +12,12 @@ from mcp.server.mcpserver import Image
 from ..app import mcp
 from ..core import config, indexed, quality, spritediff
 from ..core.errors import ValidationFailed
-from ..core.limits import MAX_ASSESS_PIXELS, MAX_DIFF_COLORS
+from ..core.limits import (
+    MAX_ASSESS_PIXELS,
+    MAX_COLOR_LIST_LENGTH,
+    MAX_DIFF_COLORS,
+    check_list_length,
+)
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import AsepriteError, run_cli, run_lua
 from .common import lua_path, parse_color, resolve_path
@@ -343,6 +348,14 @@ def assess_sprite(
     Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
     the measurements, so this is cheap to call after every pass.
     """
+    if ramp:
+        # The cap its seven siblings apply, and the only route to a palette that was
+        # missing it. The cost here is linear in the ramp rather than quadratic
+        # (`quality.palette_conformance` builds a set once and then does O(pixels)
+        # membership tests, and the prelude's `ramp_palette_state` is O(ramp x palette)
+        # with the palette capped at 256), so this is consistency and not a weakness: a
+        # cap that holds for seven of eight call sites is a cap nobody can rely on.
+        check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
     src = resolve_path(filename)
     measured = run_lua(_ASSESS_LUA, {
         "src": lua_path(src), "frame": int(frame), "layer": layer,

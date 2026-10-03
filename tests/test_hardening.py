@@ -14,6 +14,7 @@ pre-flight checks, so they are testable (and enforced) on a machine with no Asep
 """
 
 import ast
+import inspect
 import io
 import os
 import pathlib
@@ -21,11 +22,17 @@ import sys
 
 import pytest
 
+from aseprite_mcp import server  # noqa: F401  importing registers every tool
+from aseprite_mcp.app import mcp
 from aseprite_mcp.core import config, limits, metadata
 from aseprite_mcp.core.errors import ExportError, ValidationFailed, WorkspaceError
 from aseprite_mcp.core.paths import ensure_output_pattern, expansion_matches
 from aseprite_mcp.core.runner import _run_bounded, _truncate
 from aseprite_mcp.tools import cels, export, image, slices, sprite, text
+
+# `_tool_manager` is the only place a tool's underlying function is reachable, and
+# the registry-wide groups below call it directly. `list_tools()` is the wire view.
+REGISTERED = {tool.name: tool for tool in mcp._tool_manager.list_tools()}
 
 
 @pytest.fixture
@@ -903,3 +910,140 @@ def test_the_only_f_string_that_becomes_lua_interpolates_an_integer_constant():
         f"the allowlist names {LUA_FSTRING_ALLOWED} but the source has {found}. "
         "Remove the stale entry, so the allowlist cannot outlive what it excuses."
     )
+
+
+# ========= every ramp and every region is bounded before Aseprite is launched =========
+# Registry-wide on purpose. Neither gap was introduced by editing a tool; both arrived
+# with a new one. `assess_sprite` grew a `ramp` without the line its seven siblings
+# have, and `shift_along_ramp`, `gradient_map` and `select_region` take a region without
+# the line the three fill tools have. A test of one example would have caught neither,
+# and the cost of the worst of them was not a slow call: a selection's stored mask is one
+# bit per pixel of the region *as asked for*, not of the canvas, so the 1e6 x 1e6 region
+# that reached Aseprite was asking it for 125 GB.
+#
+# `assemble_script` is intercepted, so "reached Lua" means every pre-flight check passed
+# and the script was handed over. Nothing in this group launches Aseprite.
+
+HUGE = 1_000_000
+
+
+class _ReachedLua(Exception):
+    """The script was assembled, so every pre-flight check passed."""
+
+
+@pytest.fixture
+def no_lua(monkeypatch):
+    """Intercept where Python hands over, so a refusal here is a pre-flight refusal."""
+
+    def reached(*_args, **_kwargs):
+        raise _ReachedLua
+
+    monkeypatch.setattr("aseprite_mcp.core.runner.assemble_script", reached)
+
+
+def _params(name):
+    return inspect.signature(REGISTERED[name].fn).parameters
+
+
+def _is_region_shaped(name):
+    """Takes an origin and an extent, with the extent defaulting to "rest of canvas"."""
+    p = _params(name)
+    return ({"x", "y", "width", "height"} <= set(p)
+            and p["width"].default is None and p["height"].default is None)
+
+
+# Only what each tool needs to get *past* its other validation, so the refusal under
+# test can only be the region's. The baseline case asserts exactly that.
+REGION_TOOLS = {
+    "fill_gradient": {"colors": ["#101010", "#f0f0f0"]},
+    "fill_checkerboard": {"color1": "#101010", "color2": "#f0f0f0"},
+    "stamp_pattern": {"source": "stamp.aseprite"},
+    "gradient_map": {"ramp": ["#101010", "#808080", "#f0f0f0"]},
+    "shift_along_ramp": {"ramp": ["#101010", "#808080", "#f0f0f0"], "steps": -1},
+    "select_region": {},
+}
+
+REGION_CAP_EXEMPT = {
+    # Capped in Lua instead, at `w * h > 4096`, and on the *derived* extent, so it is
+    # bounded by whichever route: a region is refused whether its size was stated or
+    # came from the canvas. It still pays a process launch to refuse an argument Python
+    # could have refused, which is a separate change to make, not a missing bound.
+    "get_pixels",
+    # A slice's bounds are metadata: `sl.bounds = Rectangle(...)` is O(1) and allocates
+    # nothing proportional to the size, so there is no loop or buffer to bound here.
+    "set_slice",
+}
+
+
+def test_the_region_family_is_exactly_the_table(no_lua):
+    """So the next tool that takes a region cannot quietly be the next gap.
+
+    A new tool with this parameter shape fails here until it is either given the cap and
+    listed, or exempted with the reason it needs none.
+    """
+    shaped = {name for name in REGISTERED if _is_region_shaped(name)}
+    assert shaped == set(REGION_TOOLS) | REGION_CAP_EXEMPT
+
+
+@pytest.mark.parametrize("tool_name", sorted(REGION_TOOLS))
+def test_a_valid_region_reaches_lua(tool_name, ws, no_lua):
+    """The teeth for the two cases below: with a sane region these same arguments get all
+    the way to the handover, so a refusal there is caused by the region and nothing else.
+    """
+    extra = REGION_TOOLS[tool_name]
+    with pytest.raises(_ReachedLua):
+        REGISTERED[tool_name].fn(filename="probe.aseprite", x=0, y=0, width=4, height=4,
+                                 **extra)
+
+
+@pytest.mark.parametrize("tool_name", sorted(REGION_TOOLS))
+def test_an_absurd_region_is_refused_before_aseprite(tool_name, ws, no_lua):
+    extra = REGION_TOOLS[tool_name]
+    with pytest.raises(ValidationFailed, match=rf"region size {HUGE}x{HUGE} exceeds"):
+        REGISTERED[tool_name].fn(filename="probe.aseprite", x=0, y=0,
+                                 width=HUGE, height=HUGE, **extra)
+
+
+@pytest.mark.parametrize("tool_name", sorted(REGION_TOOLS))
+def test_a_far_origin_cannot_inflate_a_defaulted_region(tool_name, ws, no_lua):
+    """The route the cap used to miss. With the extent left to default, the body derives
+    it as `spr.width - rx` at run time, after the check, so a far-away origin inflates
+    the extent the check just approved.
+    """
+    extra = REGION_TOOLS[tool_name]
+    with pytest.raises(ValidationFailed, match=rf"region x is -{HUGE}"):
+        REGISTERED[tool_name].fn(filename="probe.aseprite", x=-HUGE, y=0,
+                                 width=None, height=None, **extra)
+
+
+# Only what each tool needs to reach its ramp check, same as above.
+RAMP_TOOLS = {
+    "assess_sprite": {},
+    "cast_shadow": {"layer": "art"},
+    "contact_shadow": {"occluder_color": "#101010"},
+    "dither_band": {"from_step": 0, "to_step": 1},
+    "glow": {},
+    "gradient_map": {},
+    "outline_smart": {},
+    "shade_region_by_light": {},
+    "shift_along_ramp": {"steps": -1},
+    # frame 2 because the refusal for frame 1 ("no earlier frame to have moved from")
+    # is its own check and fires first, which would pass this test for the wrong reason.
+    "smear_frame": {"layer": "art", "frame": 2},
+    "specular_highlight": {},
+}
+
+
+def test_the_ramp_family_is_exactly_the_table():
+    """Same reasoning: `assess_sprite` was the one of eight without the cap."""
+    assert {name for name in REGISTERED if "ramp" in _params(name)} == set(RAMP_TOOLS)
+
+
+@pytest.mark.parametrize("tool_name", sorted(RAMP_TOOLS))
+def test_an_over_cap_ramp_is_refused_before_aseprite(tool_name, ws, no_lua):
+    """The message names `ramp` and its count, so this cannot pass for another reason."""
+    over = ["#101010"] * (limits.MAX_COLOR_LIST_LENGTH + 1)
+    extra = RAMP_TOOLS[tool_name]
+    with pytest.raises(ValidationFailed,
+                       match=rf"ramp has {limits.MAX_COLOR_LIST_LENGTH + 1} items"):
+        REGISTERED[tool_name].fn(filename="probe.aseprite", ramp=over, **extra)
