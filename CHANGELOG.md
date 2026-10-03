@@ -6,7 +6,45 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-02
+
+The release where the results started saying what the calls actually did. Six tools grew a
+field for something a caller previously had to find out by looking at the art:
+`region_components` and `region_bounds`, because `base_color` scopes a pass by colour
+*distance* and two materials' ramps are routinely closer than the default tolerance;
+`distinct` on `generate_ramp`, because lightness clamps at both ends and nine steps in can
+be eight colours out; `from_color` and `to_color` on `dither_band`, whose steps count from
+1 beside a ramp that counts from 0; and `pixels_outside_selection` on a write a mask
+refused entirely, which the result harness had been withholding in exactly the case where
+that number is the whole answer. None of these is a new capability. Each is the server
+answering a question it used to leave to guesswork, and every one was found by drawing with
+the tools rather than by reading them.
+
+Nine write paths were ignoring the active selection and reporting `selection_applied: true`
+anyway, which is the same failure from the other side: not a missing number but a false
+one. `img_set` was the only write that consulted the mask, and the anti-aliased coverage
+write, the flood fill, every per-pixel effect pass, `mirror_layer` and the batch runner's
+replace op all went around it. The rule lives in one function now, and six writes that
+must not use it say why in a comment, because a selection is in canvas space and a tileset
+tile, a grid of tile indices and a palette reindex are not.
+
+The showcase was rewritten and then reviewed at native scale, which found ten defects in
+art that looked finished at the size the README shows it. Nine of the ten were invisible in
+a thumbnail, and every one of them had passed the checks the generators already carried.
+That is the lesson of this release, and it is recorded in both READMEs: an assertion covers
+the failure it was written for and no other.
+
+Five new tools, 147 to 152: `set_cel_z_index`, `set_properties`, `get_properties`,
+`export_spritesheet_packed` and `quantize_palette`. Nothing was removed.
+
+Minor rather than patch, for three reasons a caller can observe: `glow` and `cast_shadow`
+now reuse their own effect layer across frames where they used to refuse any existing name,
+`create_sprite(overwrite=True)` discards a selection sidecar it would previously have
+handed to the new sprite, and the nine write paths above now clip where they did not. No
+signature changed incompatibly.
+
 ### Added
+
 - **`shade_region_by_light` and `specular_highlight` say where the region landed**
   (#183). `base_color` scopes a pass by colour *distance*, which is not the same as
   scoping it by material: art whose fills came from `generate_ramp` puts two materials
@@ -61,7 +99,115 @@ All notable changes to this project are documented here. The format is based on
   tell a deliberate pair from a mistake, and the docstring spells the collision out where
   it happens.
 
+- **Per-object metadata and a packed sheet exporter**, four capabilities the editor has
+  had since 1.3 (#95, #94).
+
+  `set_cel_z_index` reorders one cel against its layer's neighbours, which is the answer
+  to a limb that is in front of the body on one frame and behind it on the next without
+  restructuring the layer stack. `z` is an offset on the layer's own stack position and
+  ties go to the larger value; the result reports the frame's competing cels back to
+  front, because a number alone does not tell a caller that the arm moved. It is refused
+  outside -32768 to 32767: the editor accepts a larger number in memory and then stores
+  it in a 16-bit field, so saving and reopening turned 32768 into -32768 and 100000 into
+  -31072. `get_cel` now reports `z_index` too.
+
+  `set_properties` and `get_properties` reach the custom-property store that a sprite,
+  layer, cel, tag, slice or tile carries inside the .aseprite file, with namespaces. Game
+  metadata (a hitbox on a slice, an anchor on a layer, the damage frames of a tag) now
+  travels with the art instead of in a sidecar the next edit desynchronises. Values keep
+  their type. A selector the chosen target does not use is refused rather than ignored,
+  since the write would otherwise land on a different object than the one named.
+  Measured, and pinned both ways: a property lives on the record linked cels share, so a
+  write to a held pose reaches every frame of it, while a z-index does not.
+
+  `quantize_palette` derives a palette from the art and reduces it to a budget, the step
+  between a picture and pixel art that `extract_palette` and `set_color_mode` leave open.
+  `max_colors` is a ceiling with a cliff in it: four colours at `max_colors=4` come back
+  as one averaged grey while `max_colors=5` returns all four, so the result reports what
+  the art holds against what the palette can draw and warns when they disagree. It
+  refuses an indexed sprite, where replacing the palette changes what every pixel means
+  without touching one; measured, that corrupted the art and could leave pixels pointing
+  past the end of the palette.
+
+  `export_spritesheet_packed` exports through the editor's own command, a sibling of the
+  proven CLI-based `export_spritesheet` rather than a replacement. It adds extrude (the
+  one-pixel border duplication that fixes texture bleeding in a game engine),
+  merge-duplicates, trim, padding, and a data file carrying the layer, tag and slice
+  sections. A packed sheet merges duplicates whether or not the flag is set, and the
+  result says so. An output extension the editor cannot encode writes nothing, raises
+  nothing and returns success, so the written file is verified afterwards.
+
+- **`docs/HEADLESS.md`**, a reference for designing a tool against `aseprite -b --script`,
+  organised so an idea can be ruled out in one pass (#96). It covers the two `app.useTool`
+  calls that take the process down, the calls that return success and do nothing, what is
+  absent under `-b`, `app.preferences` and why nothing may write to it, and the region
+  transforms reachable only as manual pixel work. Each constraint points at the code it
+  forced, so the file explains why ramp shading is palette index arithmetic, why gradients
+  are projected per pixel, and why `app.useTool` is never called anywhere in this server.
+
+  Claims re-checked against Aseprite 1.3.18.6 are marked as such, and two were wrong:
+  `Dialog` is not absent but a constructor that evaluates to `nil`, which a truthiness
+  guard will not catch, and `app.site` is present and populated with only `app.site.editor`
+  missing. The crashes and anything needing an `app.preferences` write were deliberately
+  not reproduced, and the file says which claims those are and why.
+
+- **`remove_stray_pixels` takes `erase_isolated`**, which erases a stray with no opaque
+  neighbour instead of skipping it (#139). That stray is the dirt an effects pass leaves
+  outside the art, which had no colour to take and so was the one kind of mess the tool
+  could not clean, while `diff_sprites` was already reading it as scattered noise and
+  naming this tool. Reported as `erased` and `erased_clusters`, apart from `replaced`,
+  because erasing changes the silhouette, which is the one thing the tool otherwise never
+  does; opt-in for the same reason, since a spark or a floating highlight is an isolated
+  pixel that is meant to be there. `min_cluster` extends it to the two-pixel speck, where
+  neither pixel is isolated because each has the other for company. Erasure is defined
+  over clusters joined to each other and to nothing else, so it cannot reach the artwork
+  at any setting.
+
+- **The shading tools now say when an indexed palette cannot hold the ramp they were
+  given.** An indexed pixel is an offset into a palette, so a shading tool cannot write a
+  colour the palette does not hold: `rgba_to_px` sends it through `nearest_index` and it
+  lands on the nearest entry that can draw. That is what indexed mode means, and refusing
+  it would make these tools unusable on exactly the sprites that most want a fixed
+  palette, so this is a measurement and not a refusal.
+
+  It needed saying because two of its consequences were invisible. A shade between two
+  ramp steps that resolve to the same palette entry does nothing at all: measured on a
+  sprite drawn in step 1 of a five step ramp against a palette holding three of those
+  colours, `shift_along_ramp(steps=1)` reported 144 pixels written and left the picture
+  byte for byte identical. And `palette_conformance` does not catch it, because the
+  colour the pixel snapped to is still a colour on the declared ramp, so the one metric
+  that separates shading from filtering read 1.0 for a no-op.
+
+  Every tool that takes a `ramp` now returns `ramp_on_palette` on an indexed sprite: how
+  many steps were declared, how many distinct palette entries they resolved to, how many
+  were in the palette exactly, and the resolution of each step. Where steps merged, the
+  `warnings` name which ones and which colour they merged into. `assess_sprite(ramp=...)`
+  says it too, in its readings beside the conformance number it qualifies. Costs one
+  `nearest_index` call per ramp entry rather than per pixel, so it is free at any sprite
+  size, and it is measured through the sprite's own resolver so it cannot drift from
+  where the pixels actually go.
+
+  Attached by the Lua harness rather than by each of the nine tools, the way the pixel
+  counts and the linked-cel report already are, with the judgement itself pure in
+  `core.indexed.ramp_readings`. A meta-test pins every ramp-taking tool to the wrapper,
+  because a tool that quietly used plain `run_lua` would be a tool whose shading bands on
+  indexed art with nothing said. `smear_frame` is deliberately not covered: it resolves
+  its ramp in Python into a colour-to-colour lookup table and passes no ramp to Lua, so
+  the question for it is what that table's *targets* resolve to, which is a different
+  measurement.
+
+  Nothing is reported on RGB or grayscale sprites, where a pixel carries its own colour
+  and there is no palette to snap to, and nothing is reported when the palette holds the
+  ramp exactly, which is the normal case for a palette built with `generate_ramp` and
+  `set_palette`.
+
+  The indexed path through the shading layer was also completely untested: every test in
+  `test_shading.py`, `test_lighting.py` and `test_effects_light.py` built an RGB sprite.
+  It now has coverage, including the no-op above pinned as a test that would fail if the
+  reading were ever dropped on the theory that conformance would catch it.
+
 ### Changed
+
 - **`glow` and `cast_shadow` reuse their own effect layer across frames** (#185). The
   guarantee worth keeping is about a *cel*: two effects composited into one cel are a
   picture neither call describes. It was enforced on the *layer*, and a layer spans every
@@ -167,7 +313,105 @@ All notable changes to this project are documented here. The format is based on
   Both READMEs now point at the issues, and the paragraph claiming thirty-five domed
   blocks from one shading call is rewritten around what that claim cost.
 
+- **The Aseprite invocation lock is per sprite path rather than process-wide** (#66).
+  Calls on different sprites run in parallel; calls on one sprite stay serialized, as do
+  all CLI exports. Six parallel edits to six sprites measured 1.44s before and 0.44s
+  after, with six parallel edits to one sprite still serialized.
+
+  Paths are learned at `tools/common.lua_path`, the one seam every path headed for Lua
+  passes through, rather than by reading argument names: ten different names are in use
+  for paths, and a runner that sniffed them would claim nothing for a tool whose name it
+  did not know, which looks exactly like a run that is correctly parallel. Anything the
+  runner cannot account for still claims the whole editor, so the narrowing can only ever
+  over-lock.
+
+  Both spellings of a path separator count as unaccountable, not just the forward slash.
+  Testing for "/" alone made the argument circular, since a path reaching Lua is
+  forward-slashed only because it came through `lua_path`: a tool passing a raw
+  `str(resolved_path)` would hand over a backslash string that was neither recorded nor
+  path-shaped, and the claim would narrow around a file it was about to write. Nothing
+  does that today, and an audit over a full integration run logged no narrowed claim that
+  omitted a path-shaped value of either spelling, so the check costs nothing measurable
+  and the property is enforced rather than conventional.
+
+- **`trim_sprite` shares one measurement with `diff_sprites`** instead of scanning every
+  pixel with `getPixel` (#172). Its answer is identical, pinned on the sprite from the
+  issue before the change, and the scan is 5.2x cheaper over a 1024x1024 frame.
+
+- **The tween's anchor and sample cap live where CI can test them** (#149). Both are
+  arithmetic over the source cel's drawn bounds and both existed only in Lua, so a
+  regression in either kept CI green and would have surfaced only in a `--run-aseprite`
+  run, the tier CI does not run. The bounds are the editor's to measure and `tween_cels`
+  is one Aseprite launch by design, so the authority now lives in `core/inbetween.py`
+  with pure tests, the Lua carries a transcription, and a test holds the two together: a
+  one-pixel error planted in the Lua anchor fails both of them.
+
+- **The README tool catalogue is tested** (#155). Every name in a catalogue or workflow
+  row is a registered tool, every registered tool has exactly one row, no row names
+  nothing, and every tool count in the prose matches the registry; failures name the
+  offending tool and the README line. The catalogue was already in sync, so this is a
+  regression guard for the structural drift that a previous pass had to fix with a
+  throwaway script. It replaces two weaker checks, one of which accepted a tool name
+  anywhere in the document including prose, the other of which verified only the headline
+  count and not the contents map that carries the same number.
+
+- **The em dash check looks at files nobody has staged yet.** It listed tracked files
+  only, so a new document carrying the character passed locally and would have failed
+  only on CI, which is the one situation the check exists for.
+
+- **Removed every em dash from tracked content, and added the test that keeps it that
+  way.** The project does not use U+2014, new work had respected that for a long time,
+  and the tree still carried 121 of them across 43 files. That is not a cosmetic
+  inconsistency: it is what made the rule unenforceable. A `git grep` over a dirty
+  baseline reports the same hits on every run, so there was no way to tell a new
+  violation from an old one, and the convention could only ever be upheld by whoever
+  happened to remember it.
+
+  Each occurrence was replaced with the punctuation that fits rather than with one
+  substitute, because the character was doing three different jobs: separating a label
+  from its description (now a colon, which is most of the CHANGELOG's feature rows),
+  joining two independent clauses (a semicolon), and marking an appositive or an aside
+  (a comma). Six sites needed rewording instead, where no single mark read properly.
+  Released CHANGELOG sections are included: the punctuation changes, the record does not.
+
+  `tests/test_style.py` now fails on any tracked file containing the character, naming
+  every offender as `file:line` with its text, and it builds the character from its code
+  point so the test is not itself the thing it forbids. `docs/TOOLS.md` is generated from
+  docstrings, so the fix there was upstream in the docstrings; the test asserts that file
+  is still tracked, because if it stopped being tracked a regression could land through
+  the generator with nothing failing.
+
+- **`set_color_mode` no longer risks turning a large conversion into a timeout.** The
+  tool counts every drawn pixel before and after a conversion to indexed, so it can
+  refuse one that would make art disappear, and nothing bounded that scan but the
+  invocation timeout. On the sprites this server is used on it is free; on a 4096x4096
+  sheet of several frames it is tens of millions of pixels counted twice, and the only
+  backstop was `ASEPRITE_MCP_TIMEOUT` turning a working conversion into a timeout with
+  nothing useful in it.
+
+  Past `MAX_VERIFY_PIXELS` (33,554,432, the canvas area times the frame count) the
+  conversion now runs and reports `verified: false` with a reason naming the measurement
+  and pointing at `diff_sprites`, instead of being refused. Refusing would have traded a
+  rare slow call for a permanent gap in a capability, which is worse than the problem.
+  Indexed targets now always carry `verified`, so the caller branches on a field rather
+  than on whether `drawn_pixels` happens to be present.
+
+  The count itself moved into the Lua prelude, where `diff_sprites` and `set_color_mode`
+  share one implementation instead of carrying a loop each. The shared version reads
+  alpha at a fixed byte stride out of `Image.bytes` rather than calling `getPixel` per
+  pixel, measured at 0.088us per pixel against 0.58us, so the scan is about 6.6 times
+  cheaper as well as bounded. Two implementations of one number were two chances to be
+  wrong about indexed transparency, which has already shipped here once.
+
+- **The pixel-loss refusal no longer guesses which palette was at fault.** It used to
+  pick one of two remedies based on `palette_source`, and the `from_art` branch said
+  "Unexpected with palette_source='from_art'" because no case reaching it was ever
+  found: quantizing from the art is what stops pixels being lost. A message that has
+  never run cannot be relied on to be right when it finally does, so both remedies are
+  now offered and neither route is blamed.
+
 ### Fixed
+
 - **Nine write paths ignored the active selection and reported `selection_applied`
   anyway** (#199). A caller who scoped an edit to a character's armour and ran
   `adjust_brightness_contrast` recoloured the whole character and was told the selection
@@ -245,119 +489,6 @@ All notable changes to this project are documented here. The format is based on
   error about it. The test that matters is not the missing file but the next edit, which
   now writes all 256 pixels of a 16x16 fill.
 
-### Added
-- **Per-object metadata and a packed sheet exporter**, four capabilities the editor has
-  had since 1.3 (#95, #94).
-
-  `set_cel_z_index` reorders one cel against its layer's neighbours, which is the answer
-  to a limb that is in front of the body on one frame and behind it on the next without
-  restructuring the layer stack. `z` is an offset on the layer's own stack position and
-  ties go to the larger value; the result reports the frame's competing cels back to
-  front, because a number alone does not tell a caller that the arm moved. It is refused
-  outside -32768 to 32767: the editor accepts a larger number in memory and then stores
-  it in a 16-bit field, so saving and reopening turned 32768 into -32768 and 100000 into
-  -31072. `get_cel` now reports `z_index` too.
-
-  `set_properties` and `get_properties` reach the custom-property store that a sprite,
-  layer, cel, tag, slice or tile carries inside the .aseprite file, with namespaces. Game
-  metadata (a hitbox on a slice, an anchor on a layer, the damage frames of a tag) now
-  travels with the art instead of in a sidecar the next edit desynchronises. Values keep
-  their type. A selector the chosen target does not use is refused rather than ignored,
-  since the write would otherwise land on a different object than the one named.
-  Measured, and pinned both ways: a property lives on the record linked cels share, so a
-  write to a held pose reaches every frame of it, while a z-index does not.
-
-  `quantize_palette` derives a palette from the art and reduces it to a budget, the step
-  between a picture and pixel art that `extract_palette` and `set_color_mode` leave open.
-  `max_colors` is a ceiling with a cliff in it: four colours at `max_colors=4` come back
-  as one averaged grey while `max_colors=5` returns all four, so the result reports what
-  the art holds against what the palette can draw and warns when they disagree. It
-  refuses an indexed sprite, where replacing the palette changes what every pixel means
-  without touching one; measured, that corrupted the art and could leave pixels pointing
-  past the end of the palette.
-
-  `export_spritesheet_packed` exports through the editor's own command, a sibling of the
-  proven CLI-based `export_spritesheet` rather than a replacement. It adds extrude (the
-  one-pixel border duplication that fixes texture bleeding in a game engine),
-  merge-duplicates, trim, padding, and a data file carrying the layer, tag and slice
-  sections. A packed sheet merges duplicates whether or not the flag is set, and the
-  result says so. An output extension the editor cannot encode writes nothing, raises
-  nothing and returns success, so the written file is verified afterwards.
-
-- **`docs/HEADLESS.md`**, a reference for designing a tool against `aseprite -b --script`,
-  organised so an idea can be ruled out in one pass (#96). It covers the two `app.useTool`
-  calls that take the process down, the calls that return success and do nothing, what is
-  absent under `-b`, `app.preferences` and why nothing may write to it, and the region
-  transforms reachable only as manual pixel work. Each constraint points at the code it
-  forced, so the file explains why ramp shading is palette index arithmetic, why gradients
-  are projected per pixel, and why `app.useTool` is never called anywhere in this server.
-
-  Claims re-checked against Aseprite 1.3.18.6 are marked as such, and two were wrong:
-  `Dialog` is not absent but a constructor that evaluates to `nil`, which a truthiness
-  guard will not catch, and `app.site` is present and populated with only `app.site.editor`
-  missing. The crashes and anything needing an `app.preferences` write were deliberately
-  not reproduced, and the file says which claims those are and why.
-
-- **`remove_stray_pixels` takes `erase_isolated`**, which erases a stray with no opaque
-  neighbour instead of skipping it (#139). That stray is the dirt an effects pass leaves
-  outside the art, which had no colour to take and so was the one kind of mess the tool
-  could not clean, while `diff_sprites` was already reading it as scattered noise and
-  naming this tool. Reported as `erased` and `erased_clusters`, apart from `replaced`,
-  because erasing changes the silhouette, which is the one thing the tool otherwise never
-  does; opt-in for the same reason, since a spark or a floating highlight is an isolated
-  pixel that is meant to be there. `min_cluster` extends it to the two-pixel speck, where
-  neither pixel is isolated because each has the other for company. Erasure is defined
-  over clusters joined to each other and to nothing else, so it cannot reach the artwork
-  at any setting.
-
-### Changed
-- **The Aseprite invocation lock is per sprite path rather than process-wide** (#66).
-  Calls on different sprites run in parallel; calls on one sprite stay serialized, as do
-  all CLI exports. Six parallel edits to six sprites measured 1.44s before and 0.44s
-  after, with six parallel edits to one sprite still serialized.
-
-  Paths are learned at `tools/common.lua_path`, the one seam every path headed for Lua
-  passes through, rather than by reading argument names: ten different names are in use
-  for paths, and a runner that sniffed them would claim nothing for a tool whose name it
-  did not know, which looks exactly like a run that is correctly parallel. Anything the
-  runner cannot account for still claims the whole editor, so the narrowing can only ever
-  over-lock.
-
-  Both spellings of a path separator count as unaccountable, not just the forward slash.
-  Testing for "/" alone made the argument circular, since a path reaching Lua is
-  forward-slashed only because it came through `lua_path`: a tool passing a raw
-  `str(resolved_path)` would hand over a backslash string that was neither recorded nor
-  path-shaped, and the claim would narrow around a file it was about to write. Nothing
-  does that today, and an audit over a full integration run logged no narrowed claim that
-  omitted a path-shaped value of either spelling, so the check costs nothing measurable
-  and the property is enforced rather than conventional.
-
-- **`trim_sprite` shares one measurement with `diff_sprites`** instead of scanning every
-  pixel with `getPixel` (#172). Its answer is identical, pinned on the sprite from the
-  issue before the change, and the scan is 5.2x cheaper over a 1024x1024 frame.
-
-- **The tween's anchor and sample cap live where CI can test them** (#149). Both are
-  arithmetic over the source cel's drawn bounds and both existed only in Lua, so a
-  regression in either kept CI green and would have surfaced only in a `--run-aseprite`
-  run, the tier CI does not run. The bounds are the editor's to measure and `tween_cels`
-  is one Aseprite launch by design, so the authority now lives in `core/inbetween.py`
-  with pure tests, the Lua carries a transcription, and a test holds the two together: a
-  one-pixel error planted in the Lua anchor fails both of them.
-
-- **The README tool catalogue is tested** (#155). Every name in a catalogue or workflow
-  row is a registered tool, every registered tool has exactly one row, no row names
-  nothing, and every tool count in the prose matches the registry; failures name the
-  offending tool and the README line. The catalogue was already in sync, so this is a
-  regression guard for the structural drift that a previous pass had to fix with a
-  throwaway script. It replaces two weaker checks, one of which accepted a tool name
-  anywhere in the document including prose, the other of which verified only the headline
-  count and not the contents map that carries the same number.
-
-- **The em dash check looks at files nobody has staged yet.** It listed tracked files
-  only, so a new document carrying the character passed locally and would have failed
-  only on CI, which is the one situation the check exists for.
-
-### Fixed
 - **A tween pivoted on a box measured by a different definition of empty than the count
   beside it** (#176). `Image:shrinkBounds` honours the sprite's transparent index only, so
   a pixel held in a palette entry that is itself transparent counted as content to it.
@@ -415,104 +546,6 @@ All notable changes to this project are documented here. The format is based on
   measured as unchanged rather than claimed.
 
 
-### Changed
-- **Removed every em dash from tracked content, and added the test that keeps it that
-  way.** The project does not use U+2014, new work had respected that for a long time,
-  and the tree still carried 121 of them across 43 files. That is not a cosmetic
-  inconsistency: it is what made the rule unenforceable. A `git grep` over a dirty
-  baseline reports the same hits on every run, so there was no way to tell a new
-  violation from an old one, and the convention could only ever be upheld by whoever
-  happened to remember it.
-
-  Each occurrence was replaced with the punctuation that fits rather than with one
-  substitute, because the character was doing three different jobs: separating a label
-  from its description (now a colon, which is most of the CHANGELOG's feature rows),
-  joining two independent clauses (a semicolon), and marking an appositive or an aside
-  (a comma). Six sites needed rewording instead, where no single mark read properly.
-  Released CHANGELOG sections are included: the punctuation changes, the record does not.
-
-  `tests/test_style.py` now fails on any tracked file containing the character, naming
-  every offender as `file:line` with its text, and it builds the character from its code
-  point so the test is not itself the thing it forbids. `docs/TOOLS.md` is generated from
-  docstrings, so the fix there was upstream in the docstrings; the test asserts that file
-  is still tracked, because if it stopped being tracked a regression could land through
-  the generator with nothing failing.
-
-### Added
-- **The shading tools now say when an indexed palette cannot hold the ramp they were
-  given.** An indexed pixel is an offset into a palette, so a shading tool cannot write a
-  colour the palette does not hold: `rgba_to_px` sends it through `nearest_index` and it
-  lands on the nearest entry that can draw. That is what indexed mode means, and refusing
-  it would make these tools unusable on exactly the sprites that most want a fixed
-  palette, so this is a measurement and not a refusal.
-
-  It needed saying because two of its consequences were invisible. A shade between two
-  ramp steps that resolve to the same palette entry does nothing at all: measured on a
-  sprite drawn in step 1 of a five step ramp against a palette holding three of those
-  colours, `shift_along_ramp(steps=1)` reported 144 pixels written and left the picture
-  byte for byte identical. And `palette_conformance` does not catch it, because the
-  colour the pixel snapped to is still a colour on the declared ramp, so the one metric
-  that separates shading from filtering read 1.0 for a no-op.
-
-  Every tool that takes a `ramp` now returns `ramp_on_palette` on an indexed sprite: how
-  many steps were declared, how many distinct palette entries they resolved to, how many
-  were in the palette exactly, and the resolution of each step. Where steps merged, the
-  `warnings` name which ones and which colour they merged into. `assess_sprite(ramp=...)`
-  says it too, in its readings beside the conformance number it qualifies. Costs one
-  `nearest_index` call per ramp entry rather than per pixel, so it is free at any sprite
-  size, and it is measured through the sprite's own resolver so it cannot drift from
-  where the pixels actually go.
-
-  Attached by the Lua harness rather than by each of the nine tools, the way the pixel
-  counts and the linked-cel report already are, with the judgement itself pure in
-  `core.indexed.ramp_readings`. A meta-test pins every ramp-taking tool to the wrapper,
-  because a tool that quietly used plain `run_lua` would be a tool whose shading bands on
-  indexed art with nothing said. `smear_frame` is deliberately not covered: it resolves
-  its ramp in Python into a colour-to-colour lookup table and passes no ramp to Lua, so
-  the question for it is what that table's *targets* resolve to, which is a different
-  measurement.
-
-  Nothing is reported on RGB or grayscale sprites, where a pixel carries its own colour
-  and there is no palette to snap to, and nothing is reported when the palette holds the
-  ramp exactly, which is the normal case for a palette built with `generate_ramp` and
-  `set_palette`.
-
-  The indexed path through the shading layer was also completely untested: every test in
-  `test_shading.py`, `test_lighting.py` and `test_effects_light.py` built an RGB sprite.
-  It now has coverage, including the no-op above pinned as a test that would fail if the
-  reading were ever dropped on the theory that conformance would catch it.
-
-### Changed
-- **`set_color_mode` no longer risks turning a large conversion into a timeout.** The
-  tool counts every drawn pixel before and after a conversion to indexed, so it can
-  refuse one that would make art disappear, and nothing bounded that scan but the
-  invocation timeout. On the sprites this server is used on it is free; on a 4096x4096
-  sheet of several frames it is tens of millions of pixels counted twice, and the only
-  backstop was `ASEPRITE_MCP_TIMEOUT` turning a working conversion into a timeout with
-  nothing useful in it.
-
-  Past `MAX_VERIFY_PIXELS` (33,554,432, the canvas area times the frame count) the
-  conversion now runs and reports `verified: false` with a reason naming the measurement
-  and pointing at `diff_sprites`, instead of being refused. Refusing would have traded a
-  rare slow call for a permanent gap in a capability, which is worse than the problem.
-  Indexed targets now always carry `verified`, so the caller branches on a field rather
-  than on whether `drawn_pixels` happens to be present.
-
-  The count itself moved into the Lua prelude, where `diff_sprites` and `set_color_mode`
-  share one implementation instead of carrying a loop each. The shared version reads
-  alpha at a fixed byte stride out of `Image.bytes` rather than calling `getPixel` per
-  pixel, measured at 0.088us per pixel against 0.58us, so the scan is about 6.6 times
-  cheaper as well as bounded. Two implementations of one number were two chances to be
-  wrong about indexed transparency, which has already shipped here once.
-
-- **The pixel-loss refusal no longer guesses which palette was at fault.** It used to
-  pick one of two remedies based on `palette_source`, and the `from_art` branch said
-  "Unexpected with palette_source='from_art'" because no case reaching it was ever
-  found: quantizing from the art is what stops pixels being lost. A message that has
-  never run cannot be relied on to be right when it finally does, so both remedies are
-  now offered and neither route is blamed.
-
-### Fixed
 - **Sorting a palette corrupted an indexed sprite that had linked cels.** `sort_palette`
   remaps every pixel through the same table it reorders the palette with, so the image
   looks identical afterwards. It did that by looping over `spr.cels` and assigning
@@ -558,7 +591,6 @@ All notable changes to this project are documented here. The format is based on
   is deliberately **not** moved to a transparent entry: that would reinterpret every
   existing index-0 pixel in the sprite as opaque, which is a worse and quieter kind of
   damage than the one being reported.
-
 
 ## [0.9.0] - 2026-10-01
 
