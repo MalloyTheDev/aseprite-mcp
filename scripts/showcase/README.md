@@ -1,11 +1,16 @@
 # Showcase generators
 
-Almost every image the README shows is produced by one of these scripts, through the
-server's own tools. They are here so the art can be regenerated rather than inherited:
-when a drawing or shading tool changes, the pictures that advertise it should change with
-it, and a script is the only way to know they still match. The two exceptions are
-`assets/slime.gif` and `assets/ramp.png`, under *More examples*, which predate the
-generators and have none here.
+Every image the README shows is produced by one of these scripts, through the server's
+own tools. They are here so the art can be regenerated rather than inherited: when a
+drawing or shading tool changes, the pictures that advertise it should change with it, and
+a script is the only way to know they still match.
+
+There used to be two exceptions, `assets/slime.gif` and `assets/ramp.png`, which predated
+the generators and had none. They are gone. An asset nobody can regenerate cannot be held
+to the tools it exists to advertise: both were measured during a gallery review and both
+turned out to be wrong in ways a generator would have caught, the slime gaining 17 percent
+of its own mass between its squash and its stretch and repeating two of its four frames
+verbatim. The rule now has no exceptions, which is the point of writing it down.
 
 Each script writes into the MCP workspace, so point that at a scratch directory and copy
 the results out. The scripts write the names on the left; the repository commits them
@@ -17,19 +22,21 @@ uv run --no-sync python scripts/showcase/orb.py        # shading_stages.png -> d
 uv run --no-sync python scripts/showcase/bounce.py     # throw.gif          -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/items.py      # items.png          -> docs/assets/showcase/item_sheet.png
 uv run --no-sync python scripts/showcase/walk.py       # walk8_sheet.png, walk8.gif -> docs/assets/showcase/
-uv run --no-sync python scripts/showcase/tiles.py      # scene.png          -> assets/tilemap_scene.png
 uv run --no-sync python scripts/showcase/skeleton.py   # skeleton.png       -> assets/skeleton.png
 uv run --no-sync python scripts/showcase/zorder.py     # zorder.gif, zorder_pair.png -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/quantize.py   # quantize_stages.png -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/dungeon.py    # dungeon.png, dungeon.gif  -> docs/assets/showcase/
-uv run --no-sync python scripts/showcase/lava.py       # lava.png, lava.gif        -> docs/assets/showcase/
+uv run --no-sync python scripts/showcase/lava.py       # lava.gif                  -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/attack.py     # attack_sheet.png, attack.gif -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/smear.py      # smear_stages.png, smear.gif -> docs/assets/showcase/
 uv run --no-sync python scripts/showcase/golem.py      # golem.png             -> docs/assets/showcase/
 ```
 
-Note that two of them are renamed on the way in, and that `tiles.py` and `skeleton.py`
-land in `assets/` at the repository root rather than in `docs/assets/showcase/`. `orb.py`
+Note that two of them are renamed on the way in, and that `skeleton.py` lands in
+`assets/` at the repository root rather than in `docs/assets/showcase/`. `tiles.py`
+publishes nothing: its scene was four tiles with no transition pieces, which makes the
+tilemap tools look incapable of the one thing they are for, so it is kept as runnable
+example code until a proper autotile scene replaces it. `orb.py`
 also leaves its three stage PNGs behind (`orb_1_flat.png`, `orb_2_lit.png`,
 `orb_3_full.png`); the committed `docs/assets/showcase/orb.png` is `orb_3_full.png`, and
 nothing currently links to it.

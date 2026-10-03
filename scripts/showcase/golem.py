@@ -1,32 +1,44 @@
-"""Build the golem showcase: a creature with carved form, in the JRPG enemy style.
+"""Build the golem showcase: a stone creature with carved form, in the JRPG enemy style.
 
-The rest of the gallery is scenes, effects and props. This is the first piece that is a
-*creature*, and the order it is built in is the whole lesson. The first attempt shaded
-fourteen hand-placed facets straight away and came out as a pile of grey boxes: nearly
-axis-aligned plates, a dark seam drawn on every one of them so the figure read as brickwork,
-and tones so close together that the facets never disagreed enough to look carved.
+The first version of this piece was 40x40 and measurably wrong, in a way worth recording
+because the fault was not in the drawing but in one line of arithmetic.
 
-So this builds in the order a pixel artist does.
+Its tone came from `step = 4 + DEPTH[part] + light`, where `light` was a count of three
+probes bucketed into three outcomes. So **no part could ever reach more than three of the
+eight ramp steps**: measured across its thirteen parts, the maximum was three and the mean
+was 2.9. The largest mass spent 72 percent of itself on a single tone, which is why a
+shoulder rendered as a flat plate. Worse, `DEPTH` spanned five steps against the light's
+two, so part identity outranked light direction five to two and the figure stratified into
+a pale near half and a dark far half whose extremes never shared a value. Eight ramp steps
+were being spent on *stacking order* and at most three were left to describe form.
 
-**The silhouette first, as one flat shape.** A creature has to be recognisable in black
-before any light touches it. The mass is built from overlapping body parts, deliberately
-top-heavy and asymmetric: one pauldron larger than the other, one arm hanging lower, a small
-head set back between the shoulders. A figure with two matching limbs is not standing, it is
-extruded, which is what made the skeleton piece in this same gallery read as programmer art.
+So this version does not compute tone. It builds a flat silhouette, hands it to
+`shade_region_by_light`, which shades by surface normal and can use the whole ramp, and
+keeps depth to a single step. Depth is a nudge and a seam, not the subject.
 
-**Then the form, from the inside out.** Tone comes from how far a pixel is from the
-silhouette's edge and which way that edge faces, not from which rectangle it belongs to.
-That gives rounded masses that still meet at hard boundaries, which is what carved stone
-looks like.
+Three other things were measured and are fixed here.
 
-**Then the boundaries, and only the ones that matter.** Seams go between *limbs*, where one
-mass overlaps another, not around every plate. The outline is `outline_smart`, which picks a
-darker version of each edge's own colour rather than ringing the whole thing in black.
+**The ramp rendered as greys.** `ramp_between("#241f2a", "#d8d2c6")` rotated 133 degrees of
+hue at a 2.4 percent saturation floor, six of its eight steps below the level at which hue
+is visible at all. Interpolation carries only the chroma its ends supply and both ends were
+near neutral. `generate_ramp` with `chroma` asks for the saturation directly, and this ramp
+holds 0.23, which is where reference work in this style runs its apparent greys.
 
-Light is up and to the left, matching every other piece so the gallery looks like one set.
+**The silhouette was clipped.** 42 drawn pixels sat on the canvas border, so the figure was
+cut off on three sides and could not take an outline there. Everything here is laid out
+inside a three-pixel margin, and `verify` fails if a single pixel reaches the edge.
+
+**The core glow painted nothing.** The old build called `glow`, whose docstring says
+plainly that "a body blocks the halo of a gem inside it": the core is inside the
+silhouette, so there was no outside for a halo to occupy, and the longest comment in the
+old file defended a layer that contributed zero pixels. Light from the core is instead
+painted *into* the stone around it, which is what emission actually does to a surface.
+
+Light is up and to the left at 130 degrees, matching the rest of the gallery.
 """
 import pathlib
 
+from aseprite_mcp.core import quality
 from aseprite_mcp.tools import (
     drawing,
     effects,
@@ -39,13 +51,21 @@ from aseprite_mcp.tools import (
 )
 
 NAME = "golem.aseprite"
-W = H = 40
+W = H = 64
+MARGIN = 3
+LIGHT_ANGLE = 130.0
 
-STONE_ENDS = ("#241f2a", "#d8d2c6")
-STONE_STEPS = 8
-CORE_ENDS = ("#1d6a5c", "#b6ffe6")
-CORE_STEPS = 4
-LIGHT = (-0.55, -0.83)
+# Asked for, not inherited. A base colour is picked for its value ("stone is grey"), which
+# is how the old ramp ended up with no chroma to rotate: saturation comes from the base
+# unless something overrides it, and 0.28 is inside the 0.17 to 0.30 that reference art in
+# this style runs. Cool violet shadow to warm cream highlight, chroma held through the
+# midtones by the peak curve rather than sagging through the neutral axis.
+STONE = {"base_color": "#7a6a62", "steps": 8, "chroma": 0.28,
+         "shadow_hue": "#2e2452", "light_hue": "#ffe2a8", "sat_curve": "peak",
+         "saturation_shift": 35.0, "easing": "perceptual", "light_range": 0.74}
+CORE = {"base_color": "#2fb8a6", "steps": 5, "chroma": 0.55,
+        "shadow_hue": "#10384a", "light_hue": "#e6fffb", "sat_curve": "peak",
+        "easing": "perceptual"}
 
 
 def disc(cx, cy, rx, ry):
@@ -61,183 +81,276 @@ def box(x0, y0, x1, y1):
             if 0 <= x < W and 0 <= y < H}
 
 
-# Each part is named because the seams below need to know which masses overlap, and because
-# a part list is the thing to edit when the silhouette does not read. Order is back to
-# front. The numbers are hand-placed and were moved several times while looking at the
-# flat shape: that is the loop this piece is really about.
 def parts():
     """The body, back to front, laid out around the gaps rather than around the masses.
 
-    The first layout had thirteen overlapping parts and rendered as one rounded rectangle:
-    the head sat *inside* the pauldrons and the arms touched the torso, so there was nothing
-    for the eye to separate. What makes a figure read is negative space, so the numbers here
-    are chosen for the gaps. Two clear pixels between each arm and the torso, three between
-    the legs, one between the feet, and the head's top seven rows clear of the shoulders.
+    What makes a figure read is negative space, so these numbers are chosen for the air:
+    four clear pixels between each arm and the torso below the shoulder line, two up the
+    middle between the legs, and the head's top eight rows clear of the pauldrons. The
+    pauldrons bridge torso to arm, which is what shoulders are for, and the near one is
+    deliberately much heavier than the far one, because a figure with two matching limbs
+    is not standing, it is extruded.
     """
     return [
-        # Legs and feet, with a three-pixel gap up the middle and the far leg shorter so
-        # the stance has depth.
-        ("leg_far", box(23, 28, 28, 35) | disc(25, 31, 3, 4)),
-        ("foot_far", box(22, 34, 30, 38)),
-        ("leg_near", box(14, 28, 19, 35) | disc(16, 31, 3, 5)),
-        ("foot_near", box(12, 34, 20, 38)),
-        ("hips", disc(20, 27, 6, 4)),
-        # An egg, wider at the chest than the waist, which is most of the difference
-        # between a creature and a crate.
-        ("torso", disc(20, 20, 6, 8)),
-        # Arms outside the torso with air between: the gap is the thing being drawn.
-        ("arm_far", disc(33, 23, 4, 6)),
-        ("fist_far", disc(33, 31, 5, 4)),
-        ("arm_near", disc(6, 24, 5, 8)),
-        ("fist_near", disc(5, 33, 6, 5)),
-        # The pauldrons bridge torso to arm, which is what shoulders are for. The near
-        # side is heavier on purpose, and by enough to count: the first version differed
-        # by a radius here and there, and `verify` measured the two halves as seven pixels
-        # apart, which is a mirrored figure with asymmetric *shading* painted on it.
-        ("pauldron_near", disc(10, 14, 9, 6)),
-        ("pauldron_far", disc(30, 16, 6, 4)),
-        # Small, and sitting clear above the shoulder line.
-        ("head", disc(20, 7, 5, 4)),
+        ("leg_far", box(35, 48, 40, 55) | disc(37, 51, 3, 5)),
+        ("foot_far", box(34, 54, 43, 58)),
+        ("leg_near", box(24, 48, 30, 57) | disc(27, 52, 4, 6)),
+        ("foot_near", box(21, 56, 32, 60)),
+        ("hips", disc(32, 46, 9, 6)),
+        ("torso", disc(32, 34, 10, 13)),
+        ("arm_far", disc(54, 38, 6, 10)),
+        ("fist_far", disc(54, 50, 6, 5)),
+        ("arm_near", disc(10, 38, 7, 12)),
+        ("fist_near", disc(10, 52, 7, 6)),
+        ("pauldron_near", disc(17, 25, 13, 9)),
+        ("pauldron_far", disc(47, 27, 9, 6)),
+        ("head", disc(32, 14, 7, 6)),
     ]
 
 
-# How far back each mass sits. A creature this wide cannot be separated by its outline
-# alone: pushing the far side down the ramp is what stops the pauldrons, the torso and the
-# arms reading as one slab, which is what the third silhouette draft did.
-DEPTH = {
-    "leg_far": -2, "foot_far": -3, "arm_far": -2, "fist_far": -1, "pauldron_far": -2,
-    "hips": -1, "torso": 0, "head": -1,
-    "leg_near": 1, "foot_near": -1, "arm_near": 1, "fist_near": 1, "pauldron_near": 2,
-}
+# One step, not five. Depth separates the far side from the near side by a nudge; the light
+# does the describing. The old file spent the whole ramp here and had three steps left over
+# for form, which is the single arithmetic fact that made the figure read as a pile of
+# plates.
+FAR = {"leg_far", "foot_far", "arm_far", "fist_far", "pauldron_far"}
+NEAR = {"leg_near", "arm_near", "fist_near", "pauldron_near"}
+
+
+def ramp_index(stone, colour):
+    """Which ramp step a read-back pixel is, or None if it is not on the ramp."""
+    want = colour[:7].lower()
+    for i, entry in enumerate(stone):
+        if entry.lower() == want:
+            return i
+    return None
+
 
 def main():
-    stone = palette.ramp_between(*STONE_ENDS, steps=STONE_STEPS)["colors"]
-    core = palette.ramp_between(*CORE_ENDS, steps=CORE_STEPS)["colors"]
-    top = len(stone) - 1
+    made = palette.generate_ramp(**STONE)
+    stone = made["colors"]
+    core = palette.generate_ramp(**CORE)["colors"]
+    # The ramp is measured here rather than trusted, because "it rotates hue" was true of
+    # the ramp this piece replaced and told nobody anything.
+    chroma = quality.ramp_chroma(stone)
+    assert chroma["grey_steps"] == 0, (
+        f"the stone ramp has {chroma['grey_steps']} steps below visible chroma: {stone}")
+    assert chroma["sat_floor"] > 0.15, chroma
 
     body = parts()
-    # Painted back to front, so the owner of a pixel is the frontmost mass covering it.
     owner = {}
     for name, pixels in body:
         for position in pixels:
             owner[position] = name
     mass = set(owner)
 
-    # Within a part, light the pixels on the side the light comes from. Distance to that
-    # part's own edge rather than to the whole figure's, so each mass is rounded in its
-    # own right: a shoulder is not a bump on a torso, it is a shoulder.
-    tone = {}
-    for (x, y), name in owner.items():
-        own = {p for p, n in owner.items() if n == name}
-        lit_side = 0.0
-        for reach in (1, 2, 3):
-            probe = (round(x + LIGHT[0] * reach), round(y + LIGHT[1] * reach))
-            if probe in own:
-                lit_side += 1.0
-        # A pixel with its own mass between it and the light is in that mass's shadow.
-        step = 4 + DEPTH[name] + (1 if lit_side <= 1 else 0) - (1 if lit_side >= 3 else 0)
-        tone[(x, y)] = max(1, min(top, step))
-
-    # Boundaries, and only where two masses actually meet. The first draft of this piece
-    # drew a seam around every plate and came out as brickwork; what has to be dark is the
-    # join between one limb and the next, which is the line the eye uses to tell them apart.
-    for (x, y), name in list(owner.items()):
-        for dx, dy in ((0, -1), (-1, 0), (1, 0), (0, 1)):
-            other = owner.get((x + dx, y + dy))
-            if other is not None and other != name and DEPTH[other] < DEPTH[name]:
-                tone[(x + dx, y + dy)] = 1
+    # Inside the margin before anything is drawn. The old piece lost 42 pixels off three
+    # edges and could not be outlined there; catching it at layout time rather than in the
+    # export is the difference between a fixable mistake and a shipped one.
+    stray = [p for p in mass
+             if not (MARGIN <= p[0] < W - MARGIN and MARGIN <= p[1] < H - MARGIN)]
+    assert not stray, f"{len(stray)} pixels are outside the {MARGIN}px margin: {stray[:6]}"
 
     sprite.create_sprite(NAME, W, H, overwrite=True)
     layers.rename_layer(NAME, "Layer 1", "stone")
-    by_step = {}
-    for position, step in tone.items():
-        by_step.setdefault(step, []).append(position)
-    for step, positions in sorted(by_step.items()):
+
+    # 1. The silhouette, flat, in one mid tone. A creature has to be recognisable as a
+    # shape before any light touches it, and shading a flat mass is also what lets the
+    # shading tool see the whole form instead of thirteen separate ones.
+    drawing.draw_pixels(
+        NAME, [{"x": x, "y": y} for x, y in sorted(mass)], stone[4])
+
+    # 2. The form, from the surface normal, by the tool that exists for it. This is the
+    # line the old version replaced with arithmetic of its own.
+    lit = shading.shade_region_by_light(
+        NAME, stone, base_color=stone[4], light_angle=LIGHT_ANGLE, light_z=0.5, rim=0.18)
+    assert lit["pixels_written"] > 0, lit
+
+    # 3. Depth, as one step. Read back rather than assumed, so a pixel is shifted from
+    # where the light actually put it.
+    back = inspect.get_pixels(NAME, 0, 0, W, H)["pixels"]
+    shifted = {}
+    for (x, y), name in owner.items():
+        if name not in FAR and name not in NEAR:
+            continue
+        index = ramp_index(stone, back[y][x])
+        if index is None:
+            continue
+        step = index - 1 if name in FAR else index + 1
+        step = max(1, min(len(stone) - 1, step))
+        if step != index:
+            shifted.setdefault(step, []).append((x, y))
+    for step, positions in sorted(shifted.items()):
         drawing.draw_pixels(
             NAME, [{"x": x, "y": y} for x, y in sorted(positions)], stone[step])
 
-    # Cracks. Without them the masses read as river pebbles rather than as cut stone,
-    # because a rounded shape with a soft gradient is a stone that has been in water. Each
-    # one runs across a mass rather than along it, and stops short of the edge so it does
-    # not read as a gap between two parts.
-    cracks = [((15, 17), (19, 22)), ((22, 23), (25, 19)), ((8, 20), (10, 26)),
-              ((31, 21), (34, 25)), ((17, 30), (18, 34)), ((25, 30), (26, 33))]
-    crack_px = []
-    for (x0, y0), (x1, y1) in cracks:
-        steps = max(abs(x1 - x0), abs(y1 - y0))
-        for i in range(steps + 1):
-            x = round(x0 + (x1 - x0) * i / steps)
-            y = round(y0 + (y1 - y0) * i / steps)
-            if (x, y) in mass:
-                crack_px.append({"x": x, "y": y})
-    drawing.draw_pixels(NAME, crack_px, stone[1])
+    # 4. The seams, where one mass overlaps another. Two steps down from whatever the
+    # light left there, rather than slammed to the darkest entry: the old piece set these
+    # to step 1 regardless, which is a drawn black line and read as brickwork.
+    #
+    # `contact_shadow` is the tool for this and cannot be used here: it finds its occluder
+    # by colour, and both sides of these seams are the same stone. Occlusion between two
+    # masses of one material is a gap in the toolkit, and this loop is what fills it in
+    # the meantime.
+    back = inspect.get_pixels(NAME, 0, 0, W, H)["pixels"]
+    seam = {}
+    for (x, y), name in owner.items():
+        for dx, dy in ((0, -1), (-1, 0), (1, 0), (0, 1)):
+            other = owner.get((x + dx, y + dy))
+            if other is None or other == name:
+                continue
+            front = (name in NEAR) or (other in FAR and name not in FAR)
+            if not front:
+                continue
+            index = ramp_index(stone, back[y + dy][x + dx])
+            if index is None:
+                continue
+            seam.setdefault(max(1, index - 2), []).append((x + dx, y + dy))
+    for step, positions in sorted(seam.items()):
+        drawing.draw_pixels(
+            NAME, [{"x": x, "y": y} for x, y in sorted(positions)], stone[step])
 
-    # The core, on the chest, and the eyes. One warm accent in a grey figure, so the face
-    # and the heart are where the eye lands.
-    core_px = {(x, y) for y in range(18, 23) for x in range(18, 23)
-               if abs(x - 20) + abs(y - 20) <= 2 and (x, y) in mass}
-    drawing.draw_pixels(
-        NAME, [{"x": x, "y": y} for x, y in sorted(core_px)], core[-1])
-    drawing.draw_pixels(
-        NAME, [{"x": x, "y": y} for x, y in [(18, 7), (22, 7)]], core[-1])
+    # 5. Cracks, drawn as a map rather than as interpolated line segments. Per-pixel
+    # intent is the whole reason `draw_pixel_map` exists: a crack that runs across a mass,
+    # widens where it turns and stops short of the edge cannot be written as a formula,
+    # and a formula is what the old piece used.
+    crack = [
+        "..a..",
+        "..a..",
+        ".aa..",
+        ".a...",
+        "aa...",
+        ".a...",
+        ".aa..",
+        "..a..",
+    ]
+    for ox, oy in ((26, 26), (37, 33), (14, 30)):
+        drawn = {(ox + cx, oy + cy)
+                 for cy, row in enumerate(crack)
+                 for cx, ch in enumerate(row) if ch != "."}
+        outside = drawn - mass
+        assert not outside, (
+            f"the crack at ({ox},{oy}) puts {len(outside)} pixels off the figure: "
+            f"{sorted(outside)[:4]}. A crack runs across a mass; one hanging off the "
+            "silhouette is a floating speck.")
+        drawing.draw_pixel_map(NAME, crack, {"a": stone[1]}, x=ox, y=oy)
 
-    # `glow` spreads the core into the stone around it on a layer of its own, which is what
-    # keeps the stone's own facets flat: the light is something happening *to* the rock
-    # rather than a gradient painted into it.
-    effects.glow(NAME, core, radius=4, falloff="quadratic", base_color=core[-1],
-                 tolerance=10.0, new_layer="core glow")
-    # Left as its own layer rather than merged: `glow` puts it at the *bottom* of the
-    # stack, which is where a glow belongs, and `merge_layer_down` correctly refuses a
-    # bottom layer because there is nothing under it. The export composites anyway, and
-    # keeping it separate means the stone's facets stay flat underneath.
+    # 6. The core, and the light it throws onto the stone around it. A map again, because
+    # a heart is four deliberate pixels and a bloom, not an ellipse.
+    heart = [
+        "..c..",
+        ".ccc.",
+        "cceec",
+        ".ccc.",
+        "..c..",
+    ]
+    drawing.draw_pixel_map(NAME, heart, {"c": core[2], "e": core[4]}, x=30, y=31)
+    drawing.draw_pixel_map(
+        NAME, ["e.e"], {"e": core[4]}, x=29, y=13)   # the eyes
 
-    # A colour-matched outline, not a black one: each edge pixel gets a darker version of
-    # its own colour, so the lit shoulder keeps a warm rim and the shadowed arm a cold one.
-    shading.outline_smart(NAME, stone, mode="colormatched", darken_steps=2,
-                          light_angle=125)
+    # The emission, painted into the rock rather than haloed outside it. `glow` would put
+    # a halo on a layer below the body, where a body blocks it; what light from an interior
+    # source actually does is warm the surface it sits in.
+    back = inspect.get_pixels(NAME, 0, 0, W, H)["pixels"]
+    bloom = []
+    cx, cy = 32, 33
+    for (x, y) in mass:
+        d = max(abs(x - cx), abs(y - cy))
+        if not 3 <= d <= 6:
+            continue
+        if ramp_index(stone, back[y][x]) is None:
+            continue
+        bloom.append({"x": x, "y": y, "color": core[1] if d <= 4 else core[0]})
+    drawing.draw_pixels(NAME, bloom)
 
-    verify(mass, core)
+    # 7. The outline, weighted by the light. Two pixels where the form turns away and one
+    # where it faces into the light, which is the shape of a hand-drawn keyline and the
+    # thing a uniform border cannot be.
+    #
+    # `lit_thickness=0` was tried and is worse here, which is worth recording because the
+    # measurement prefers it: dropping the lit side entirely moves the separator share
+    # from 25.3 to 19.1 percent, into the middle of the band, and makes the picture look
+    # damaged. On a silhouette this lumpy the lit/shadow test is decided per pixel, so the
+    # outline does not taper at the terminator, it fragments into specks. A keyline that
+    # drops out has to thin through 2, 1, 0 across a band, and `add_outline` cannot do
+    # that yet. One pixel on the lit side is continuous, and continuous beats optimal.
+    #
+    # The old piece ran a colour-matched 1px ring and
+    # its darkest colour covered 7.6 percent of the drawing, well under the 10 to 24 that
+    # work in this style spends on separating its masses.
+    outlined = effects.add_outline(
+        NAME, stone[0], thickness=2, connectivity=8, where="outside",
+        light_angle=LIGHT_ANGLE, lit_thickness=1)
+    assert outlined["outline_shadow"] > outlined["outline_lit"], outlined
+
+    verify(stone, core, outlined)
 
     out = pathlib.Path(NAME).with_suffix("")
     export.export_png(NAME, f"{out}.png", scale=1, overwrite=True)
-    export.export_png(NAME, f"{out}_6x.png", scale=6, overwrite=True)
+    export.export_png(NAME, f"{out}_4x.png", scale=4, overwrite=True)
     print(f"wrote {out}.png: {len(body)} parts, {len(mass)} pixels, "
-          f"{len(by_step)} tones in use")
+          f"ramp sat_floor {chroma['sat_floor']}, outline "
+          f"{outlined['outline_shadow']}/{outlined['outline_lit']} shadow/lit")
 
 
-def verify(mass, core):
-    """What this piece claims about the figure, read back off the sprite.
+def verify(stone, core, outlined):
+    """What this piece claims, read back off the sprite by the project's own measurements.
 
-    All three are about the silhouette rather than the shading, because the shading was
-    never the problem: three drafts of this piece were lost to a figure that was shaded
-    beautifully and read as a pile of boxes.
+    Every assertion here is one the previous version of this file would have failed, which
+    is the only reason to write them: a verification that passes on the art it replaced
+    measures nothing.
     """
-    # 1. The negative space survived. These columns are the gaps between each arm and the
-    # torso, and if they ever fill in, the arms have welded themselves back on and the
-    # figure is a slab again, which is exactly what drafts one and three were.
-    for gap_x, label in ((12, "near arm"), (28, "far arm")):
-        column = inspect.get_pixels(NAME, gap_x, 18, 1, 8)["pixels"]
-        clear = [row[0] for row in column if row[0][7:9] == "00"]
-        assert clear, (
-            f"the gap beside the {label} has filled in: {[r[0] for r in column]}. The "
-            "arms are welded to the torso and the silhouette has stopped reading.")
+    report = inspect.assess_sprite(NAME, ramp=stone)
+    m = report["metrics"]
+    rows = m["row_structure"]
 
-    # 2. The figure is not symmetrical. A mirrored creature is not standing, it is
-    # extruded, which is what made the skeleton piece in this gallery read as placeholder.
-    left = sum(1 for (x, _) in mass if x < W // 2)
-    right = len(mass) - left
-    assert abs(left - right) >= 40, (
-        f"the two halves are within {abs(left - right)} pixels of each other, so the "
-        "figure is mirrored and the pose says nothing")
+    # 1. The silhouette is not cut off. The old piece had 42 of these.
+    assert m["edge_contact"] == 0, (
+        f"{m['edge_contact']} drawn pixels sit on the canvas border, so the silhouette is "
+        "clipped and cannot take an outline there")
 
-    # 3. The accent is actually in the picture. The eyes and the core are the only warm
-    # thing in a grey figure, and a glow that silently failed would leave a grey lump.
+    # 2. It is a figure with parts, and they are not fused. The old piece had 16 of its 38
+    # drawn rows as a single run across most of its width.
+    assert rows["waists"] >= 1, f"no waist, so the silhouette is one convex blob: {rows}"
+    assert rows["rows_with_air"] / rows["rows_drawn"] >= 0.25, (
+        f"only {rows['rows_with_air']} of {rows['rows_drawn']} rows have background "
+        "between two parts; the limbs have welded to the body")
+
+    # 3. The ramp's hue is visible. The old one rotated 133 degrees and showed none of it.
+    assert m["ramp_chroma"]["grey_steps"] == 0, m["ramp_chroma"]
+    assert m["ramp_chroma"]["sat_floor"] > 0.15, m["ramp_chroma"]
+
+    # 4. There is a keyline doing the separating, in the band that work in this style uses.
+    low, high = quality.SEPARATOR_BAND
+    share = m["separator"]["share"]
+    assert low <= share <= high * 2, (
+        f"the darkest colour is {share:.1%} of the drawing, outside the {low:.0%} to "
+        f"{high:.0%} this style spends on separating masses")
+
+    # 5. The form uses the ramp. The old piece could not give any one part more than three
+    # of its eight steps, so this is the measurement that would have caught it.
+    assert m["colors"] >= 8, f"only {m['colors']} colours in the figure"
+    assert m["tone_shares"]["top_share"] < 0.40, (
+        f"{m['tone_shares']['top_color']} covers {m['tone_shares']['top_share']:.0%} of "
+        "the drawing, so one tone is filling rather than describing")
+
+    # 6. The accent is actually in the picture, and the emission reached the stone. The old
+    # piece called `glow` and it contributed zero pixels, because a body blocks the halo of
+    # a gem inside it.
     found = set()
-    for row in inspect.get_pixels(NAME, 14, 4, 14, 20)["pixels"]:
+    for row in inspect.get_pixels(NAME, 0, 0, W, H)["pixels"]:
         found.update(px[:7].lower() for px in row)
-    assert core[-1].lower() in found, (
-        f"the core colour {core[-1]} is not in the figure; the eyes and the heart are "
-        "where the eye is supposed to land")
+    assert core[4].lower() in found, "the core's brightest colour is not in the figure"
+    assert core[0].lower() in found or core[1].lower() in found, (
+        "no emission reached the stone around the core, so the heart is a sticker")
+
+    readings = [r for r in report["readings"]
+                if "fused" in r or "border" in r or "keyline" in r or "saturation" in r]
+    assert not readings, "the measurements this rebuild exists to fix still fire:\n  " \
+                         + "\n  ".join(readings)
+    print(f"verified: edge_contact 0, waists {rows['waists']}, "
+          f"air {rows['rows_with_air']}/{rows['rows_drawn']}, "
+          f"separator {share:.1%}, colours {m['colors']}, "
+          f"top tone {m['tone_shares']['top_share']:.0%}")
 
 
 if __name__ == "__main__":

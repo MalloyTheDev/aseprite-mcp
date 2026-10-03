@@ -223,3 +223,108 @@ def glow_rings(radius: int, ramp_length: int, falloff: str = "linear") -> list[i
         brightness = (1.0 - t) ** 2 if falloff == "quadratic" else (1.0 - t)
         rings.append(1 + round(brightness * (ramp_length - 1)))
     return rings
+
+
+# ------------------------------------------------------------------ outline taper weights
+
+# How finely the facing of an edge is bucketed before it picks a thickness. Odd, so that an
+# edge exactly square to the light lands on the middle bucket rather than between two, and
+# generous, so the quantisation is far finer than the integer thicknesses it selects: the
+# bucket is never what decides where a weight changes.
+TAPER_BUCKETS = 65
+
+
+def taper_weights(
+    shadow: int, lit: int, buckets: int = TAPER_BUCKETS
+) -> list[int]:
+    """Outline thickness per facing bucket, from fully facing away to fully facing the light.
+
+    `add_outline` decided this with one comparison: an edge pixel either faced the light or
+    it did not, and it took `lit_thickness` or `thickness` accordingly. On a smooth
+    silhouette that is a visible seam at the terminator and on a lumpy one it is worse,
+    because the test is per pixel: measured on the golem, `lit_thickness=0` moved the
+    separator share from 25.3 to 19.1 percent, which the metric prefers, and made the
+    figure look damaged, because the keyline did not thin at the terminator, it broke into
+    specks. A keyline that drops out has to pass through 2, then 1, then 0 across a band of
+    edge.
+
+    So the weight is interpolated rather than switched, and returned as a table of integers
+    the Lua looks up. Deciding it here is what makes the curve checkable: the shape of a
+    taper is a list of integers, and an integer list can be asserted on, where a band of
+    outline on a disc can only be eyeballed.
+
+    The interpolation is deliberately an identity for the commonest case. With `shadow` and
+    `lit` one apart there are only two values available and the midpoint sits between them,
+    so the table switches at exactly the facing the old comparison switched at, and
+    `thickness=2, lit_thickness=1` draws what it has always drawn. A taper only appears
+    once the two differ by two or more, which is precisely the case that was broken.
+    """
+    if buckets < 3:
+        raise ValueError(
+            f"a taper needs at least 3 buckets to have a middle; got {buckets}"
+        )
+    if shadow < 0 or lit < 0:
+        raise ValueError(
+            f"an outline thickness cannot be negative; got shadow={shadow}, lit={lit}"
+        )
+    weights = []
+    for index in range(buckets):
+        toward_light = index / (buckets - 1)
+        weights.append(_round_half_up(shadow + (lit - shadow) * toward_light))
+    return weights
+
+
+# How far around an edge pixel the facing is measured, in pixels. One, which is what
+# summing the directions to the touching neighbours amounts to, is the right answer to "is
+# this pixel on the edge" and the wrong answer to "which way does the edge face": a
+# one-pixel bump in the silhouette swings it by ninety degrees, so the weight changes pixel
+# by pixel instead of across a band.
+#
+# Three, measured rather than chosen. Walking the boundary ring of a deliberately lumpy
+# silhouette (a disc with twelve single-pixel bumps stuck to it) in angular order and
+# counting how often it crosses between outlined and bare, with thickness 2 and
+# lit_thickness 0: radius 1 crosses 30 times, which is fifteen separate scraps of keyline
+# and is exactly the fragmenting this replaced; radius 2 crosses 8 times; radius 3 crosses
+# twice, which is one unbroken arc of outline and one unbroken arc of bare silhouette.
+# Radius 4 is also 2 and costs nearly twice the lookups for it.
+#
+# The same radius is also the one that reproduces the geometry. On a circle the three
+# weights of a 2-to-0 taper should each cover 120 degrees, so a 96-pixel ring should split
+# 32 / 32 / 32: radius 1 gives 28 / 12 / 56, radius 2 gives 29 / 36 / 31, and radius 3
+# gives 32 / 32 / 32. Fixed rather than exposed for the reason FACET_TILT is: a knob whose
+# only defensible setting is the default is a control that does nothing.
+TAPER_RADIUS = 3
+
+
+def emission_lift(
+    radius: int, depth: int, falloff: str = "quadratic"
+) -> list[int]:
+    """How many ramp steps **up** each ring around an interior light source takes.
+
+    `glow_rings` is the same arithmetic for the opposite job. A glow is a halo outside a
+    shape and picks an absolute ramp entry per ring, because it is painting new pixels onto
+    empty canvas. Emission is light landing on a surface that is already painted, so what a
+    ring selects is not a colour but a distance to travel up the ramp the surface is on:
+    the shadowed side of a form near a glowing core brightens, the lit side brightens, and
+    both keep their relation to each other. Picking a colour per ring instead would flatten
+    every tone within the radius to one value, which is a gradient painted over a form
+    rather than light falling on it.
+
+    Ring 1 touches the source and lifts by `depth`. The outermost ring lifts by 1, never 0,
+    because a ring that moves nothing is a ring that should not have been in the radius.
+    `quadratic` keeps the lift concentrated near the source, which is how a light actually
+    falls off and is the one that reads as a source rather than as a wash.
+    """
+    if radius < 1:
+        raise ValueError("an emission needs a radius of at least 1 ring")
+    if depth < 1:
+        raise ValueError("an emission needs a depth of at least 1 ramp step")
+    if falloff not in FALLOFFS:
+        raise ValueError(f"unknown falloff {falloff!r}; expected one of {FALLOFFS}")
+
+    lifts = []
+    for ring in range(1, radius + 1):
+        t = 0.0 if radius == 1 else (ring - 1) / (radius - 1)
+        brightness = (1.0 - t) ** 2 if falloff == "quadratic" else (1.0 - t)
+        lifts.append(1 + _round_half_up(brightness * (depth - 1)))
+    return lifts

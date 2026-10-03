@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **156 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **160 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -15,9 +15,9 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Cels](#cels) (10)
 - [Drawing](#drawing) (11)
 - [Brushes & symmetry](#brushes--symmetry) (4)
-- [Shading & light](#shading--light) (7)
+- [Shading & light](#shading--light) (10)
 - [Selections](#selections) (6)
-- [Effects & colour adjustments](#effects--colour-adjustments) (12)
+- [Effects & colour adjustments](#effects--colour-adjustments) (13)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (2)
@@ -237,8 +237,32 @@ good, in the ways that can be counted.
 Reports how many colours are in use and roughly how many ramps they form, pixels with
 no neighbour of their own colour (noise), jagged corners on diagonals, the drawn
 bounding box, how much of the canvas it fills, whether it sits centred, and how far
-the silhouette is from its own mirror. Each measurement that is worth acting on comes
-back with a line saying why, so the numbers do not have to be interpreted.
+the silhouette is from its own mirror.
+
+It also reports five things about whether the drawing has *form*, which were added
+because every measurement above passed on a figure that read as one grey slab:
+
+* `row_structure`: how many drawn rows have background between two parts of the
+  silhouette, how many are a single run across most of the width, and the widest run.
+  A creature reads because air cuts between its limbs, and nothing else here notices
+  when it does not.
+* `edge_contact`: drawn pixels sitting on the canvas border, where a silhouette is cut
+  off and cannot take an outline.
+* `tone_shares`: the most-used colour and what share of the drawing it covers. One
+  tone over a large share of a surface is a fill, not a form.
+* `separator`: what share of the drawing is its darkest colour, and how dark that is.
+  In this medium the dark keyline is structural rather than a fallback.
+* `ramp_chroma`, when a `ramp` is declared: its hue span, its saturation floor, and
+  how many of its steps are below the chroma at which hue is visible at all. A ramp
+  interpolated between two endpoints on opposite sides of the colour wheel routes
+  through the neutral axis, so it can rotate hue a long way and render as greys.
+
+The silhouette and form readings are withheld for art that fills its canvas (a scene
+has no silhouette) and for art using fewer than three colours (a flat shape is not a
+surface without form), because a reading that cannot be acted on is noise.
+
+Each measurement that is worth acting on comes back with a line saying why, so the
+numbers do not have to be interpreted.
 
 Args:
     ramp: Declare the ramp the art should be on and the report adds palette
@@ -1886,6 +1910,122 @@ into the artwork.
 | `frame` | integer | no | 1 |
 
 
+### `seam_occlusion`
+
+Darken the seam where two masses of the **same** material overlap, along its ramp.
+
+`contact_shadow` does ambient occlusion already and finds the form doing the occluding
+by colour, which is the one case a figure never presents. An arm against a torso, a
+pauldron over a shoulder, a thigh against a hip: both sides are the same stone under
+the same light and no colour separates them, so there is nothing for `occluder_color`
+to match. Measured on this project's own golem, an armpit where an artist darkens the
+contact came out +131 in luminance, because nothing here could see the seam.
+
+What a colour cannot say, the caller can. The map is the same notation
+`draw_pixel_map` and `shade_facets` take, one character per pixel, except that the
+legend names **masses** instead of colours or directions, and gives each one a `z`.
+
+Args:
+    rows: One string per row of the map, one character per pixel. "." is a pixel that
+        belongs to no mass, and is neither darkened nor treated as an occluder.
+    legend: {symbol: z}, where a **higher z is nearer the viewer**. `{"a": 1, "b": 0}`
+        says mass "a" overlaps mass "b", so the seam darkens on "b" and not on "a".
+        Occlusion is asymmetric and that is the whole point: darken both sides of a
+        seam and you have drawn brickwork, darken the side behind and you have put one
+        mass in front of another.
+    ramp: Colours darkest first. Darkened pixels stay on this ramp, so conformance is
+        preserved by construction.
+    radius: How far the darkening reaches from the seam, in pixels. 2 is usually right
+        and is what gives the falloff somewhere to happen.
+    depth: How many ramp steps darker, against the seam itself, tapering to nothing at
+        `radius`. Refused at or above the ramp's length, which would slam the seam to
+        the darkest entry whatever was there.
+    tolerance: How close a pixel must be to a ramp entry to be darkened, as a weighted
+        RGB distance. A pixel further off is left alone, so a seam crossing another
+        material does not drag it onto this ramp.
+    x, y: Where the map's top-left corner lands on the canvas.
+    layer: Target layer (default: top layer).
+    frame: Target frame, 1-based.
+
+The darkening **falls off with distance** from the seam rather than being a hard line,
+on the same curve `contact_shadow` uses so the two cannot disagree about what a contact
+falloff is. That matters more here than it does there: the workaround this replaces, in
+this project's golem generator, read seam pixels back in Python and slammed them two
+steps down at a fixed width, and the result read as masonry. A combination that cannot
+produce a falloff, such as `depth=1` over `radius=2`, is reported as a flat band rather
+than passed off as one.
+
+Refuses rather than darkening nothing: a map with one mass, a map whose masses all sit
+at the same z, masses that do not come within `radius` of each other, and a pass where
+every pixel it reached was already at the ramp's darkest step are each their own
+refusal, and each one names the counts behind it.
+
+Reports `masses` (pixels per symbol), `depths` (the z each resolved to), `by_steps`
+(how many pixels moved how far, which is the falloff) and `darkened_pixels`.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `rows` | array<string> | yes |  |
+| `legend` | object | yes |  |
+| `ramp` | array<string> | yes |  |
+| `radius` | integer | no | 2 |
+| `depth` | integer | no | 2 |
+| `tolerance` | number | no | 24.0 |
+| `x` | integer | no | 0 |
+| `y` | integer | no | 0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `shade_facets`
+
+Shade a form built from flat planes, one tone per plane, from a map of directions.
+
+Args:
+    rows: One string per row of the map, one character per pixel, as `draw_pixel_map`
+        takes. "." leaves a pixel alone.
+    legend: {symbol: facet direction}. A direction is an angle in degrees in the same
+        convention as `light_angle` (0 faces right, 90 up, 135 up and to the left),
+        the word "front" for a plane square to the viewer, or `[angle, z]` to tilt a
+        plane toward the viewer as well, which is how a chamfer is said.
+    ramp: Colours darkest first. Facet tones are entries of this and nothing else.
+    light_angle, light_z: The key light.
+    fill_strength: How much bounce comes back from roughly opposite, as a share of the
+        key. Without it every plane facing away from the key clamps to the same
+        ambient value and the whole shadow side comes out one flat colour.
+    ambient: The floor, so a plane facing away is dark rather than black.
+    x, y: Where the map's top-left corner lands.
+
+`shade_region_by_light` reads a surface normal out of how far each pixel sits from the
+silhouette's edge. That is right for anything round and wrong for everything hard: a
+distance field cannot know where an edge is, so it rounds the form over, and a crate
+comes out as a cushion. This takes the normals from the caller instead, because which
+way a plane faces is a fact about the drawing that only the person drawing it knows.
+
+Every pixel of one facet gets the same value. That flatness is the point: it is what
+reads as cut rather than inflated, and it is the thing a gradient cannot imitate.
+
+Returns the usual write counts plus `facet_steps`, the ramp step each symbol resolved
+to, so a caller can see the value structure it just asked for. A pass whose facets all
+land on the same step is refused rather than painting a flat fill.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `rows` | array<string> | yes |  |
+| `legend` | object | yes |  |
+| `ramp` | array<string> | yes |  |
+| `light_angle` | number | no | 135.0 |
+| `light_z` | number | no | 0.5 |
+| `fill_strength` | number | no | 0.35 |
+| `ambient` | number | no | 0.16 |
+| `x` | integer | no | 0 |
+| `y` | integer | no | 0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
 ### `shade_region_by_light`
 
 Shade a flat region as a lit form, using a ramp and a light direction.
@@ -2120,6 +2260,82 @@ got its only glint on the leather grip, with none on the blade, and
 | `frame` | integer | no | 1 |
 
 
+### `surface_emission`
+
+Light an interior source onto the surface around it, up that surface's own ramp.
+
+`glow` builds a halo on a layer **below** the artwork, and its docstring says plainly
+that "a body blocks the halo of a gem inside it". So a glowing core inside a silhouette
+gets nothing at all: on this project's golem, `glow` contributed zero pixels to the
+export, which was confirmed by counting the colours in the committed PNG (nine: eight
+stone steps and one core colour), and the longest comment in the old generator defended
+a layer with nothing on it. What light from an interior source actually does is warm the
+surface it sits in, and that is this.
+
+It is neither a halo nor a gradient. Each pixel within `radius` of the source is moved
+**up the ramp it is already on**, by a number of steps that falls off with distance, so
+the surface keeps its own form: a crack near the core stays darker than the stone around
+it, and both brighten. Painting a colour per ring instead, which is what a hand-rolled
+bloom does, flattens every tone inside the radius to one value and reads as a gradient
+laid over the figure.
+
+Args:
+    ramp: Colours darkest first, and **the ramp the surface is painted on**: this moves
+        pixels along it, so a pixel further than `tolerance` from every entry is left
+        alone rather than dragged onto a palette it was never on. The warmth therefore
+        comes from the ramp's upper end, which is where a hue-shifted ramp is warm
+        (`generate_ramp` with `light_hue`). To tint as well as brighten, hand it a ramp
+        built from the surface's midtone up into the source's colour and the lift walks
+        into that hue.
+    source_color: The colour of the thing emitting, for example a gem or a molten core.
+        Source pixels are never repainted; they are where the light comes from.
+    radius: How many rings of surface the light reaches, in pixels.
+    depth: How many ramp steps the ring touching the source is lifted. The outermost
+        ring is always lifted by at least 1, because a ring that moves nothing should
+        not be in the radius. Refused at or above the ramp's length.
+    falloff: "quadratic" keeps the lift concentrated near the source, which is how light
+        falls off and what reads as a source; "linear" spreads it evenly.
+    tolerance: How close a pixel must be to a ramp entry to be lifted, as a weighted RGB
+        distance.
+    source_tolerance: How close a pixel must be to `source_color` to count as the
+        source. Defaults to `tolerance`, and it wants to be **tight** for the reason
+        `contact_shadow` documents at `occluder_tolerance`: the source is a flat colour
+        you named, while `tolerance` has to stay loose enough for shaded art that
+        varies, and one number cannot be both. The result warns when `source_color`
+        cannot be told apart from a ramp entry, because then the surface is partly its
+        own source and the light spreads from the wrong pixels.
+    layer: The layer whose surface is lit, and the one written (default: top layer).
+    frame: Target frame, 1-based.
+
+**Why this is not an argument to `glow`.** `glow` writes a new layer below the subject
+and promises the subject's cel is untouched, so deleting one layer removes the effect;
+this writes into the subject's cel, because light landing on a surface is part of that
+surface. `glow` paints only where the art is not; this paints only where the art is.
+`glow` refuses when it runs out of room outside the silhouette; this refuses when it
+finds no surface on the ramp inside it. An argument that reversed all three would be two
+tools sharing one name, and it would make `glow`'s central promise conditional on a flag.
+
+Refuses rather than reporting a pass that did nothing: no pixel matching `source_color`
+is an error, and so is a source with no surface on the declared ramp around it. The
+refusal carries the counts that say which it was.
+
+Reports `per_ring`, how many pixels were lifted at each distance, which is the number
+that says the falloff happened, alongside `lifts`, the steps each ring was given.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `ramp` | array<string> | yes |  |
+| `source_color` | string | yes |  |
+| `radius` | integer | no | 4 |
+| `depth` | integer | no | 3 |
+| `falloff` | string | no | quadratic |
+| `tolerance` | number | no | 24.0 |
+| `source_tolerance` | number | no | _none_ |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
 ## Selections
 
 ### `deselect`
@@ -2279,14 +2495,55 @@ Args:
 
 ### `add_outline`
 
-Add a pixel outline around the artwork on a layer.
+Add a pixel outline around the artwork on a layer, optionally weighted by light.
 
 Args:
     color: Outline colour.
-    thickness: Outline width in pixels (default 1).
+    thickness: Outline width in pixels (default 1). With `light_angle`, this is the
+        width on the edges that face away from the light.
     connectivity: 4 (orthogonal only) or 8 (includes diagonals, default).
     where: "outside" (grow into transparency, default) or "inside"
         (recolour the shape's border pixels).
+    light_angle: Degrees, 0 from the right and 90 from above, as the shading tools
+        state it. Given, the outline's width varies by which way each edge faces:
+        `thickness` where the form turns away from the light, `lit_thickness` where
+        it faces into it, and **everything between the two across the band of edge in
+        between**.
+    lit_thickness: Width on the edges facing the light. 0 drops the outline there
+        entirely. Defaults to one pixel less than `thickness`. A value above
+        `thickness` is allowed and puts the weight on the lit side instead, which is
+        a rim light rather than a weighted outline.
+
+A constant-width border is the single thing that most reliably makes a sprite read as
+a die-cut sticker: nothing lit has an edge of uniform darkness, so the eye sees card
+stamped out with a punch rather than a form in light. Hand-drawn work in this style
+gathers the weight where the surface turns away and lets it vanish on the lit top
+faces. `thickness=2, light_angle=135, lit_thickness=0` is that look.
+
+The weight **tapers** rather than switching. The lit and shadow widths are the two ends
+of a run of integers, and each edge pixel takes the one its facing selects, so a 2-to-0
+keyline passes through 2, then 1, then 0 across a band of edge instead of flipping
+between two values at the terminator. Facing is measured over a neighbourhood rather
+than over the touching pixels, which is what makes the band continuous on a lumpy
+silhouette: at a radius of one, a single-pixel bump swings the facing by ninety degrees
+and the keyline comes apart into scraps. Measured by walking the boundary ring of a disc
+with twelve bumps on it, the old per-pixel test crossed between outlined and bare 30
+times, which is fifteen separate pieces of keyline; the taper crosses twice, which is
+one arc. That fragmenting is why `lit_thickness=0` had to be reverted to 1 on this
+project's own golem, where it measured better and looked damaged.
+
+With the two widths one apart there are only two integers to choose from and the
+changeover sits at the same facing the old comparison used, so
+`thickness=2, lit_thickness=1` draws exactly what it drew before. The taper appears once
+they differ by two or more, which is the case that was broken.
+
+Reports `outline_weights` alongside the lit and shadow counts: how many of the
+silhouette's own boundary pixels took each thickness, from 0 upward. That is the number
+that says whether a pass tapered or switched, since a switch leaves the entries between
+its two widths empty.
+
+For an outline in colours taken from the artwork's own ramp rather than one flat
+colour, see `outline_smart`, which varies hue instead of width.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2295,6 +2552,8 @@ Args:
 | `thickness` | integer | no | 1 |
 | `connectivity` | integer | no | 8 |
 | `where` | string | no | outside |
+| `light_angle` | number | no | _none_ |
+| `lit_thickness` | integer | no | _none_ |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
@@ -2560,6 +2819,67 @@ Invert the RGB colours of a layer's pixels (alpha preserved).
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `normalize_edge_runs`
+
+Even out the run lengths along a silhouette's diagonals, conservatively.
+
+A hand-drawn diagonal is built from runs of consistent length: a 1:2 slope is two
+pixels, two pixels, two pixels, held steady, and broken only on purpose. A generated
+one wanders, runs of 3, 1, 2, 1, 4 where a person would have drawn 2, 2, 2, 2, and
+that wander is the most recognisable tell in generated pixel art, ahead of both colour
+and shading. `assess_sprite` already counts it as `jaggy_corners`, which on a boundary
+stepping one way is exactly the number of steps; this is what to do about the count.
+
+What it changes is narrow on purpose: a run of **exactly one**, with a run of at least
+two on either side, stepping the same way on both sides, by exactly one pixel each
+time. That run is merged into whichever neighbour lies further out, which paints one
+pixel in the colour of the pixel beside it. Everything else is left alone and counted
+under `kept`, so a pass that declines to touch something says which rule stopped it:
+
+* `diagonal`: the run sits next to another one-pixel run, so this is a 1:1 diagonal,
+  already the most even edge there is;
+* `feature`: the run is further out, or further in, than both its neighbours. That is a
+  spike or a notch, a local extremum, and somebody drew it: a horn, a finger, a chip
+  in the stone;
+* `step`: the step either side is more than one pixel, so this is a change of slope;
+* `thin`: the edge belongs to something thinner than `min_span`, where adding a pixel
+  reshapes the feature instead of smoothing its edge;
+* `no_gain`: the merge would not lower the jagged-corner count, measured over the four
+  2x2 windows the one new pixel can change.
+
+Because it only ever adds a pixel, and only ever a value the boundary already held
+somewhere else, **the silhouette's extent cannot move and nothing can be eaten**. Both
+are checked rather than promised: a plan whose bounding box differs from the
+original's is refused and nothing is written.
+
+Args:
+    min_span: How thick the mass behind an edge has to be before its edge is treated
+        as an edge, measured as the unbroken run of drawn pixels inward from the
+        boundary. The default of 3 is the smallest value at which the added pixel is a
+        minority of what it joins. Raise it to protect thin limbs; 2 is the floor.
+    layer: The layer whose silhouette is read and written (default: top layer).
+    frame: Target frame, 1-based.
+
+Returns `jaggy_corners_before` and `jaggy_corners_after` every call, so the claim is in
+the result rather than in this docstring, along with `runs_merged` and `by_side`. A
+pass with nothing to merge is **refused**, and the refusal carries the tally above: a
+silhouette this cannot improve is the normal case for art that was drawn by hand.
+
+Two Aseprite launches, one to read the silhouette and one to paint: the decision about
+which runs are stumbles is arithmetic over the whole shape, and the shape is only
+knowable with the file open. The read ignores any active selection, because the
+geometry is a fact about the whole silhouette, while the write honours it like every
+other drawing tool. When the mask refuses some of the planned pixels, the after figure
+is withheld rather than reported against a shape that was not painted.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `min_span` | integer | no | 3 |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
@@ -2952,9 +3272,22 @@ hue shifting: cool shadows / warm highlights) and scaling saturation by
 Args:
     filename: If set with apply, write the ramp into that sprite's palette.
     apply: "none" (just return), "append" (add to palette), or "replace".
+    chroma: The saturation the ramp holds, 0 to 1, in place of the base colour's own.
 
 Returns the ramp as a list of "#RRGGBB" colours (darkest first), with `distinct`, how
-many of them are different from each other.
+many of them are different from each other, and `hue_span`, `sat_floor` and
+`grey_steps` measuring whether the hue rotation can actually be seen.
+
+**`chroma` is usually the argument that matters, and it is easy to miss.** Every hue
+control here rotates hue; none of them creates saturation, which is inherited from
+`base_color` and only scaled from there. So a base picked for its *value*, the way a
+base is usually picked ("stone is grey", so `#8a7f74`), carries almost no saturation,
+and the ramp built from it rotates a hue that cannot be seen: the ramp this argument
+was added for turned 143 degrees of hue at a 0.08 saturation floor and rendered as
+eight greys, which is what `grey_steps` now says out loud. Reference work in this
+style runs its apparent greys at 0.17 to 0.30. Setting `chroma` is how a ramp gets
+that without the caller having to reverse-engineer a saturated base colour they did
+not want to name.
 
 **`distinct` is not always `steps`.** Lightness is clamped at both ends, so a base
 already near white or near black spends its outermost steps on the same colour: nine
@@ -2981,6 +3314,7 @@ success either way.
 | `light_hue` | string | no | _none_ |
 | `sat_curve` | string | no | linear |
 | `easing` | string | no | linear |
+| `chroma` | number | no | _none_ |
 
 
 ### `get_palette`
@@ -3094,6 +3428,15 @@ Args:
 Neither mode rotates hue. Interpolating hue between distant colours is what turns a
 blue-to-cream ramp magenta in the middle: at that distance both ways round the wheel
 are equally short, and neither is the blend anybody wanted.
+
+Comes back with `hue_span`, `sat_floor` and `grey_steps` alongside the colours. These
+are worth reading, because interpolation can only carry the chroma its ends supply: two
+endpoints that are themselves near-neutral produce a ramp of greys however it is eased,
+and `grey_steps` is how many of its interior steps fall below the saturation at which
+hue is visible at all. The ramp this reporting was added for came back with six of
+eight, and the figure painted from it read as grey stone for three drafts before anyone
+measured it. To hold a chroma that the ends do not supply, use `generate_ramp` with
+`chroma`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -3319,7 +3662,15 @@ Tag *ranges* are honoured, but a tag's playback direction is not: a GIF is a fla
 frame sequence. A ping-pong tag exports forward, and the result says so in
 `warnings` rather than letting the caller find out in-engine.
 
-overwrite: Replace `output` if it already exists (default False = no-clobber).
+Args:
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+    loop: True (the default) repeats forever, which is what Aseprite writes and what
+        a cycle wants. False plays the animation once and stops.
+
+`loop=False` is the one a one-shot needs, and there was no way to ask for it. An attack
+or a death is not a cycle: built from tags at `repeats=1`, with `validate_loop`
+confirming it does not close, it still exported as an endless loop that snapped from
+the recovery pose back to the wind-up. Set this and the result reports `loops`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -3327,6 +3678,7 @@ overwrite: Replace `output` if it already exists (default False = no-clobber).
 | `output` | string | yes |  |
 | `scale` | integer | no | 1 |
 | `overwrite` | boolean | no | False |
+| `loop` | boolean | no | True |
 
 
 ### `export_layer`
@@ -3848,6 +4200,7 @@ names to their tileset indices.
 | `columns` | integer | no | 4 |
 | `rows` | integer | no | 4 |
 | `tiles` | array<object> | no | _none_ |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_game_asset_bundle`

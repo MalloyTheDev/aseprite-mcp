@@ -11,7 +11,9 @@ import colorsys
 
 import pytest
 
-from aseprite_mcp.core import ramps
+from aseprite_mcp.core import quality, ramps
+from aseprite_mcp.core.errors import ValidationFailed
+from aseprite_mcp.tools import palette
 
 
 def rgb(colour: str) -> tuple[int, int, int]:
@@ -193,3 +195,92 @@ def test_clip_warning_names_the_end_the_steps_went_to():
 
 def test_clip_warning_says_so_when_no_range_would_work():
     assert "ask for fewer steps" in ramps.clip_warning(["#888888", "#888888"], 2, None)
+
+
+# ------------------------------------------------- chroma, and a ramp that reports itself
+def test_a_ramp_from_a_grey_base_rotates_a_hue_nobody_can_see():
+    """The defect `chroma` exists for, stated as the measurement that finds it.
+
+    Every hue control on `generate_ramp` rotates hue. None of them creates saturation,
+    which is inherited from the base colour and only scaled from there. A base is usually
+    picked for its *value*, so "stone is grey" produces `#8a7f74`, and the ramp built from
+    it turns 140 degrees of hue at a saturation nothing can show. Three drafts of a figure
+    were painted from a ramp like this before anyone measured it.
+    """
+    grey = palette.generate_ramp(
+        "#8a7f74", steps=8, shadow_hue="#3a2a6a", light_hue="#ffd9a0")
+    assert grey["hue_span"] > 100, grey
+    assert grey["sat_floor"] < quality.HUE_INVISIBLE_SAT, grey
+    assert grey["grey_steps"] > 0, (
+        "a ramp of greys reported no grey steps, so the one measurement that would have "
+        "caught this is not working")
+
+
+def test_chroma_makes_the_rotation_visible_from_the_same_base():
+    """And the fix, from the identical base colour, so the comparison is honest."""
+    held = palette.generate_ramp(
+        "#8a7f74", steps=8, shadow_hue="#3a2a6a", light_hue="#ffd9a0", chroma=0.22)
+    assert held["hue_span"] > 100, held
+    assert held["sat_floor"] >= 0.2, held
+    assert held["grey_steps"] == 0, held
+    assert held["distinct"] == 8, held
+
+
+def test_chroma_replaces_the_base_saturation_rather_than_scaling_it():
+    """Scaling is what `saturation_shift` does, and scaling zero is zero. A base with no
+    saturation at all has to be able to produce a saturated ramp, or the argument does
+    nothing in exactly the case it was added for."""
+    from_neutral = palette.generate_ramp("#808080", steps=6, chroma=0.35)
+    assert from_neutral["sat_floor"] >= 0.3, from_neutral
+    assert from_neutral["grey_steps"] == 0, from_neutral
+
+
+def test_chroma_zero_is_a_deliberate_grey_ramp():
+    """Asking for no chroma is a real request, so it is not treated as "unset"."""
+    neutral = palette.generate_ramp("#8a3a5a", steps=6, chroma=0.0)
+    assert neutral["sat_floor"] == 0.0, neutral
+    for colour in neutral["colors"]:
+        r, g, b = rgb(colour)
+        assert r == g == b, f"{colour} is not grey, so chroma=0 was ignored"
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5, 30, 100])
+def test_a_chroma_outside_zero_to_one_is_refused(bad):
+    """Named as a saturation rather than a percentage, because 30 is the plausible
+    mistake and silently clamping it to 1.0 would produce a fluorescent ramp."""
+    with pytest.raises(ValidationFailed, match="saturation from 0 to 1"):
+        palette.generate_ramp("#8a7f74", steps=5, chroma=bad)
+
+
+def test_both_ramp_builders_report_whether_their_hue_is_visible():
+    """Reported where the ramp is built, not only when a sprite painted from it is
+    assessed. `ramp_between` cannot rotate hue and cannot invent chroma either: it carries
+    only what its two ends supply, so two near-neutral ends give a ramp of greys however
+    it is eased, which is precisely what happened."""
+    for result in (palette.generate_ramp("#5a7fd4", steps=5),
+                   palette.ramp_between("#241f2a", "#d8d2c6", steps=8)):
+        for field in ("hue_span", "sat_floor", "grey_steps"):
+            assert field in result, f"{field} missing from {sorted(result)}"
+
+    flat = palette.ramp_between("#241f2a", "#d8d2c6", steps=8)
+    assert flat["grey_steps"] >= 5, (
+        f"the ramp the golem was painted from reported {flat['grey_steps']} grey steps; "
+        "it rendered as stone-coloured nothing and must be reported as such")
+
+
+def test_a_peak_ramp_is_not_punished_for_desaturating_its_ends():
+    """The reason the saturation figures cover the ramp's interior.
+
+    A hand-built ramp washes its highlight out toward the light and its deepest shadow
+    toward ambient, which is what `sat_curve="peak"` produces. Measuring the ends would
+    mark that correct practice as the same defect as a grey midtone, and the two are
+    opposites.
+    """
+    peak = palette.generate_ramp(
+        "#8a7f74", steps=8, chroma=0.3, sat_curve="peak", saturation_shift=100.0)
+    ends = [saturation(peak["colors"][0]), saturation(peak["colors"][-1])]
+    assert min(ends) < quality.HUE_INVISIBLE_SAT, (
+        f"the fixture does not desaturate its ends ({ends}), so it cannot show that "
+        "doing so is forgiven")
+    assert peak["grey_steps"] == 0, peak
+    assert peak["sat_floor"] > quality.HUE_INVISIBLE_SAT, peak

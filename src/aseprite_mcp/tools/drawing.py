@@ -20,7 +20,7 @@ from ..core.limits import (
 )
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
-from .common import lua_path, parse_color, resolve_path
+from .common import lua_path, parse_color, resolve_path, run_ramp_lua
 
 # Shared Lua preamble: open sprite, resolve a non-group layer + frame, build an
 # editable full-canvas image, then run the per-tool drawing snippet, commit & save.
@@ -37,9 +37,14 @@ commit_image(spr, layer, framenum, img)
 save_sprite(spr)
 RESULT = { ok = true, filename = spr.filename, layer = layer.name,
            frame = framenum, width = spr.width, height = spr.height }
--- A snippet that counted something it wants reported sets `_stray_replaced`; the harness
--- passes it through rather than every drawing tool growing its own RESULT block.
-if _stray_replaced ~= nil then RESULT.replaced = _stray_replaced end
+-- A snippet that measured something it wants reported sets `_extra`, a table of fields
+-- merged in here, rather than every drawing tool growing its own RESULT block. Leaving a
+-- field out of `_extra` leaves it out of the result, which is the convention the counters
+-- already follow: absent rather than zero, so a count that is present means the work it
+-- describes was actually attempted.
+if type(_extra) == "table" then
+  for field, value in pairs(_extra) do RESULT[field] = value end
+end
 """
 
 
@@ -194,6 +199,21 @@ def draw_pixel_map(
     Returns the usual write counters plus `map_width`, `map_height`,
     `pixels_transparent` (cells deliberately left alone) and `colors_used`.
     """
+    return _write_map(filename, rows, legend, x=x, y=y, layer=layer, frame=frame)
+
+
+def _write_map(filename, rows, legend, *, x, y, layer, frame, ramp=None):
+    """The shared body of every tool that writes a character map.
+
+    One path, so the expansion's refusals, the selection mask and the clipping counters
+    are inherited rather than reimplemented by each caller that happens to want a grid.
+
+    `ramp`, when given, routes the write through `run_ramp_lua` so the harness measures
+    what that ramp became against an indexed palette. A facet pass needs that more than
+    most tools do: its whole premise is that each plane takes a distinct flat tone, so two
+    tones banding onto one palette entry merges two planes into one, and nothing in the
+    picture or the counts would say so.
+    """
     plan = pixelmap.expand(rows, legend, int(x), int(y))
     args = {
         "src": lua_path(resolve_path(filename)),
@@ -205,7 +225,11 @@ def draw_pixel_map(
         "pixels": [{"x": p["x"], "y": p["y"], "c": parse_color(p["color"])}
                    for p in plan["pixels"]],
     }
-    result = _draw(args, _PIXEL_WRITE_LUA)
+    if ramp is None:
+        result = _draw(args, _PIXEL_WRITE_LUA)
+    else:
+        args["ramp"] = [parse_color(entry) for entry in ramp]
+        result = run_ramp_lua(_OPEN + _PIXEL_WRITE_LUA + _CLOSE, args)
     result["map_width"] = plan["width"]
     result["map_height"] = plan["height"]
     result["pixels_transparent"] = plan["transparent"]

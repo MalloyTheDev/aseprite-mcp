@@ -1029,7 +1029,22 @@ local function get_draw_image(spr, layer, framenum)
   img:clear()
   local cel = layer:cel(framenum)
   if cel ~= nil and cel.image ~= nil then
-    img:drawImage(cel.image, cel.position)
+    -- BlendMode.SRC, which copies the source pixel and consults no palette.
+    --
+    -- The default, BlendMode.NORMAL, blends. On an INDEXED sprite that means converting
+    -- each pixel to RGBA through a palette and mapping the result back with a best-fit
+    -- search, and the palette that round trip uses holds 32 entries. So every pixel
+    -- drawn in index 32 or above came back as the mask index: silently erased, by the
+    -- helper that every drawing tool calls before it touches anything.
+    --
+    -- Measured on an indexed sprite with a 35-entry palette: write index 34 at one
+    -- coordinate, write index 1 at another, and the first coordinate is transparent.
+    -- Indices 30 and 31 survive, 32 and 33 do not, which pins the boundary exactly. It
+    -- cost this repository 421 pixels per frame of a committed showcase animation: the
+    -- warm glow on the cavern rock and the whole of the lava waterline existed on frame
+    -- 1 and were a hole on the other 23, and the piece's own verification passed because
+    -- it sampled a window those pixels do not reach.
+    img:drawImage(cel.image, cel.position, 255, BlendMode.SRC)
   end
   return img
 end

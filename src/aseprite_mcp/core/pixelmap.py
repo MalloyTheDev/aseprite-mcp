@@ -63,13 +63,14 @@ def _check_legend(legend: dict) -> dict[str, str | None]:
     return resolved
 
 
-def expand(rows, legend, origin_x: int = 0, origin_y: int = 0) -> dict:
-    """The pixel list a character grid describes, plus what it says about itself.
+def read_rows(rows) -> tuple[list[str], int, int]:
+    """A character grid checked for being a grid, as `(lines, width, height)`.
 
-    Returns `pixels` in the shape `draw_pixels` takes, with `width`, `height`, the count
-    of cells deliberately left alone, and the colours actually used. Colours are passed
-    through as written: parsing them is the tool layer's job, so this module stays free of
-    anything that knows what a colour is.
+    Separated from `expand` so that a second reader of this notation inherits these
+    refusals rather than writing its own: `core.occlusion` reads the same shape of map but
+    its legend names masses rather than colours, and the ragged-row message below is the
+    one a hand-written grid actually earns. Two copies of it would be two messages, and the
+    one that drifts is the one nobody is reading.
     """
     if not isinstance(rows, (list, tuple)) or not rows:
         raise ValidationFailed(
@@ -102,7 +103,18 @@ def expand(rows, legend, origin_x: int = 0, origin_y: int = 0) -> dict:
         raise ValidationFailed(
             f"map is {width}x{height}; the maximum is {MAX_CANVAS_DIMENSION} per axis."
         )
+    return lines, width, height
 
+
+def expand(rows, legend, origin_x: int = 0, origin_y: int = 0) -> dict:
+    """The pixel list a character grid describes, plus what it says about itself.
+
+    Returns `pixels` in the shape `draw_pixels` takes, with `width`, `height`, the count
+    of cells deliberately left alone, and the colours actually used. Colours are passed
+    through as written: parsing them is the tool layer's job, so this module stays free of
+    anything that knows what a colour is.
+    """
+    lines, width, height = read_rows(rows)
     resolved = _check_legend(legend)
     pixels: list[dict] = []
     transparent = 0
