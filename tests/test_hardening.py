@@ -1099,6 +1099,7 @@ RAMP_TOOLS = {
     "dither_band": {"from_step": 0, "to_step": 1},
     "glow": {},
     "shade_facets": {"rows": ["ab"], "legend": {"a": 90, "b": 0}},
+    "seam_occlusion": {"rows": ["ab"], "legend": {"a": 1, "b": 0}},
     "gradient_map": {},
     "outline_smart": {},
     "shade_region_by_light": {},
@@ -1107,6 +1108,7 @@ RAMP_TOOLS = {
     # is its own check and fires first, which would pass this test for the wrong reason.
     "smear_frame": {"layer": "art", "frame": 2},
     "specular_highlight": {},
+    "surface_emission": {"source_color": "#ff8a2a"},
 }
 
 

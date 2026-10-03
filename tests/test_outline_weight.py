@@ -18,8 +18,12 @@ feature makes is geometric and the only honest way to check it is to count pixel
 """
 from __future__ import annotations
 
+import itertools
+import math
+
 import pytest
 
+from aseprite_mcp.core import lighting
 from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.core.limits import MAX_OUTLINE_THICKNESS
 from aseprite_mcp.tools import drawing, effects, inspect, sprite
@@ -119,12 +123,26 @@ def test_the_weight_gathers_on_the_side_facing_away_from_the_light(disc):
 
 def test_the_counts_say_which_side_the_pixels_landed_on(disc):
     """Reported so a caller can prove the directional pass did something, rather than
-    inferring it from a total that a uniform outline would also produce."""
+    inferring it from a total that a uniform outline would also produce.
+
+    `outline_lit` used to have to be exactly 0 here, and that assertion was a statement
+    about the old hard switch rather than about the picture: with `lit_thickness=0` no
+    pixel whose facing was lit by even a hair got an outline, which is what made the
+    keyline come apart at the terminator. The taper keeps a thinning band across it, so a
+    minority of the laid pixels now sit on the lit side of the terminator and the keyline
+    is continuous. What the counts still have to do is distinguish the two sides, so that
+    is what is asserted: most of the weight away from the light, and the two adding up to
+    what was written.
+    """
     result = effects.add_outline(disc, INK, thickness=2, light_angle=LIGHT,
                                  lit_thickness=0)
-    assert result["outline_lit"] == 0, result
-    assert result["outline_shadow"] > 0, result
-    assert result["outline_shadow"] == result["pixels_written"], result
+    assert result["outline_shadow"] > 4 * result["outline_lit"], (
+        f"the weight is not gathering away from the light: {result}")
+    assert result["outline_lit"] > 0, (
+        "with lit_thickness=0 and a taper, the band through the terminator reaches a "
+        f"little way onto the lit side; nothing did: {result}")
+    assert result["outline_shadow"] + result["outline_lit"] == result["pixels_written"], (
+        f"the two counts no longer account for every pixel written: {result}")
 
 
 def test_without_a_light_the_outline_is_the_uniform_one_it_always_was(disc):
@@ -207,3 +225,150 @@ def test_the_light_direction_actually_steers_which_side_is_heavy(disc):
         f"weight: {column[:6]}")
     assert not _opaque(column[25 - 4]), (
         f"the lit bottom edge was outlined anyway: {column[25 - 4]}")
+
+
+# --------------------------------------------------------------------- the taper itself
+# The weight table is arithmetic and gets pure tests; the band it produces is geometry and
+# gets measured off a sprite. Both are needed: a correct table drawn through a facing
+# measured at the wrong radius still comes apart, which is what the ring walk below counts.
+
+
+@pytest.mark.pure
+def test_a_two_to_zero_keyline_passes_through_one():
+    """The headline. Three weights rather than two, and the middle one covering the widest
+    band of facing, because that band is the terminator the keyline has to thin across."""
+    weights = lighting.taper_weights(2, 0)
+    assert sorted(set(weights)) == [0, 1, 2], weights
+    assert weights[0] == 2 and weights[-1] == 0, weights
+    counted = {value: weights.count(value) for value in set(weights)}
+    assert counted[1] > counted[0] and counted[1] > counted[2], counted
+
+
+@pytest.mark.pure
+def test_the_table_only_ever_runs_one_way():
+    """A weight that rose again toward the light would be a second keyline on the lit side.
+    Asserted across every pairing a caller can ask for rather than on one example."""
+    for shadow in range(0, 5):
+        for lit in range(0, 5):
+            weights = lighting.taper_weights(shadow, lit)
+            assert weights[0] == shadow and weights[-1] == lit, (shadow, lit, weights)
+            step = 1 if lit >= shadow else -1
+            for before, after in itertools.pairwise(weights):
+                assert (after - before) * step >= 0, (
+                    f"{shadow} to {lit} doubles back: {weights}")
+
+
+@pytest.mark.pure
+def test_two_widths_one_apart_still_switch_where_they_always_switched():
+    """The compatibility property, and the reason this could become the default rather than
+    an argument. With only two integers available the changeover sits at the midpoint of
+    the facing range, which is where `dot > 0` put it, so every existing call with
+    `thickness=2, lit_thickness=1` draws exactly what it drew before."""
+    weights = lighting.taper_weights(2, 1)
+    assert sorted(set(weights)) == [1, 2], weights
+    middle = len(weights) // 2
+    assert weights[middle] == 2, (
+        "an edge exactly square to the light has to count as the shadow side, which is "
+        f"what the comparison it replaced did: {weights[middle - 1:middle + 2]}")
+    assert weights[middle + 1] == 1, weights[middle:middle + 2]
+
+
+@pytest.mark.pure
+def test_a_taper_needs_a_middle_and_cannot_be_negative():
+    with pytest.raises(ValueError, match="at least 3 buckets"):
+        lighting.taper_weights(2, 0, buckets=2)
+    with pytest.raises(ValueError, match="cannot be negative"):
+        lighting.taper_weights(2, -1)
+
+
+def test_the_thickness_changes_gradually_around_a_disc(disc):
+    """Measured off the sprite rather than off the table: every weight between the two
+    asked for has to actually land on the silhouette's own boundary ring.
+
+    On a circle each of the three weights of a 2-to-0 taper covers 120 degrees of arc, so
+    they should come out in roughly equal thirds. A per-pixel switch would leave the middle
+    entry empty, and the facing measured at too small a radius leaves it nearly empty: at a
+    radius of one the same disc split 28 / 12 / 56 instead.
+    """
+    result = effects.add_outline(disc, INK, thickness=2, light_angle=LIGHT,
+                                 lit_thickness=0)
+    weights = result["outline_weights"]
+    assert len(weights) == 3, weights
+    assert all(count > 0 for count in weights), (
+        f"a weight between the two asked for never appeared, so this switched rather than "
+        f"tapered: {weights}")
+    ring = sum(weights)
+    assert weights[1] > 0.2 * ring, (
+        f"the band of single-pixel keyline is only {weights[1]} of {ring} edge pixels, "
+        "which is a seam rather than a taper")
+
+
+def test_a_longer_drop_uses_every_weight_on_the_way_down(disc):
+    """Three to nothing has four weights, and all four have to appear. This is the case the
+    old switch could not express at all: it had two values whatever the arguments."""
+    result = effects.add_outline(disc, INK, thickness=3, light_angle=LIGHT,
+                                 lit_thickness=0)
+    weights = result["outline_weights"]
+    assert len(weights) == 4, weights
+    assert all(count > 0 for count in weights), (
+        f"a 3-to-0 keyline skipped a weight on the way down: {weights}")
+
+
+def test_the_keyline_stays_in_one_piece_on_a_lumpy_silhouette(request):
+    """The defect this item exists for, counted.
+
+    A taper that works lays one continuous arc of outline and leaves one continuous arc
+    bare, so walking the shape's boundary ring in angular order crosses between the two
+    exactly twice. The per-pixel test crossed 30 times on this shape, which is fifteen
+    separate scraps of keyline: the figure looked damaged, which is why `lit_thickness=0`
+    had to be reverted to 1 on this project's golem even though the measurement preferred
+    it.
+
+    A handful of crossings is allowed rather than exactly two, because the ring of a bumpy
+    silhouette is not a circle and the angular sort around its centroid is an
+    approximation of walking it. Fifteen pieces and one piece are not close enough for
+    that to matter.
+    """
+    name = f"outline_lumpy_{request.node.name}.aseprite"
+    sprite.create_sprite(name, W, H, overwrite=True)
+    drawing.draw_ellipse(name, CX, CY, 9, 9, FILL, filled=True)
+    bumps = [(16, 6), (11, 8), (21, 8), (6, 15), (26, 17), (12, 24), (21, 24), (16, 26),
+             (9, 11), (24, 22), (8, 20), (24, 11)]
+    drawing.draw_pixels(name, [{"x": x, "y": y} for x, y in bumps], FILL)
+
+    rows = inspect.get_pixels(name, 0, 0, W, H)["pixels"]
+    solid = {(x, y) for y in range(H) for x in range(W) if _opaque(rows[y][x].lower())}
+    cx = sum(x for x, _ in solid) / len(solid)
+    cy = sum(y for _, y in solid) / len(solid)
+    ring = {
+        (x + dx, y + dy)
+        for x, y in solid
+        for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+        if (x + dx, y + dy) not in solid and 0 <= x + dx < W and 0 <= y + dy < H
+    }
+    walk = sorted(ring, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+
+    effects.add_outline(name, INK, thickness=2, light_angle=LIGHT, lit_thickness=0)
+    after = inspect.get_pixels(name, 0, 0, W, H)["pixels"]
+    inked = [after[y][x].lower()[:7] == INK for x, y in walk]
+    crossings = sum(1 for i, state in enumerate(inked) if state != inked[i - 1])
+    assert 0 < crossings <= 6, (
+        f"the keyline crosses between outlined and bare {crossings} times around the "
+        f"ring, so it is in about {max(1, crossings // 2)} pieces rather than one")
+
+    # And no scrap left on its own, which is what a reader sees as dirt rather than as a
+    # thinning keyline.
+    ink = {(x, y) for y in range(H) for x in range(W) if after[y][x].lower()[:7] == INK}
+    lone = [
+        (x, y) for x, y in ink
+        if not any((x + dx, y + dy) in ink
+                   for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0))
+    ]
+    assert lone == [], f"{len(lone)} outline pixels are stranded alone: {lone[:6]}"
+
+
+def test_a_uniform_outline_reports_no_weights(disc):
+    """The counts are a statement about a directional pass. A call with no light has no
+    facing to report, and a zero-filled table would read as a taper that came out flat."""
+    result = effects.add_outline(disc, INK, thickness=2)
+    assert "outline_weights" not in result, result

@@ -28,6 +28,8 @@ import itertools
 from typing import NamedTuple
 
 Grid = list[list[str]]
+# A silhouette: one boolean per pixel, True where something is drawn.
+Mask = list[list[bool]]
 
 # Hue distance, in degrees, above which two colours are counted as belonging to separate
 # ramps. Pixel-art ramps hue-shift as they go light or dark, commonly by 20 to 40 degrees
@@ -120,25 +122,43 @@ def isolated_pixels(grid: Grid) -> int:
     return count
 
 
+def opacity_mask(grid: Grid) -> Mask:
+    """The silhouette as rows of booleans, which is all the shape metrics actually read.
+
+    Separated out because `core.edges` plans a change to a silhouette and has to score the
+    silhouette it is planning, and the alternative was a second transcription of the
+    window test below. A metric with two definitions is a metric that drifts, and the one
+    here is the one `assess_sprite` reports.
+    """
+    return [[_rgba(px)[3] > 0 for px in row] for row in grid]
+
+
+def jaggy_corners_in_mask(mask: Mask) -> int:
+    """`jaggy_corners`, counted on a silhouette rather than on colours."""
+    height = len(mask)
+    width = len(mask[0]) if height else 0
+    return sum(
+        1
+        for y in range(height - 1)
+        for x in range(width - 1)
+        if mask[y][x] + mask[y][x + 1] + mask[y + 1][x] + mask[y + 1][x + 1] == 3
+    )
+
+
 def jaggy_corners(grid: Grid) -> int:
     """Staircase corners in the silhouette.
 
     Counts 2x2 windows where exactly three cells are opaque, which is the shape a
     single-pixel step makes. It is what Aseprite's own pixel-perfect mode exists to
     avoid. Curves legitimately produce some, so compare rather than aim for zero.
+
+    A step of two pixels scores the same as a step of one, which is worth knowing before
+    reading the number as a quality score: on a staircase that only ever goes one way the
+    count is exactly the number of steps, whatever their size. That is the property
+    `normalize_edge_runs` works against, and it is why merging a stray one-row run into
+    its neighbour lowers this by one.
     """
-    height = len(grid)
-    width = len(grid[0]) if height else 0
-
-    def opaque(x: int, y: int) -> bool:
-        return 0 <= x < width and 0 <= y < height and _rgba(grid[y][x])[3] > 0
-
-    return sum(
-        1
-        for y in range(height - 1)
-        for x in range(width - 1)
-        if sum((opaque(x, y), opaque(x + 1, y), opaque(x, y + 1), opaque(x + 1, y + 1))) == 3
-    )
+    return jaggy_corners_in_mask(opacity_mask(grid))
 
 
 def bounding_box(grid: Grid) -> BBox | None:

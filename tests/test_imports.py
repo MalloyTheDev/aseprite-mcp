@@ -521,9 +521,10 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     # would pass every assertion above and prove nothing at all.
     assert sorted(checked) == [
         "assess_sprite", "cast_shadow", "contact_shadow", "dither_band", "glow",
-        "gradient_map", "outline_smart", "shade_facets", "shade_region_by_light",
+        "gradient_map", "outline_smart", "seam_occlusion", "shade_facets",
+        "shade_region_by_light",
         "shift_along_ramp",
-        "smear_frame", "specular_highlight",
+        "smear_frame", "specular_highlight", "surface_emission",
     ], f"the set of ramp tools changed: {sorted(checked)}"
 
 

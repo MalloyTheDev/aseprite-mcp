@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **157 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **160 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -123,7 +123,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 157 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 160 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -737,7 +737,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 `selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
 section of their own, because the sections above each describe the *product* while these
 are a verdict on the *call*, and because every other result in this server reports them
-there: one rule reads them across all 157 tools. They are **absent rather than zero**, so a
+there: one rule reads them across all 160 tools. They are **absent rather than zero**, so a
 key that is present at all means there is something to read, and a tool that writes no
 pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
 them, which let a batch report `status: applied` for an op whose every pixel an active
@@ -894,6 +894,8 @@ and says so rather than doing it quietly.
 | `shift_along_ramp` | Move pixels along a colour ramp, keeping every one of them on the palette. |
 | `specular_highlight` | Place a small glint where the light reflects at the viewer, never on an edge pixel. The ramp's top step, or a brighter colour for metal. |
 | `contact_shadow` | Darken the pixels where one form meets another, along its ramp. |
+| `seam_occlusion` | Darken the seam where two masses of the **same** material overlap, from a character map whose legend names the masses and says which is nearer the viewer. `contact_shadow` finds its occluder by colour, so it cannot see an arm against a torso cut from one stone. Falls off with distance, so the contact does not read as drawn brickwork. |
+| `surface_emission` | Light an interior source onto the surface around it, up that surface's own ramp by distance. `glow` builds its halo on a layer below the art, so a core inside a silhouette gets nothing; this warms the stone instead, and two tones at one distance move together so the form survives. |
 | `outline_smart` | Outline a shape in colours taken from its own ramp, not one flat colour. |
 | `dither_band` | Dither the boundary between two adjacent ramp steps, widening the transition. |
 
@@ -929,12 +931,13 @@ satisfied by a tool that wrote the right number of pixels in the wrong places.
 | --- | --- |
 | `fill_gradient` | Linear/radial gradient, multi-stop, optional Bayer dithering. |
 | `fill_checkerboard` | Two-colour checkerboard pattern. |
-| `add_outline` | Pixel outline around art (outside/inside, 4/8-connectivity, thickness). |
+| `add_outline` | Pixel outline around art (outside/inside, 4/8-connectivity, thickness). With a light angle the weight **tapers** across the terminator, 2 then 1 then 0 over a band of edge, instead of switching per pixel and breaking the keyline into scraps. |
 | `add_drop_shadow` | Hard drop shadow on a new layer beneath the art. |
 | `cast_shadow` | A shadow on the ground, away from the light and foreshortened by its height, built of ramp steps and clipped to the surface it falls on. |
 | `glow` | A halo of several rings, each a step further down a ramp, optionally dithered at the outer edge. Its own layer, so deleting it removes the effect, and one cel a frame, so one layer carries an animated one. |
 | `replace_color` | Swap a colour (with per-channel tolerance). |
 | `remove_stray_pixels` | Replace pixels with no neighbour of their own colour by the colour around them: the dirt a shading pass leaves, without touching a dither or introducing a colour. |
+| `normalize_edge_runs` | Even out the run lengths along a silhouette's diagonals, which is the wander that reads as programmer art. Merges a stray one-row run into its neighbour and reports the jagged-corner count before and after; it only ever adds a pixel, so the extent cannot move, and it declines a 1:1 diagonal, a spike, a notch or a hairline by name. |
 | `invert_colors` | Invert RGB (alpha preserved). |
 | `adjust_brightness_contrast` · `adjust_hue_saturation` · `desaturate` | Colour grading. |
 
