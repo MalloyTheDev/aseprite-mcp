@@ -172,13 +172,84 @@ def duplicate_layer(filename: str, layer: str) -> dict:
 
 @mcp.tool()
 def merge_layer_down(filename: str, layer: str) -> dict:
-    """Merge a layer down into the layer directly beneath it."""
+    """Merge a layer down into the layer directly beneath it.
+
+    Refuses rather than doing nothing when there is nothing to merge into. Aseprite's
+    `MergeDownLayer` is a no-op in five cases, and it raises in none of them, so this used
+    to report a result indistinguishable from a merge that happened. Measured, naming the
+    layer stack before and after:
+
+        bottom layer of the sprite        ['only']                   -> ['only']
+        lowest layer inside a group       ['Layer 1', 'grp/a', 'b']  -> unchanged
+        the layer below is a group        ['Layer 1', 'grp', 'a']    -> unchanged
+        the layer named is a group        ['Layer 1', 'grp/a']       -> unchanged
+        the layer below is a tilemap      ['Layer 1', 'tiles', 'px'] -> unchanged
+
+    All five returned sprite info describing the stack they had failed to change, which is
+    the same shape a successful merge returns. Only the ordinary case worked, so an agent
+    flattening a stack by merging downward in a loop was told the loop had finished when it
+    had stopped.
+
+    Returns `merged_into`, the name of the layer the artwork went into, so the result says
+    what happened rather than only what the sprite now looks like.
+    """
     args = {"src": lua_path(resolve_path(filename)), "layer": layer}
     body = """
     local spr = open_sprite(ARG.src)
-    app.layer = find_layer(spr, ARG.layer)
+    local target = find_layer(spr, ARG.layer)
+
+    -- The siblings of a layer, which is where "the layer beneath" has to be looked for:
+    -- `stackIndex` is 1-based within the parent, so a group's lowest child has index 1
+    -- just as the sprite's bottom layer does, and merging either one has nothing to
+    -- merge into.
+    -- The parent is read now and kept, because MergeDownLayer deletes `target` and
+    -- reaching through it afterwards raises "Tried to access a deleted 'Layer'" on the
+    -- one path that works.
+    local parent = target.parent
+    local siblings = (parent == spr) and spr.layers or parent.layers
+    local where = (parent == spr) and "the sprite" or ("group '" .. parent.name .. "'")
+
+    if target.isGroup then
+      error("Cannot merge down the group layer '" .. target.name .. "': a group holds " ..
+            "no pixels of its own, so there is nothing to merge. Merge the layers " ..
+            "inside it, or flatten_sprite.", 0)
+    end
+    if target.stackIndex <= 1 then
+      error("'" .. target.name .. "' is the bottom layer of " .. where .. ", so there " ..
+            "is nothing beneath it to merge into. Nothing was changed.", 0)
+    end
+
+    local below = siblings[target.stackIndex - 1]
+    if below.isGroup then
+      error("'" .. target.name .. "' sits above the group layer '" .. below.name ..
+            "', which holds no pixels of its own, so there is nothing to merge into. " ..
+            "Nothing was changed. Move '" .. target.name .. "' into the group first, " ..
+            "or flatten_sprite.", 0)
+    end
+    if below.isTilemap then
+      error("'" .. target.name .. "' sits above the tilemap layer '" .. below.name ..
+            "', and pixels cannot be merged into a tile grid. Nothing was changed. " ..
+            "Export the tilemap to a normal layer first, or flatten_sprite.", 0)
+    end
+
+    local before = #siblings
+    local below_name = below.name
+    app.layer = target
     app.command.MergeDownLayer()
+    -- Checked rather than assumed. The refusals above cover every no-op measured, and
+    -- this is the guard against the next one: a merge that left the stack the length it
+    -- was did not happen, whatever the command reported.
+    local after = #((parent == spr) and spr.layers or parent.layers)
+    if after == before then
+      error("Aseprite's MergeDownLayer left " .. where .. " with " .. after ..
+            " layer(s), the same as before, so '" .. ARG.layer .. "' was not merged. " ..
+            "Nothing was changed and nothing was saved.", 0)
+    end
+
     save_sprite(spr)
     RESULT = sprite_info(spr)
+    RESULT.ok = true
+    RESULT.merged = ARG.layer
+    RESULT.merged_into = below_name
     """
     return run_lua(body, args)

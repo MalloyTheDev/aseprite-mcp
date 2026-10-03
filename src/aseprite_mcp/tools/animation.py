@@ -38,7 +38,7 @@ from ..core.limits import (
 from ..core.manifest import workflow_manifest
 from ..core.models import FRAME_GUARD_LUA, ColorSpec, FrameRef
 from ..core.runner import run_lua
-from .common import lua_path, resolve_path
+from .common import LANDED_LUA, carry_harness_keys, lua_path, resolve_path
 
 # FNV-1a over the frame's raw pixel bytes, 64-bit so that reporting two frames as
 # identical is not a coin toss. A hash rather than a pairwise comparison, so frames can
@@ -573,7 +573,7 @@ end
 """
 
 _TWEEN_LUA = (
-    FRAME_GUARD_LUA + _LINK_GUARD_LUA + _COMMIT_LUA + _PIXEL_LAYER_LUA + """
+    FRAME_GUARD_LUA + _LINK_GUARD_LUA + _COMMIT_LUA + _PIXEL_LAYER_LUA + LANDED_LUA + """
 -- The point the transform holds still, taken from the cel's own drawn bounds so the
 -- caller never has to work out where a contact edge is. `bottom` is the last drawn row
 -- rather than one past it: that row then maps to itself exactly, which is the difference
@@ -685,7 +685,11 @@ app.transaction(function()
     local n, box = frames[i], boxes[i]
     local img = Image(spr.spec)
     img:clear()
-    local drawn = 0
+    -- Counted from the prelude's own tally rather than beside the loop: a write refused
+    -- by the active selection increments nothing, and `drawn_pixels` would otherwise
+    -- claim resampled pixels that never reached the frame. The `bounds` beside it come
+    -- from the committed image and were already honest, so the two disagreed.
+    local mark = landed()
     for dy = box.y0, box.y1 do
       for dx = box.x0, box.x1 do
         local ox, oy = dx - ax, dy - ay
@@ -701,7 +705,6 @@ app.transaction(function()
             -- The source pixel, copied: nothing is blended and nothing is averaged, so
             -- no colour appears that the drawing did not already contain.
             img_set(img, dx, dy, px)
-            drawn = drawn + 1
           end
         end
       end
@@ -717,7 +720,7 @@ app.transaction(function()
     end
     layer:cel(n).opacity = step.opacity
     written[i] = {
-      frame = n, drawn_pixels = drawn, off_canvas = box.off_canvas,
+      frame = n, drawn_pixels = landed() - mark, off_canvas = box.off_canvas,
       scale_x = step.scale_x, scale_y = step.scale_y,
       rotate_deg = step.rotate_deg, opacity = step.opacity,
       bounds = { x = bounds.x, y = bounds.y,
@@ -951,7 +954,7 @@ def tween_cels(
                     "its mind. Scale further per frame, or over fewer frames."
                 )
 
-    return {
+    return carry_harness_keys({
         "layer": result["layer"],
         "frames": numbered,
         "source_frame": result["source_frame"],
@@ -971,7 +974,7 @@ def tween_cels(
         "rendered_monotone": monotone,
         "pixels_written": result.get("pixels_written", 0),
         "warnings": warnings,
-    }
+    }, result)
 
 
 # A smear is two launches, not one: the subject is measured, the trail is planned in
@@ -1479,7 +1482,7 @@ def smear_frame(
 
     applied = run_lua(_SMEAR_WRITE_LUA, args)
 
-    return {
+    return carry_harness_keys({
         "layer": applied["layer"],
         "frame": applied["frame"],
         "from_frame": there,
@@ -1503,4 +1506,4 @@ def smear_frame(
         "bounds": applied["bounds"],
         "pixels_written": applied.get("pixels_written", 0),
         "warnings": warnings,
-    }
+    }, applied)

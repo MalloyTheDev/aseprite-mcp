@@ -267,6 +267,20 @@ def parse_property_value(value, *, as_json: bool = False):
                     'needs JSON syntax ({"x": 8, "y": 15}).'
                 ) from exc
             return text
+        except RecursionError as exc:
+            # The depth cap below is the right cap in the wrong place for this one input:
+            # `json.loads` walks the nesting itself, so a value nested past the
+            # interpreter's recursion limit never reaches `_check_tree`. RecursionError
+            # is a RuntimeError, not a ValueError, so the branch above does not see it
+            # either, and `set_properties(value='{"a":' * 5000 + ..., as_json=True)`
+            # surfaced as an untyped internal failure with no remedy in it. Measured at
+            # v0.10.0 against a 5,000-deep value. Reported as the depth refusal it is,
+            # because that is what the caller has to change.
+            raise ValidationFailed(
+                f"value nests too deeply to parse (more than {MAX_PROPERTY_DEPTH} "
+                "levels is refused in any case). Properties hold game metadata, not "
+                "documents; flatten it."
+            ) from exc
         _check_tree(parsed, "value", 0)
         return parsed
     return text

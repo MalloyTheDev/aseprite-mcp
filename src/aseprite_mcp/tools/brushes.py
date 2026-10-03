@@ -182,8 +182,12 @@ def mirror_layer(
         local lo, hi
         if ARG.source_side == "first" then lo, hi = 0, ax - 1 else lo, hi = ax, img.width - 1 end
         for x = lo, hi do
-          local mx = 2 * ax - 1 - x
-          if mx >= 0 and mx < img.width then img_set(img, mx, y, img:getPixel(x, y)) end
+          -- Handed to img_set unguarded, so a mirror that lands off the canvas is
+          -- counted as clipped rather than dropped in silence. Guarding it here meant
+          -- `mirror_layer(axis=12)` on a 16-wide canvas asked for 96 writes, landed 32,
+          -- and reported no `pixels_clipped` at all: two thirds of the request vanished
+          -- with nothing in the result to compare against what was asked for.
+          img_set(img, 2 * ax - 1 - x, y, img:getPixel(x, y))
         end
       end
     else
@@ -192,8 +196,8 @@ def mirror_layer(
         local lo, hi
         if ARG.source_side == "first" then lo, hi = 0, ay - 1 else lo, hi = ay, img.height - 1 end
         for y = lo, hi do
-          local my = 2 * ay - 1 - y
-          if my >= 0 and my < img.height then img_set(img, x, my, img:getPixel(x, y)) end
+          -- Unguarded for the same reason as the horizontal axis above.
+          img_set(img, x, 2 * ay - 1 - y, img:getPixel(x, y))
         end
       end
     end

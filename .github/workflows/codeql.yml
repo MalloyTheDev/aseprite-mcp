@@ -28,7 +28,13 @@ jobs:
     steps:
       # Actions pinned to commit SHAs (supply-chain hardening); Dependabot keeps
       # them current and annotates the version (see .github/dependabot.yml).
+      #
+      # persist-credentials: false matters more here than in ci.yml: this job holds
+      # `security-events: write`, so a token left in .git/config for later steps to read
+      # is a token that can write code-scanning results. Nothing here pushes.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3

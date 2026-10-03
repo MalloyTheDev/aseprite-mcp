@@ -27,7 +27,7 @@ from ..core.limits import (
     check_list_length,
 )
 from ..core.models import FRAME_GUARD_LUA
-from .common import lua_path, parse_color, resolve_path, run_ramp_lua
+from .common import LANDED_LUA, lua_path, parse_color, resolve_path, run_ramp_lua
 
 # Shared by every ramp-aware tool here: find the ramp entry a pixel belongs to.
 #
@@ -89,6 +89,10 @@ def shift_along_ramp(
 
     Returns `pixels_written` and `pixels_skipped`. A high skip count usually means the
     ramp does not match the artwork, not that the sprite was already correct.
+
+    `pixels_matched` counts the pixels that both matched the ramp and were written, so it
+    agrees with `pixels_written` rather than counting matches an active selection then
+    refused.
     """
     if len(ramp) < 2:
         raise ValidationFailed("ramp needs at least 2 colours to shift along.")
@@ -111,7 +115,7 @@ def shift_along_ramp(
         "x": int(x), "y": int(y), "width": width, "height": height,
         "tolerance": float(tolerance),
     }
-    body = FRAME_GUARD_LUA + _RAMP_LUA + """
+    body = FRAME_GUARD_LUA + _RAMP_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
@@ -122,7 +126,7 @@ def shift_along_ramp(
     local rw = ARG.width or (spr.width - rx)
     local rh = ARG.height or (spr.height - ry)
     local ramp = ARG.ramp
-    local matched = 0
+    local mark = landed()
 
     for yy = ry, ry + rh - 1 do
       for xx = rx, rx + rw - 1 do
@@ -140,7 +144,6 @@ def shift_along_ramp(
               -- Alpha is carried through untouched: shading must not alter a
               -- silhouette, including anti-aliased edge pixels.
               img_set(img, xx, yy, rgba_to_px(spr, c.r, c.g, c.b, a))
-              matched = matched + 1
             else
               note_skipped()
             end
@@ -153,7 +156,7 @@ def shift_along_ramp(
     save_sprite(spr)
     RESULT = { ok = true, filename = spr.filename, layer = layer.name,
                frame = framenum, steps = ARG.steps, ramp_size = #ramp,
-               pixels_matched = matched }
+               pixels_matched = landed() - mark }
     """
     return run_ramp_lua(body, args)
 
@@ -873,6 +876,34 @@ def specular_highlight(
     return result
 
 
+def _ramp_entries_within(
+    colour: dict, ramp: list[dict], tolerance: float
+) -> list[tuple[int, str, float]]:
+    """The ramp entries `colour` cannot be told apart from, as (index, hex, distance).
+
+    A transcription of `ramp_match`'s weighted distance, which is the authority; the two
+    have to agree or this would warn about an overlap the Lua does not have, or stay quiet
+    about one it does. Weighted rather than plain RGB for the reason given at `_RAMP_LUA`.
+
+    An indexed colour (`{"index": N}`) carries no channels here, so it is skipped rather
+    than guessed at: the palette is only knowable with the file open.
+    """
+    if "r" not in colour:
+        return []
+    out: list[tuple[int, str, float]] = []
+    for i, entry in enumerate(ramp):
+        if "r" not in entry:
+            continue
+        dr = colour["r"] - entry["r"]
+        dg = colour["g"] - entry["g"]
+        db = colour["b"] - entry["b"]
+        dist = (0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db) ** 0.5
+        if dist <= tolerance:
+            hexed = f"#{entry['r']:02x}{entry['g']:02x}{entry['b']:02x}"
+            out.append((i, hexed, dist))
+    return out
+
+
 @mcp.tool()
 def contact_shadow(
     filename: str,
@@ -882,6 +913,7 @@ def contact_shadow(
     depth: int = 1,
     direction: float | None = None,
     tolerance: float = 24.0,
+    occluder_tolerance: float | None = None,
     layer: str | None = None,
     frame: int = 1,
 ) -> dict:
@@ -903,8 +935,28 @@ def contact_shadow(
             form is actually touching something.
         tolerance: How close a pixel must be to a ramp entry to be darkened. Pixels
             further away are left alone, so this does not spill onto other materials.
+        occluder_tolerance: How close a pixel must be to `occluder_color` to count as the
+            occluder, as a weighted RGB distance. Defaults to `tolerance`, which is what
+            this did before it was a separate argument. It wants to be **tight**: the
+            occluder is a flat fill you named, while `tolerance` has to stay loose enough
+            for shaded art that varies, and one number cannot be both. At the shared
+            default of 24 a ground colour within 24 of the subject's own ramp makes the
+            subject its own occluder: measured on a 24x24 sprite with a subject painted
+            `#5a5a7a` and ground `#60607e`, `occluder_pixels` came back as 312 (the 144
+            ground pixels plus all 168 of the subject) and nothing was darkened at all.
+            The result carries a warning naming any ramp entry this cannot be told apart
+            from, because that overlap is invisible otherwise.
         layer: Target layer (default: top layer).
         frame: Target frame, 1-based.
+
+    Refuses a pass that darkened nothing rather than reporting `darkened_pixels: 0` as a
+    success, and the refusal carries the three counts that say which of the possible
+    causes it was. A contact shadow that changed no pixel is not a contact shadow.
+
+    Run this **before** the passes that repaint the occluder, not after. The occluder is
+    found by colour, so a `shade_region_by_light` or `shift_along_ramp` that has already
+    moved the ground off `occluder_color` leaves this matching a handful of pixels and
+    reporting the handful as a success.
     """
     if len(ramp) < 2:
         raise ValidationFailed("ramp needs at least 2 colours.")
@@ -918,19 +970,25 @@ def contact_shadow(
         raise ValidationFailed("depth must be at least 1 ramp step.")
     if tolerance < 0:
         raise ValidationFailed("tolerance must not be negative.")
+    occ_tol = float(tolerance) if occluder_tolerance is None else float(occluder_tolerance)
+    if occ_tol < 0:
+        raise ValidationFailed("occluder_tolerance must not be negative.")
 
+    parsed_ramp = [parse_color(c) for c in ramp]
+    parsed_occ = parse_color(occluder_color)
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer,
         "frame": int(frame),
-        "ramp": [parse_color(c) for c in ramp],
-        "occluder": parse_color(occluder_color),
+        "ramp": parsed_ramp,
+        "occluder": parsed_occ,
         "radius": int(radius),
         "depth": int(depth),
         "direction": None if direction is None else float(direction),
         "tolerance": float(tolerance),
+        "occluder_tolerance": occ_tol,
     }
-    body = FRAME_GUARD_LUA + _RAMP_LUA + """
+    body = FRAME_GUARD_LUA + _RAMP_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
@@ -944,15 +1002,19 @@ def contact_shadow(
     -- lookup, because the inner loop reads every pixel in the radius around every
     -- candidate and re-decoding each one is the whole cost of the tool.
     local is_occ = {}
-    local occ_count = 0
+    local occ_count, opaque = 0, 0
     for y = 0, H - 1 do
       is_occ[y] = {}
       for x = 0, W - 1 do
         local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
         local hit = false
         if a > 0 then
+          opaque = opaque + 1
           local dr, dg, db = r - occ.r, g - occ.g, b - occ.b
-          hit = math.sqrt(0.299*dr*dr + 0.587*dg*dg + 0.114*db*db) <= ARG.tolerance
+          -- Its own tolerance, not the ramp's. One number for both made the subject its
+          -- own occluder whenever the ground sat within 24 of any ramp step, which left
+          -- nothing to darken and reported it as a success.
+          hit = math.sqrt(0.299*dr*dr + 0.587*dg*dg + 0.114*db*db) <= ARG.occluder_tolerance
         end
         is_occ[y][x] = hit
         if hit then occ_count = occ_count + 1 end
@@ -961,7 +1023,7 @@ def contact_shadow(
 
     if occ_count == 0 then
       error("No pixel matched occluder_color, so there is no contact to shade. " ..
-            "Check the colour, or raise tolerance.")
+            "Check the colour, or raise occluder_tolerance.")
     end
 
     local dirx, diry
@@ -970,7 +1032,10 @@ def contact_shadow(
       dirx, diry = math.cos(rad), -math.sin(rad)
     end
 
-    local darkened = 0
+    local mark = landed()
+    -- Counted so a pass that darkened nothing can say which of its reasons it was,
+    -- instead of reporting `darkened_pixels: 0` as a success nobody reads.
+    local in_reach, already_darkest = 0, 0
     for y = 0, H - 1 do
       for x = 0, W - 1 do
         if not is_occ[y][x] then
@@ -999,6 +1064,7 @@ def contact_shadow(
             end
 
             if nearest ~= nil then
+              in_reach = in_reach + 1
               local idx, dist = ramp_match(ramp, r, g, b)
               if dist <= ARG.tolerance then
                 -- Full depth at the contact line, tapering to nothing at the radius.
@@ -1011,7 +1077,8 @@ def contact_shadow(
                   if target ~= idx then
                     local c = ramp[target]
                     img_set(img, x, y, rgba_to_px(spr, c.r, c.g, c.b, a))
-                    darkened = darkened + 1
+                  else
+                    already_darkest = already_darkest + 1
                   end
                 end
               else
@@ -1023,12 +1090,47 @@ def contact_shadow(
       end
     end
 
+    local darkened = landed() - mark
+    -- Refused rather than reported, the way specular_highlight refuses a glint that
+    -- would be invisible. A contact shadow that changed no pixel is not a contact
+    -- shadow, and `ok: true, darkened_pixels: 0` is the result an agent reads as done.
+    if darkened == 0 then
+      error(string.format(
+        "This contact shadow darkened nothing, so the sprite is unchanged. %d of the " ..
+        "%d opaque pixels matched occluder_color (at occluder_tolerance %.1f), %d " ..
+        "non-occluder pixels lay within %d of one, and %d of those were already at the " ..
+        "ramp's darkest step. If the occluder count is most of the sprite, " ..
+        "occluder_color is close enough to the artwork's own colours that the subject " ..
+        "is being read as its own occluder: lower occluder_tolerance. If nothing lay " ..
+        "within reach, the two forms are not touching: raise radius.",
+        occ_count, opaque, ARG.occluder_tolerance, in_reach, R, already_darkest), 0)
+    end
+
     commit_image(spr, layer, framenum, img)
     save_sprite(spr)
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
-               occluder_pixels = occ_count, darkened_pixels = darkened }
+               occluder_pixels = occ_count, opaque_pixels = opaque,
+               pixels_in_reach = in_reach, darkened_pixels = darkened }
     """
-    return run_ramp_lua(body, args)
+    result = run_ramp_lua(body, args)
+    # Said in Python because only Python holds both lists. The occluder match and the ramp
+    # match are two colour-distance tests over the same pixels, and where their radii
+    # overlap a pixel of the artwork is classified as the thing occluding it. That is
+    # invisible in the result otherwise: `occluder_pixels` is a number with nothing to
+    # compare it to, and the pass simply darkens less than it should.
+    overlap = _ramp_entries_within(parsed_occ, parsed_ramp, occ_tol)
+    if overlap:
+        named = ", ".join(f"ramp[{i}] {colour} at {dist:.1f}" for i, colour, dist in overlap)
+        note = (
+            f"occluder_color is within occluder_tolerance ({occ_tol:.1f}) of {named}, so "
+            "pixels of those ramp steps are being treated as the occluder rather than as "
+            "artwork to darken. Lower occluder_tolerance, or give the occluder a colour "
+            "the ramp does not come near."
+        )
+        if isinstance(result, dict):
+            existing = result.get("warnings")
+            result["warnings"] = [*existing, note] if isinstance(existing, list) else [note]
+    return result
 
 
 @mcp.tool()
@@ -1089,7 +1191,7 @@ def outline_smart(
         "angle": None if light_angle is None else float(light_angle),
         "tolerance": float(tolerance),
     }
-    body = FRAME_GUARD_LUA + _RAMP_LUA + """
+    body = FRAME_GUARD_LUA + _RAMP_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
     if layer.isGroup then error("Cannot outline a group layer: " .. layer.name) end
@@ -1153,6 +1255,7 @@ def outline_smart(
       end
     end
 
+    local mark = landed()
     for _, p in ipairs(pending) do
       img_set(img, p.x, p.y, rgba_to_px(spr, p.c.r, p.c.g, p.c.b, 255))
     end
@@ -1160,7 +1263,7 @@ def outline_smart(
     commit_image(spr, layer, framenum, img)
     save_sprite(spr)
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
-               mode = ARG.mode, outline_pixels = #pending }
+               mode = ARG.mode, outline_pixels = landed() - mark }
     """
     return run_ramp_lua(body, args)
 
@@ -1243,7 +1346,7 @@ def dither_band(
         "width": int(width),
         "tolerance": float(tolerance),
     }
-    body = FRAME_GUARD_LUA + _RAMP_LUA + """
+    body = FRAME_GUARD_LUA + _RAMP_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
     if layer.isGroup then error("Cannot dither a group layer: " .. layer.name) end
@@ -1317,6 +1420,7 @@ def dither_band(
       end
     end
 
+    local mark = landed()
     for _, p in ipairs(pending) do
       local _, _, _, al = px_to_rgba(spr, img:getPixel(p.x, p.y))
       img_set(img, p.x, p.y, rgba_to_px(spr, p.c.r, p.c.g, p.c.b, al))
@@ -1325,7 +1429,7 @@ def dither_band(
     commit_image(spr, layer, framenum, img)
     save_sprite(spr)
     RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
-               pattern = ARG.pattern, dithered_pixels = #pending }
+               pattern = ARG.pattern, dithered_pixels = landed() - mark }
     """
     result = run_ramp_lua(body, args)
     # Named in Python, because only Python knows what the caller asked for: the Lua is
@@ -1407,7 +1511,7 @@ def gradient_map(
         "dither": dither,
         "x": int(x), "y": int(y), "width": width, "height": height,
     }
-    body = FRAME_GUARD_LUA + """
+    body = FRAME_GUARD_LUA + LANDED_LUA + """
     local spr = open_sprite(ARG.src)
     local layer = find_layer(spr, ARG.layer)
     if layer.isGroup then error("Cannot map a group layer: " .. layer.name) end
@@ -1431,8 +1535,13 @@ def gradient_map(
       return (BAYER4[(y % 4) + 1][(x % 4) + 1] + 0.5) / 16.0
     end
 
-    local written, histogram = 0, {}
+    local histogram = {}
     for i = 1, #ramp do histogram[i] = 0 end
+    -- Kept so this tool still reports `pixels_written` on a region with nothing opaque in
+    -- it, where the harness attaches no counters at all. Equal to the harness's number by
+    -- construction, since nothing else in this body writes a pixel, and taken from the
+    -- same counter so the two cannot drift.
+    local mark = landed()
 
     for yy = ry, ry + rh - 1 do
       for xx = rx, rx + rw - 1 do
@@ -1459,9 +1568,14 @@ def gradient_map(
             if index < 0 then index = 0 elseif index > last then index = last end
 
             local c = ramp[index + 1]
+            -- Tallied from what landed, not from what was offered: an active selection
+            -- refuses the write silently, and a histogram built beside the loop summed
+            -- to twice the harness's own `pixels_written` on a half-selected canvas.
+            local before = landed()
             img_set(img, xx, yy, rgba_to_px(spr, c.r, c.g, c.b, a))
-            written = written + 1
-            histogram[index + 1] = histogram[index + 1] + 1
+            if landed() > before then
+              histogram[index + 1] = histogram[index + 1] + 1
+            end
           end
         end
       end
@@ -1470,6 +1584,7 @@ def gradient_map(
     commit_image(spr, layer, framenum, img)
     save_sprite(spr)
     RESULT = { ok = true, layer = layer.name, frame = framenum,
-               pixels_written = written, steps = #ramp, per_step = histogram }
+               pixels_written = landed() - mark,
+               steps = #ramp, per_step = histogram }
     """
     return run_ramp_lua(body, args)

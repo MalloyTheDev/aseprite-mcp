@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import secrets
 
+from .limits import MAX_DRAW_EXTENT_PIXELS
+
 # Legacy un-nonced sentinels. Retained because `aseprite_mcp.luagen` re-exports them,
 # but no longer used to frame real output: see `new_nonce` for why.
 RESULT_PREFIX = "@@ASEMCP@@"
@@ -108,7 +110,35 @@ def to_lua(value) -> str:
 # --------------------------------------------------------------------------- #
 # Lua prelude (shared helpers available to every tool body)                   #
 # --------------------------------------------------------------------------- #
-PRELUDE = r"""
+# The caps the prelude enforces are injected from `core.limits` rather than written out
+# again here: a number duplicated in a Lua string is a number that drifts silently,
+# because nothing imports it and no test can see the two copies disagree.
+_LIMITS_LUA = f"""
+-- Injected from core.limits.MAX_DRAW_EXTENT_PIXELS. See the three check_extent calls
+-- below for what it bounds and why the canvas caps do not already cover it.
+local MAX_DRAW_EXTENT = {MAX_DRAW_EXTENT_PIXELS}
+"""
+
+PRELUDE = _LIMITS_LUA + r"""
+-- A shape's cost is the extent it was given, not the canvas it lands on: img_set throws
+-- away the off-canvas writes, but only after the loop has run. So a rectangle, ellipse
+-- or line whose extent is larger than any canvas could show is not a harmless no-op,
+-- it is the whole budget spent to draw nothing. Refused here, in the shared primitives,
+-- rather than at each tool's entry: three primitives serve a dozen tools and a new
+-- tool reaching one of them inherits the bound instead of having to remember it.
+--
+-- error(..., 0) so Lua does not prepend this script's own location; the runner strips
+-- that anyway, and a message about an argument should read as one.
+local function check_extent(what, count, detail)
+  if count > MAX_DRAW_EXTENT then
+    error(string.format(
+      "%s would step over %d pixels, past the limit of %d. The shape is iterated " ..
+      "before any of it is clipped to the canvas, so an extent this large costs the " ..
+      "whole call and draws nothing extra. %s",
+      what, count, MAX_DRAW_EXTENT, detail), 0)
+  end
+end
+
 -- ===== number / table helpers =====================================
 -- ===== pixel accounting ===========================================
 -- Every write to an image goes through img_set, blend_over or flood_fill_img, so
@@ -672,7 +702,14 @@ local function open_sprite(path)
   -- always reported, because an edit that silently touched a fraction of what the
   -- caller asked for is exactly the failure this codebase keeps turning up.
   if ARG.use_selection ~= false then
-    local mask_path = tostring(path):gsub("%.[^./\\]+$", "") .. ".msk"
+    -- Appended to the whole filename, which is what core.paths.selection_sidecar does
+    -- on the Python side; the two have to agree or a selection is written to one path
+    -- and looked for at another. This used to strip the last extension instead, and the
+    -- two agreed for `hero.aseprite` and disagreed for any name whose final component
+    -- begins with a dot: `.hidden` was saved to `.hidden.msk` and loaded from `.msk`.
+    -- Stripping also made `hero.aseprite` and `hero.png` share one `hero.msk`, so a
+    -- selection set on the sprite silently scoped every edit to the export beside it.
+    local mask_path = tostring(path) .. ".msk"
     if app.fs.isFile(mask_path) then
       app.command.LoadMask{ filename = mask_path }
       if not spr.selection.isEmpty then _sel = spr.selection end
@@ -724,6 +761,10 @@ end
 -- Bresenham line as a list of {x,y} points.
 local function bresenham_points(x0, y0, x1, y1)
   x0, y0, x1, y1 = math.floor(x0), math.floor(y0), math.floor(x1), math.floor(y1)
+  -- One table per step, built in full before returning, so the span is the allocation.
+  check_extent("A line that long",
+    math.max(math.abs(x1 - x0), math.abs(y1 - y0)) + 1,
+    "Give endpoints on or near the canvas.")
   local pts = {}
   local dx = math.abs(x1 - x0)
   local dy = -math.abs(y1 - y0)
@@ -742,6 +783,11 @@ end
 
 local function draw_line_img(img, x0, y0, x1, y1, px)
   x0, y0, x1, y1 = math.floor(x0), math.floor(y0), math.floor(x1), math.floor(y1)
+  -- Walks the span one step at a time. No list here, so this is time rather than
+  -- memory, and the bound is the same one for the same reason.
+  check_extent("A line that long",
+    math.max(math.abs(x1 - x0), math.abs(y1 - y0)) + 1,
+    "Give endpoints on or near the canvas.")
   local dx = math.abs(x1 - x0)
   local dy = -math.abs(y1 - y0)
   local sx = x0 < x1 and 1 or -1
@@ -759,6 +805,11 @@ end
 local function draw_rect_img(img, x, y, w, h, px, filled)
   x, y, w, h = math.floor(x), math.floor(y), math.floor(w), math.floor(h)
   if w <= 0 or h <= 0 then return end
+  -- A filled rectangle is w*h img_set calls; an outline is the perimeter. Both come
+  -- straight from the caller's width and height, which nothing on the way here bounds.
+  check_extent("A rectangle that size",
+    filled and (w * h) or (2 * (w + h)),
+    "Give a width and height that fit on, or near, the canvas.")
   if filled then
     for yy = y, y + h - 1 do
       for xx = x, x + w - 1 do img_set(img, xx, yy, px) end
@@ -776,6 +827,15 @@ end
 -- two forms the same ellipse rather than two rasterisers that nearly agree.
 local function ellipse_offsets(rx, ry, filled)
   rx, ry = math.floor(math.abs(rx)), math.floor(math.abs(ry))
+  -- One two-element table per emitted offset, and the whole list is built before it is
+  -- returned, so the point count IS the allocation. Filled is the area, outline is the
+  -- circumference. This is the same measurement `cast_shadow` makes against
+  -- MAX_SHADOW_ELLIPSE_POINTS before it rasterises; the plain drawing tools reach this
+  -- function with nothing between them and it, which is what this closes.
+  check_extent("An ellipse that size",
+    filled and math.ceil(math.pi * (rx + 1) * (ry + 1))
+            or math.ceil(4 * (rx + ry + 2)),
+    "Give radii that fit on, or near, the canvas.")
   if rx == 0 or ry == 0 then
     return bresenham_points(-rx, -ry, rx, ry)
   end
@@ -894,6 +954,11 @@ end
 
 -- Anti-aliased line (Xiaolin Wu) drawn with coverage blending.
 local function aa_line_img(spr, img, x0, y0, x1, y1, r, g, b)
+  -- Two blend_over calls per step along the span, so the same bound as the hard-edged
+  -- line: antialias=True must not be a way around it.
+  check_extent("An anti-aliased line that long",
+    math.max(math.abs(x1 - x0), math.abs(y1 - y0)) + 1,
+    "Give endpoints on or near the canvas.")
   local function fpart(x) return x - math.floor(x) end
   local function rfpart(x) return 1 - fpart(x) end
   local steep = math.abs(y1 - y0) > math.abs(x1 - x0)
@@ -926,6 +991,13 @@ local function aa_ellipse_fill_img(spr, img, cx, cy, rx, ry, r, g, b)
   rx, ry = math.abs(rx), math.abs(ry)
   if rx < 1 then rx = 1 end
   if ry < 1 then ry = 1 end
+  -- Cells of the bounding box, which is what the two loops below step over. Each cell
+  -- then costs sixteen sub-sample tests, so the real ceiling here is sixteen times the
+  -- number checked; cells is still the right unit, because charging sub-samples would
+  -- refuse a full-canvas anti-aliased ellipse on a perfectly ordinary 4096x4096 sprite.
+  check_extent("An anti-aliased ellipse that size",
+    math.ceil((2 * rx + 3) * (2 * ry + 3)),
+    "Give radii that fit on, or near, the canvas.")
   for yy = math.floor(cy - ry - 1), math.ceil(cy + ry + 1) do
     for xx = math.floor(cx - rx - 1), math.ceil(cx + rx + 1) do
       local cnt = 0

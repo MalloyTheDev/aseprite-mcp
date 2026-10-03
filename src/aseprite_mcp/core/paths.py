@@ -132,8 +132,32 @@ def selection_sidecar(sprite_path: Path) -> Path:
 
     Beside the sprite rather than in a subdirectory, so it is discoverable: someone
     looking at the workspace can see that a sprite has a selection attached.
+
+    The suffix is *appended* to the whole filename (`hero.aseprite` ->
+    `hero.aseprite.msk`) rather than replacing the extension, and that is the whole
+    point of this function rather than a `with_suffix` call at each site.
+    `with_suffix(".msk")` mapped `hero.aseprite` and `hero.png` onto one `hero.msk`,
+    which is two sprites sharing one selection:
+
+      * a selection set on `hero.aseprite` then scoped every edit to `hero.png`, with a
+        rectangle measured against a different sprite's dimensions, and both calls
+        reported `selection_applied: true` because from the Lua side it was;
+      * `save_sprite_as("hero.aseprite", "hero.png")` called
+        `discard_selection_sidecar` on the destination and deleted `hero.msk`, which was
+        the *source's* selection, directly against the comment at that call site saying
+        the source's own sidecar is untouched;
+      * and the prelude derived the sidecar a third way, by stripping the last extension
+        with a Lua pattern, which disagreed with `with_suffix` for any name whose final
+        component begins with a dot: `.hidden` saved to `.hidden.msk` and loaded from
+        `.msk`, so a selection on such a sprite was written and then never read.
+
+    Appending removes all three at once, because the mapping from sprite to sidecar is
+    now injective and the two derivations are the same operation. The Lua half lives in
+    `core.luagen`'s `open_sprite`; the two have to be changed together, and
+    `test_hardening` pins that they agree.
     """
-    return Path(sprite_path).with_suffix(SELECTION_SUFFIX)
+    path = Path(sprite_path)
+    return path.with_name(path.name + SELECTION_SUFFIX)
 
 
 def discard_selection_sidecar(sprite_path: Path) -> bool:
@@ -147,9 +171,11 @@ def discard_selection_sidecar(sprite_path: Path) -> bool:
     call ("Nothing to shade: no pixel matched"), several steps from the cause and clean on
     a fresh workspace, which made it look like nondeterminism rather than a leftover file.
 
-    Only for tools that write a *sprite*. An export must not call this: `with_suffix` maps
-    `hero.png` and `hero.aseprite` onto the same `hero.msk`, so exporting a PNG beside a
-    sprite would throw away the sprite's selection.
+    Only for tools that write a *sprite*. An export still must not call this, but the
+    reason is now only the obvious one, that an export is not a new sprite: since
+    `selection_sidecar` appends rather than replacing the extension, `hero.png` and
+    `hero.aseprite` no longer name one `hero.msk`, so an export that did call this would
+    forget its own target's selection and not the source sprite's.
 
     Returns whether there was one to forget. A sidecar that exists and cannot be removed
     raises rather than being swallowed, because that is the bug this exists to prevent: the

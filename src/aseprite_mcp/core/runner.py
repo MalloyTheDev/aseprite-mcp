@@ -136,9 +136,9 @@ def _claim_keys(args: dict | None) -> frozenset[str] | None:
         one, since not one of them is an f-string, so walking `args` sees every path the
         run names.
       * The one path a body builds for itself is the `.msk` selection sidecar, which the
-        prelude derives from `ARG.src` by replacing the extension. It is covered without
-        being seen: any two runs that could race on one sidecar both name the sprite it
-        belongs to, so both claim that path.
+        prelude derives from `ARG.src` by appending the suffix to the whole filename. It
+        is covered without being seen: the derivation is injective, so the only runs that
+        can race on one sidecar are runs naming the same sprite, and both claim that path.
       * `lua_path` is the only producer of those values and records what it returns, so a
         value that is not in the recording is one this function cannot account for.
       * Every path `lua_path` returns has been through `config.resolve`, so it is
@@ -351,6 +351,51 @@ def _run_bounded(
         )
 
 
+# Generated scripts whose removal failed, carried to the next run so it retries them.
+# Bounded, so a path that can never be removed cannot grow this without end: the oldest
+# entry is dropped rather than retried forever.
+_PENDING_UNLINK: deque[str] = deque(maxlen=64)
+_PENDING_LOCK = threading.Lock()
+
+
+def _drop_script(path: str) -> None:
+    """Delete one generated script, retrying anything an earlier run could not.
+
+    The removal used to be a single `os.unlink` inside `contextlib.suppress(OSError)`,
+    which on Windows is a silently *likely* failure rather than a rare one: unlinking a
+    file another process still holds open raises PermissionError, and a killed Aseprite
+    has not always had its handle closed by the time the timeout path reaches here.
+    Measured on this machine at v0.10.0: ten `asemcp_*.lua` files left in the system
+    temp directory over four days, 335 KB in all, each carrying the caller's resolved
+    paths and colours in its ARG table. Suppressing the error was right, because failing
+    a successful call over cleanup would be worse; never trying again was not.
+
+    One case stays out of reach on purpose. A hard kill of the server leaves a script
+    behind whatever this does, because no `finally` runs at all. Only a sweep of the
+    temp directory could collect those, and deleting files by glob in a directory shared
+    with every other process on the machine is a larger decision than a cleanup helper
+    should take on its own.
+    """
+    with _PENDING_LOCK:
+        stale = list(_PENDING_UNLINK)
+        _PENDING_UNLINK.clear()
+    for old in stale:
+        try:
+            os.unlink(old)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            with _PENDING_LOCK:
+                _PENDING_UNLINK.append(old)
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        with _PENDING_LOCK:
+            _PENDING_UNLINK.append(path)
+
+
 def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -> dict:
     """Assemble + run a Lua tool body, returning the parsed RESULT table.
 
@@ -377,8 +422,7 @@ def run_lua(body: str, args: dict | None = None, timeout: float | None = None) -
             "or split the operation into smaller steps."
         ) from exc
     finally:
-        with contextlib.suppress(OSError):
-            os.unlink(path)
+        _drop_script(path)
 
     return _parse_result(proc, nonce=nonce)
 
@@ -431,9 +475,17 @@ def _parse_result(proc: subprocess.CompletedProcess, *, nonce: str) -> dict:
         raise LuaToolError(_decode_error(errors[0]))
 
     if not results:
-        detail = (proc.stderr or "").strip() or out.strip() or (
-            f"Aseprite exited with code {proc.returncode} and produced no result."
-        )
+        # Stripped here as well, not only in `_decode_error`. This is the branch a Lua
+        # *compile* error takes: the harness never ran, so no sentinel was printed and
+        # the interpreter's own line is all there is. Measured against v0.10.0, a stderr
+        # of `C:\Users\<user>\AppData\Local\Temp\asemcp_abcd1234.lua:12: unexpected
+        # symbol near ')'` came back to the caller verbatim, which hands over the host's
+        # temp directory and the account name for a failure that is entirely ours. The
+        # helper existed and was simply not applied on the one path that carries raw
+        # interpreter output.
+        detail = strip_script_location(
+            (proc.stderr or "").strip() or out.strip()
+        ) or f"Aseprite exited with code {proc.returncode} and produced no result."
         raise LuaToolError(detail)
 
     try:
@@ -490,9 +542,12 @@ def run_cli(cli_args: list[str], timeout: float | None = None) -> subprocess.Com
         raise AsepriteTimeoutError(f"Aseprite CLI timed out after {exc.timeout:.0f}s.") from exc
 
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip() or (
-            f"Aseprite CLI failed with exit code {proc.returncode}."
-        )
+        # Same hygiene as the Lua route. Nothing on this route runs one of our scripts,
+        # so a hit is unlikely rather than impossible, and a strip that finds nothing
+        # costs one regex over a short string.
+        detail = strip_script_location(
+            (proc.stderr or proc.stdout or "").strip()
+        ) or f"Aseprite CLI failed with exit code {proc.returncode}."
         raise AsepriteCLIError(detail)
 
     # Aseprite's CLI exits 0 for arguments it rejected. `-b --totally-bogus-flag` prints
@@ -501,7 +556,7 @@ def run_cli(cli_args: list[str], timeout: float | None = None) -> subprocess.Com
     # the exit code alone therefore turns a refused export into a reported success, and
     # the caller has no way to tell. A successful batch run is silent on stderr, so a
     # non-empty stderr is the signal the exit code fails to give.
-    stderr = (proc.stderr or "").strip()
+    stderr = strip_script_location((proc.stderr or "").strip())
     if stderr:
         raise AsepriteCLIError(
             f"Aseprite CLI reported a problem (exit code {proc.returncode}): {stderr}"

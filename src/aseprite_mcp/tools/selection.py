@@ -211,8 +211,9 @@ def select_by_color(
     color: str,
     tolerance: int = 0,
     frame: int = 1,
+    layer: str | None = None,
 ) -> dict:
-    """Select every pixel matching a colour, the magic-wand selection.
+    """Select every pixel of one layer matching a colour, the magic-wand selection.
 
     The usual way to scope an edit to one material: select the armour's base colour and
     every later operation touches only the armour. Pair it with `shift_along_ramp` to
@@ -223,9 +224,26 @@ def select_by_color(
         tolerance: 0 matches exactly. Higher values also catch nearby colours, which is
             useful on artwork that was anti-aliased or converted from a photo.
         frame: Which frame to sample, 1-based.
+        layer: Which layer to match on. Defaults to the top layer, which is the layer the
+            drawing and shading tools also default to, so a selection made here scopes
+            the call that follows it.
 
-    Matching is done on the composited image, so what is selected is what you see rather
-    than what happens to be on the active layer.
+    **One layer, not the composite**, and that is deliberate for the same reason
+    `get_pixels` takes a layer: the tools this selection is for write to one layer, so a
+    pixel selected on a different one is selected and unreachable. Select on the layer you
+    are about to edit.
+
+    This used to run Aseprite's `MaskByColor` without saying which layer it meant, and the
+    layer it got was whichever one Aseprite made active on opening the file, which is the
+    *bottom* one. Measured on an 8x8 sprite with red on the bottom layer and an opaque
+    blue square over half of it on the layer above: matching red selected all 64 pixels,
+    including the 32 nothing can see, and matching blue (32 pixels, plainly visible, and
+    on the layer every drawing tool writes to) selected nothing at all.
+
+    Refuses when no pixel matches, rather than reporting a success with no selection. The
+    old behaviour cleared the sidecar on the way through, so a mistyped colour silently
+    unscoped every edit that followed it, which is the opposite of what asking for a
+    selection means. A refusal leaves the previous selection as it was.
     """
     if tolerance < 0 or tolerance > 255:
         raise ValidationFailed("tolerance must be between 0 and 255.")
@@ -237,16 +255,35 @@ def select_by_color(
         "color": parse_color(color),
         "tolerance": int(tolerance),
         "frame": int(frame),
+        "layer": layer,
         "use_selection": False,
     }
     body = """
     local spr = open_sprite(ARG.src)
     app.frame = spr.frames[math.max(1, math.min(#spr.frames, ARG.frame))]
+    -- Named rather than left to whatever Aseprite made active. MaskByColor follows
+    -- `app.layer`, and on a freshly opened file that is spr.layers[1], the bottom of the
+    -- stack; `find_layer(spr, nil)` is spr.layers[#spr.layers], the top, which is what
+    -- every drawing tool means by "no layer given".
+    local target = find_layer(spr, ARG.layer)
+    if target.isGroup then
+      error("Cannot match a colour on a group layer: '" .. target.name ..
+            "'. A group holds no pixels of its own; name one of the layers inside it.", 0)
+    end
+    app.layer = target
     local c = ARG.color
     app.command.MaskByColor{
       color = Color{ r = c.r, g = c.g, b = c.b, a = c.a },
       tolerance = ARG.tolerance,
     }
+    if spr.selection.isEmpty then
+      error(string.format(
+        "No pixel on layer '%s' matched that colour at tolerance %d, so there is " ..
+        "nothing to select and the selection was left as it was. Matching is per " ..
+        "layer: pass layer to name a different one, read the layer's actual colours " ..
+        "with get_pixels, or raise tolerance.", target.name, ARG.tolerance), 0)
+    end
+    RESULT.layer = target.name
 """ + _SAVE_MASK
     return run_lua(body, args)
 
