@@ -1098,6 +1098,7 @@ RAMP_TOOLS = {
     "contact_shadow": {"occluder_color": "#101010"},
     "dither_band": {"from_step": 0, "to_step": 1},
     "glow": {},
+    "shade_facets": {"rows": ["ab"], "legend": {"a": 90, "b": 0}},
     "gradient_map": {},
     "outline_smart": {},
     "shade_region_by_light": {},

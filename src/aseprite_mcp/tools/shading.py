@@ -16,7 +16,7 @@ written), so it is implemented as palette index arithmetic instead.
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import lighting
+from ..core import facets, lighting
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_COLOR_LIST_LENGTH,
@@ -29,6 +29,7 @@ from ..core.limits import (
 )
 from ..core.models import FRAME_GUARD_LUA
 from .common import LANDED_LUA, lua_path, parse_color, resolve_path, run_ramp_lua
+from .drawing import _write_map
 
 # Shared by every ramp-aware tool here: find the ramp entry a pixel belongs to.
 #
@@ -1591,3 +1592,87 @@ def gradient_map(
                steps = #ramp, per_step = histogram }
     """
     return run_ramp_lua(body, args)
+
+
+@mcp.tool()
+def shade_facets(
+    filename: str,
+    rows: list[str],
+    legend: dict,
+    ramp: list[str],
+    light_angle: float = 135.0,
+    light_z: float = 0.5,
+    fill_strength: float = 0.35,
+    ambient: float = 0.16,
+    x: int = 0,
+    y: int = 0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Shade a form built from flat planes, one tone per plane, from a map of directions.
+
+    Args:
+        rows: One string per row of the map, one character per pixel, as `draw_pixel_map`
+            takes. "." leaves a pixel alone.
+        legend: {symbol: facet direction}. A direction is an angle in degrees in the same
+            convention as `light_angle` (0 faces right, 90 up, 135 up and to the left),
+            the word "front" for a plane square to the viewer, or `[angle, z]` to tilt a
+            plane toward the viewer as well, which is how a chamfer is said.
+        ramp: Colours darkest first. Facet tones are entries of this and nothing else.
+        light_angle, light_z: The key light.
+        fill_strength: How much bounce comes back from roughly opposite, as a share of the
+            key. Without it every plane facing away from the key clamps to the same
+            ambient value and the whole shadow side comes out one flat colour.
+        ambient: The floor, so a plane facing away is dark rather than black.
+        x, y: Where the map's top-left corner lands.
+
+    `shade_region_by_light` reads a surface normal out of how far each pixel sits from the
+    silhouette's edge. That is right for anything round and wrong for everything hard: a
+    distance field cannot know where an edge is, so it rounds the form over, and a crate
+    comes out as a cushion. This takes the normals from the caller instead, because which
+    way a plane faces is a fact about the drawing that only the person drawing it knows.
+
+    Every pixel of one facet gets the same value. That flatness is the point: it is what
+    reads as cut rather than inflated, and it is the thing a gradient cannot imitate.
+
+    Returns the usual write counts plus `facet_steps`, the ramp step each symbol resolved
+    to, so a caller can see the value structure it just asked for. A pass whose facets all
+    land on the same step is refused rather than painting a flat fill.
+    """
+    if len(ramp) < facets.MIN_RAMP:
+        raise ValidationFailed(
+            f"ramp needs at least {facets.MIN_RAMP} colours to describe a form; got "
+            f"{len(ramp)}."
+        )
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    steps = facets.plan(
+        legend, steps=len(ramp), light_angle=float(light_angle),
+        light_z=float(light_z), fill_strength=float(fill_strength),
+        ambient=float(ambient),
+    )
+    # Delegated rather than reimplemented: the expansion, every refusal a hand-written
+    # grid earns, the selection mask and the clipping counters all already live on that
+    # path. A second write path here would have had to grow its own and would have
+    # forgotten one.
+    result = _write_map(
+        filename, rows, {symbol: ramp[step] for symbol, step in steps.items()},
+        x=int(x), y=int(y), layer=layer, frame=frame, ramp=ramp,
+    )
+    result["facet_steps"] = steps
+    # Two planes given different directions and handed the same tone will read as one
+    # plane, and the caller cannot see that from the picture: the facet it authored is
+    # simply not there. Surfaced rather than left to be noticed, because the fix is a
+    # choice between three things and only the caller knows which. Absent when it did not
+    # happen, like every other count here.
+    by_step: dict[int, list[str]] = {}
+    for symbol, step in steps.items():
+        by_step.setdefault(step, []).append(symbol)
+    merged = {step: sorted(syms) for step, syms in by_step.items() if len(syms) > 1}
+    if merged:
+        result["warnings"] = [
+            f"facets {syms} all resolved to ramp step {step}, so they will read as one "
+            "plane rather than as separate ones. Separate their angles, tilt one toward "
+            "the viewer with [angle, z], or give the pass a longer ramp."
+            for step, syms in sorted(merged.items())
+        ]
+    return result

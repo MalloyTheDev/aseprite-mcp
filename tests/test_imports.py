@@ -460,6 +460,15 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     # beside the conformance number it qualifies, not in `warnings`. It passes the ramp
     # to Lua for the measurement and consumes it itself.
     reports_it_as_a_reading = {"assess_sprite"}
+    # shade_facets consumes its ramp in Python, picking one entry per facet from the
+    # directions it was given, and then writes those as ordinary colours. So it never
+    # hands a ramp to Lua either, and `run_ramp_lua` has nothing of its own to wrap. It
+    # still needs the measurement more than most tools do, because its whole premise is
+    # that each plane takes a distinct flat tone: two tones banding onto one palette entry
+    # merges two planes into one and neither the picture nor the counts would say so. It
+    # gets there by passing `ramp` to the shared map write, which routes through
+    # `run_ramp_lua` precisely when a ramp is present.
+    writes_its_ramp_through_the_map_path = {"shade_facets"}
 
     checked = []
     for info in pkgutil.iter_modules(tools_pkg.__path__):
@@ -486,6 +495,14 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
                 )
                 checked.append(name)
                 continue
+            if name in writes_its_ramp_through_the_map_path:
+                assert "ramp=ramp" in source, (
+                    f"{name} no longer passes its ramp to the shared map write, so the "
+                    "harness has stopped measuring what that ramp becomes on an indexed "
+                    "palette: its facets will band onto one entry and report nothing."
+                )
+                checked.append(name)
+                continue
             if name in reports_it_as_a_reading:
                 assert "ramp_readings" in source, (
                     f"{name} takes a ramp and surfaces the reading itself, but no longer "
@@ -504,7 +521,8 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     # would pass every assertion above and prove nothing at all.
     assert sorted(checked) == [
         "assess_sprite", "cast_shadow", "contact_shadow", "dither_band", "glow",
-        "gradient_map", "outline_smart", "shade_region_by_light", "shift_along_ramp",
+        "gradient_map", "outline_smart", "shade_facets", "shade_region_by_light",
+        "shift_along_ramp",
         "smear_frame", "specular_highlight",
     ], f"the set of ramp tools changed: {sorted(checked)}"
 

@@ -20,7 +20,7 @@ from ..core.limits import (
 )
 from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
-from .common import lua_path, parse_color, resolve_path
+from .common import lua_path, parse_color, resolve_path, run_ramp_lua
 
 # Shared Lua preamble: open sprite, resolve a non-group layer + frame, build an
 # editable full-canvas image, then run the per-tool drawing snippet, commit & save.
@@ -199,6 +199,21 @@ def draw_pixel_map(
     Returns the usual write counters plus `map_width`, `map_height`,
     `pixels_transparent` (cells deliberately left alone) and `colors_used`.
     """
+    return _write_map(filename, rows, legend, x=x, y=y, layer=layer, frame=frame)
+
+
+def _write_map(filename, rows, legend, *, x, y, layer, frame, ramp=None):
+    """The shared body of every tool that writes a character map.
+
+    One path, so the expansion's refusals, the selection mask and the clipping counters
+    are inherited rather than reimplemented by each caller that happens to want a grid.
+
+    `ramp`, when given, routes the write through `run_ramp_lua` so the harness measures
+    what that ramp became against an indexed palette. A facet pass needs that more than
+    most tools do: its whole premise is that each plane takes a distinct flat tone, so two
+    tones banding onto one palette entry merges two planes into one, and nothing in the
+    picture or the counts would say so.
+    """
     plan = pixelmap.expand(rows, legend, int(x), int(y))
     args = {
         "src": lua_path(resolve_path(filename)),
@@ -210,7 +225,11 @@ def draw_pixel_map(
         "pixels": [{"x": p["x"], "y": p["y"], "c": parse_color(p["color"])}
                    for p in plan["pixels"]],
     }
-    result = _draw(args, _PIXEL_WRITE_LUA)
+    if ramp is None:
+        result = _draw(args, _PIXEL_WRITE_LUA)
+    else:
+        args["ramp"] = [parse_color(entry) for entry in ramp]
+        result = run_ramp_lua(_OPEN + _PIXEL_WRITE_LUA + _CLOSE, args)
     result["map_width"] = plan["width"]
     result["map_height"] = plan["height"]
     result["pixels_transparent"] = plan["transparent"]

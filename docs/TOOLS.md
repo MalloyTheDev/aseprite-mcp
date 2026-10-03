@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **156 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **157 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -15,7 +15,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Cels](#cels) (10)
 - [Drawing](#drawing) (11)
 - [Brushes & symmetry](#brushes--symmetry) (4)
-- [Shading & light](#shading--light) (7)
+- [Shading & light](#shading--light) (8)
 - [Selections](#selections) (6)
 - [Effects & colour adjustments](#effects--colour-adjustments) (12)
 - [Text](#text) (1)
@@ -1906,6 +1906,54 @@ into the artwork.
 | `darken_steps` | integer | no | 2 |
 | `light_angle` | number | no | _none_ |
 | `tolerance` | number | no | 32.0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `shade_facets`
+
+Shade a form built from flat planes, one tone per plane, from a map of directions.
+
+Args:
+    rows: One string per row of the map, one character per pixel, as `draw_pixel_map`
+        takes. "." leaves a pixel alone.
+    legend: {symbol: facet direction}. A direction is an angle in degrees in the same
+        convention as `light_angle` (0 faces right, 90 up, 135 up and to the left),
+        the word "front" for a plane square to the viewer, or `[angle, z]` to tilt a
+        plane toward the viewer as well, which is how a chamfer is said.
+    ramp: Colours darkest first. Facet tones are entries of this and nothing else.
+    light_angle, light_z: The key light.
+    fill_strength: How much bounce comes back from roughly opposite, as a share of the
+        key. Without it every plane facing away from the key clamps to the same
+        ambient value and the whole shadow side comes out one flat colour.
+    ambient: The floor, so a plane facing away is dark rather than black.
+    x, y: Where the map's top-left corner lands.
+
+`shade_region_by_light` reads a surface normal out of how far each pixel sits from the
+silhouette's edge. That is right for anything round and wrong for everything hard: a
+distance field cannot know where an edge is, so it rounds the form over, and a crate
+comes out as a cushion. This takes the normals from the caller instead, because which
+way a plane faces is a fact about the drawing that only the person drawing it knows.
+
+Every pixel of one facet gets the same value. That flatness is the point: it is what
+reads as cut rather than inflated, and it is the thing a gradient cannot imitate.
+
+Returns the usual write counts plus `facet_steps`, the ramp step each symbol resolved
+to, so a caller can see the value structure it just asked for. A pass whose facets all
+land on the same step is refused rather than painting a flat fill.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `rows` | array<string> | yes |  |
+| `legend` | object | yes |  |
+| `ramp` | array<string> | yes |  |
+| `light_angle` | number | no | 135.0 |
+| `light_z` | number | no | 0.5 |
+| `fill_strength` | number | no | 0.35 |
+| `ambient` | number | no | 0.16 |
+| `x` | integer | no | 0 |
+| `y` | integer | no | 0 |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 
@@ -3924,6 +3972,7 @@ names to their tileset indices.
 | `columns` | integer | no | 4 |
 | `rows` | integer | no | 4 |
 | `tiles` | array<object> | no | _none_ |
+| `overwrite` | boolean | no | False |
 
 
 ### `export_game_asset_bundle`

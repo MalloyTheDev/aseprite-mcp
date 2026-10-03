@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **156 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **157 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -123,7 +123,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 156 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 157 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -737,7 +737,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 `selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
 section of their own, because the sections above each describe the *product* while these
 are a verdict on the *call*, and because every other result in this server reports them
-there: one rule reads them across all 156 tools. They are **absent rather than zero**, so a
+there: one rule reads them across all 157 tools. They are **absent rather than zero**, so a
 key that is present at all means there is something to read, and a tool that writes no
 pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
 them, which let a batch report `status: applied` for an op whose every pixel an active
@@ -889,6 +889,7 @@ and says so rather than doing it quietly.
 | Tool | Description |
 | --- | --- |
 | `shade_region_by_light` | Shade a flat region as a lit form, from a ramp and a light direction. |
+| `shade_facets` | Shade a form built from flat planes, one tone per plane, from a map whose legend names directions instead of colours. For anything hard: a crate, a helm, cut stone. `shade_region_by_light` reads its normals from the silhouette's distance field, so it rounds a form over and a block comes out a pillow. |
 | `gradient_map` | Put every pixel on a ramp by its brightness, whatever it started as: the tool that brings imported or filtered art onto a palette at all. Optional ordered dithering. |
 | `shift_along_ramp` | Move pixels along a colour ramp, keeping every one of them on the palette. |
 | `specular_highlight` | Place a small glint where the light reflects at the viewer, never on an edge pixel. The ramp's top step, or a brighter colour for metal. |
