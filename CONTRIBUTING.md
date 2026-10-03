@@ -110,6 +110,38 @@ uv build                                        # wheel + sdist build
 > `--run-aseprite` step is local-only. Pass `--skip-aseprite` to `release_gate.py` to
 > mirror CI when Aseprite isn't installed.
 
+## Cutting a release
+
+Written down because it had been improvised. Three of the eleven releases before 0.10.0
+carry no build artifacts while the eight before them do, for no recorded reason, and the
+whole point of a release here is that it is the only way to install a pinned version: this
+project is not published to PyPI.
+
+1. **Pass the gate on the release branch**, including `--run-aseprite`. Record the counts
+   in the pull request; CI cannot run that tier.
+2. **Regenerate and verify the showcase.** All nine generators in `scripts/showcase/` must
+   reproduce their committed images byte for byte. A mismatch means a tool's output moved,
+   and the cause goes in the changelog before the release, not after.
+3. **Consolidate `[Unreleased]`** in `CHANGELOG.md` into a dated `## [x.y.z]` section with
+   one `### Added` / `### Changed` / `### Fixed` each. The Unreleased block repeats those
+   headings per batch of work, which is deliberate while work is in flight and wrong in a
+   released section. Leave a fresh empty `[Unreleased]` behind.
+4. **Bump `version` in `pyproject.toml`** and say in the changelog's lead paragraph why the
+   bump is minor rather than patch, naming the observable changes that justify it.
+5. **Merge, then tag.** `main` is protected, so the bump goes through a pull request like
+   anything else. Tag the merge commit with an annotated tag whose message is a few
+   sentences on what the release is *for*, in the same voice as the changelog, with the
+   gate's numbers at the end.
+6. **Create the GitHub release from the tag, and attach the wheel and the sdist** that
+   `uv build` produced during the gate. Both, every time. Notes-only releases leave anyone
+   pinning an old version to build it themselves from a tag, which is the inconsistency
+   this step exists to end.
+
+A release page can be deleted without deleting its tag, and the changelog holds every
+version's entry regardless, so pruning the releases list costs nothing but the attached
+artifacts and their download links. Check `gh release view <tag> --json assets` before
+deleting one.
+
 ## Architecture (how a tool works)
 
 ```
