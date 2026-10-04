@@ -333,11 +333,45 @@ def test_separator_share_measures_the_keyline_and_how_dark_it_is():
     out = quality.separator_share(keyed)
     assert out["separator"] == "#05050a"
     assert out["share"] == pytest.approx(12 / 16, abs=0.01)
-    assert out["lightness"] < 0.1
+    assert out["luminance"] < 0.05
+    assert out["contrast"] > quality.WCAG_GRAPHICAL_CONTRAST, (
+        f"a near-black keyline against a mid grey should clear 3:1: {out}")
 
+    # A mid tone separating a slightly lighter one does not come apart, and the measure
+    # that says so is the contrast ratio rather than the separator's own value.
     pale = quality.separator_share(_from_map(["mmmm", "mkkm"], {"m": "#9a9a9aff",
-                                                            "k": "#6a6a6aff"}))
-    assert pale["lightness"] > 0.25, "a mid tone must not pass as a separator"
+                                                               "k": "#6a6a6aff"}))
+    assert pale["contrast"] < quality.WCAG_GRAPHICAL_CONTRAST, (
+        f"a mid tone must not pass as a separator: {pale}")
+
+
+def test_the_darkest_colour_is_the_one_that_actually_looks_darkest():
+    """The bug this replaced, kept as a test because it is invisible by inspection.
+
+    HLS lightness is the mean of a colour's extreme channels, so it reports 0.500 for pure
+    yellow and 0.500 for pure blue, whose relative luminances are 0.928 and 0.072. Asked
+    for the darkest colour in a sprite made of those two, the previous implementation
+    returned **yellow**: the brightest pixel in the picture, named as its keyline. Three
+    readings rested on that answer.
+    """
+    checker = _from_map(["yb", "by"], {"y": "#ffff00ff", "b": "#0000ffff"})
+    out = quality.separator_share(checker)
+    assert out["separator"] == "#0000ff", (
+        f"the darkest colour came back as {out['separator']}; blue is 13 times darker "
+        "than yellow and HLS lightness cannot tell them apart")
+    assert quality.luminance((255, 255, 0, 255)) > quality.luminance((0, 0, 255, 255))
+
+
+def test_the_contrast_ratio_is_the_wcag_one():
+    """Pinned against the two values the standard itself names, so a change to the
+    linearisation or the coefficients cannot pass silently."""
+    black, white = (0, 0, 0, 255), (255, 255, 255, 255)
+    assert quality.contrast_ratio(black, white) == pytest.approx(21.0, abs=0.05)
+    assert quality.contrast_ratio(white, white) == pytest.approx(1.0, abs=0.01)
+    # Symmetric, because a ratio between two colours cannot depend on their order.
+    mid = (119, 119, 119, 255)
+    assert quality.contrast_ratio(black, mid) == pytest.approx(
+        quality.contrast_ratio(mid, black), abs=1e-9)
 
 
 def test_ramp_chroma_catches_a_hue_rotation_that_goes_through_grey():
@@ -429,3 +463,81 @@ def test_an_outline_carrying_half_the_sprite_is_reported_too():
             < quality.SEPARATOR_BAND[1] * 2)
     quiet = quality.readings(quality.score(balanced), width=8, height=8)
     assert not [line for line in quiet if "doing the drawing" in line], quiet
+
+
+# --- the output tiers ------------------------------------------------------------------
+# These exist because the first draft of the tiering was indistinguishable from deleting
+# the module. Promoting two readings to the defect tier silenced the false complaint on
+# every clean sprite in the repository, and also silenced every complaint on the two
+# sprites known to be bad, which looked like a pass and was not one. The tests below pin
+# both halves: a constructed defect must be reported, and correct art must not be.
+
+
+def _joined_figure(keyline_rows: int) -> quality.Grid:
+    """A head over a narrower neck over a body: one figure, with a waist and no gutter.
+
+    Built joined on purpose. Two separate blocks with background between them would be
+    simpler and would prove nothing, because the gutter gate correctly treats that as
+    two pictures rather than one articulated figure.
+    """
+    size = 32
+    g = [[T] * size for _ in range(size)]
+
+    def band(y0: int, y1: int, x0: int, x1: int, color: str) -> None:
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                g[y][x] = color
+
+    band(4, 12, 12, 20, "#787878")      # head
+    band(4, 8, 12, 20, "#c8c8c8")       # its lit top
+    band(12, 15, 15, 17, "#787878")     # the neck, which is the waist
+    band(15, 28, 9, 23, "#787878")      # body
+    band(15, 21, 9, 23, "#c8c8c8")      # its lit top
+    for y in range(4, 4 + keyline_rows):
+        for x in range(12, 20):
+            g[y][x] = "#0a0a0a"
+    return g
+
+
+def test_defect_tier_reports_a_constructed_defect() -> None:
+    """A figure whose keyline is 3% of the drawing is a defect, not an observation."""
+    metrics = quality.score(_joined_figure(1))
+    assert metrics["row_structure"]["waists"] > 0, "fixture stopped being articulated"
+    assert metrics["separator"]["share"] < quality.SEPARATOR_BAND[0]
+    defects = quality.readings(metrics, width=32, height=32, tier=quality.DEFECT)
+    assert [d for d in defects if "keyline" in d], defects
+
+
+def test_defect_tier_is_silent_on_a_keyline_inside_the_band() -> None:
+    """The same fixture with a keyline in the band draws nothing, so this is not a tax."""
+    metrics = quality.score(_joined_figure(6))
+    low, high = quality.SEPARATOR_BAND
+    assert low <= metrics["separator"]["share"] <= high, metrics["separator"]
+    assert quality.readings(metrics, width=32, height=32, tier=quality.DEFECT) == []
+
+
+def test_off_ramp_pixels_are_counted_not_rounded() -> None:
+    """One stray pixel in a large drawing must not be reported as "0% off the ramp"."""
+    size = 32
+    g = [[T] * size for _ in range(size)]
+    for y in range(6, 26):
+        for x in range(6, 26):
+            g[y][x] = "#787878"
+    g[10][10] = "#ff0080"
+    metrics = quality.score(g, ramp=["#101010", "#787878", "#c8c8c8"])
+    defects = quality.readings(metrics, width=size, height=size, tier=quality.DEFECT)
+    hits = [d for d in defects if "off the declared ramp" in d]
+    assert hits, defects
+    assert "1 of 400 drawn pixels" in hits[0], hits[0]
+
+
+def test_tier_argument_partitions_the_readings() -> None:
+    """Defects and observations together are exactly the untiered output, in order."""
+    metrics = quality.score(_joined_figure(1))
+    size = {"width": 32, "height": 32}
+    everything = quality.readings(metrics, **size)
+    defects = quality.readings(metrics, **size, tier=quality.DEFECT)
+    observations = quality.readings(metrics, **size, tier=quality.OBSERVATION)
+    assert len(defects) + len(observations) == len(everything)
+    assert set(defects) | set(observations) == set(everything)
+    assert not set(defects) & set(observations)

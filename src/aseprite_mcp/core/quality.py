@@ -344,6 +344,12 @@ SHADED_MIN_COLORS = 3
 # about 18 percent; the sprite that failed ran 7.6, and its "outline" was two ramp steps
 # down rather than near-black, so the silhouette dissolved on a light background.
 SEPARATOR_BAND = (0.10, 0.24)
+# WCAG 2.1 SC 1.4.11: a graphical object needs 3:1 against the colours next to it to be
+# distinguishable. Used here in place of a threshold on how dark a keyline is, because a
+# separator's job is to be told apart from what it separates. It is also the only
+# threshold in this module that comes from a published standard rather than from two
+# sprites in this repository.
+WCAG_GRAPHICAL_CONTRAST = 3.0
 # Saturation below which a hue is no longer visible, so a ramp that passes through it is a
 # value ramp whatever its endpoints say. The ramp that failed fell to 2.4 percent at its
 # midtone while rotating 227 degrees end to end, and read as eight greys.
@@ -381,6 +387,32 @@ def _waists(widths: list[int], min_depth: int = WAIST_MIN_DEPTH) -> int:
     return waists
 
 
+def _gutters(grid: Grid, box: BBox) -> int:
+    """How many full-height columns of background split the drawing into separate panels.
+
+    This exists to stop the articulation readings firing on a sprite sheet. Those
+    readings ask whether several masses are told apart, and they decide a drawing has
+    several masses by finding background between them. A sheet of five animation frames
+    satisfies that test perfectly while containing no figure at all, and the keyline
+    reading added alongside this one did exactly that: it complained about an attack
+    sheet whose five panels made it look articulated.
+
+    A gutter is the discriminator because of an asymmetry in how the two cases are built.
+    Background between a figure's limbs never spans the drawing's full height, since the
+    limbs are joined somewhere: the gap between two legs is closed by the hips above it,
+    and the gap between an arm and the torso is closed by the shoulder. Background
+    between two panels spans all of it, because the panels are separate pictures.
+
+    Consecutive empty columns count once, so a three pixel gutter is one gutter and not
+    three. The known limit is that panels drawn flush against each other leave no gutter
+    and still read as one figure here; this detects the spaced case, which is how every
+    sheet this project exports is laid out.
+    """
+    empty = [all(_rgba(grid[y][x])[3] == 0 for y in range(box.y0, box.y1 + 1))
+             for x in range(box.x0, box.x1 + 1)]
+    return sum(1 for i, blank in enumerate(empty) if blank and not (i and empty[i - 1]))
+
+
 def row_structure(grid: Grid) -> dict:
     """How the silhouette breaks up, row by row.
 
@@ -396,7 +428,7 @@ def row_structure(grid: Grid) -> dict:
     box = bounding_box(grid)
     if box is None:
         return {"rows_drawn": 0, "rows_with_air": 0, "welded_rows": 0, "widest_run": 0,
-                "waists": 0}
+                "waists": 0, "gutters": 0}
     rows_drawn = welded = with_air = 0
     widest = 0
     widths: list[int] = []
@@ -429,6 +461,7 @@ def row_structure(grid: Grid) -> dict:
         "welded_rows": welded,
         "widest_run": widest,
         "waists": _waists(widths),
+        "gutters": _gutters(grid, box),
     }
 
 
@@ -472,26 +505,77 @@ def tone_shares(grid: Grid) -> dict:
     }
 
 
+def luminance(px: tuple[int, int, int, int]) -> float:
+    """Relative luminance, which is how dark a colour actually looks.
+
+    This function exists because the obvious alternative is wrong in a way that is easy
+    to miss and hard to see. HLS lightness is `(max + min) / 2` of the raw channels, so it
+    reports **0.500 for pure yellow and 0.500 for pure blue**, whose relative luminances
+    are 0.928 and 0.072: a thirteenfold difference collapsed to nothing. Measured against
+    this module's own `separator_share`, that made it name pure yellow as the darkest
+    colour in a sprite containing pure blue, which is to say it picked the brightest pixel
+    in the picture and called it the keyline.
+
+    The coefficients and the sRGB linearisation are WCAG 2.x's, which is also where the
+    contrast ratio used by `readings()` comes from, so the two agree by construction.
+    """
+    channels = []
+    for raw in px[:3]:
+        c = raw / 255
+        channels.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def contrast_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    """The WCAG contrast ratio between two colours, from 1 (identical) to 21.
+
+    WCAG 2.1 SC 1.4.11 requires **3:1** between a graphical object and the colours next to
+    it for that object to be distinguishable. That is a published number for exactly the
+    question a keyline poses, which is why it is used here instead of a threshold on how
+    dark the keyline is in the abstract: a separator's job is to be told apart from what it
+    separates, not to be any particular colour.
+    """
+    first, second = luminance(a), luminance(b)
+    lighter, darker = max(first, second), min(first, second)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
 def separator_share(grid: Grid) -> dict:
-    """What share of the drawing is its darkest colour, and how dark that is.
+    """What share of the drawing is its darkest colour, and how far it stands apart.
 
     In this style the dark separator is structural rather than a fallback: it is what
     makes a mass countable and keeps a silhouette from dissolving. Reference art spends
     roughly a fifth of a sprite on it, near black. A sprite whose darkest colour is a
     couple of ramp steps down and covers under a tenth has no keyline.
+
+    `contrast` is the worst WCAG ratio between that darkest colour and any colour it
+    actually touches. A keyline that does not clear 3:1 against its neighbours is not
+    separating them, whatever its own value is.
     """
     cells = _opaque_cells(grid)
     if not cells:
-        return {"separator": None, "share": 0.0, "lightness": 0.0}
-    def light(px):
-        r, g, b, _ = px
-        return colorsys.rgb_to_hls(r / 255, g / 255, b / 255)[1]
-    darkest = min((px for _, _, px in cells), key=light)
+        return {"separator": None, "share": 0.0, "luminance": 0.0, "contrast": 0.0}
+    darkest = min((px for _, _, px in cells), key=luminance)
     n = sum(1 for _, _, px in cells if px == darkest)
+
+    # Only the colours the separator is adjacent to: a ratio against a colour on the far
+    # side of the sprite says nothing about whether these two masses come apart.
+    at = {(x, y): px for x, y, px in cells}
+    worst = None
+    for (x, y), px in at.items():
+        if px != darkest:
+            continue
+        for step in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            other = at.get((x + step[0], y + step[1]))
+            if other is None or other == darkest:
+                continue
+            ratio = contrast_ratio(darkest, other)
+            worst = ratio if worst is None else min(worst, ratio)
     return {
         "separator": f"#{darkest[0]:02x}{darkest[1]:02x}{darkest[2]:02x}",
         "share": round(n / len(cells), 3),
-        "lightness": round(light(darkest), 3),
+        "luminance": round(luminance(darkest), 3),
+        "contrast": round(worst, 2) if worst is not None else 0.0,
     }
 
 
@@ -584,13 +668,54 @@ JAGGY_SHARE = 0.6
 NEARLY_SYMMETRIC = 0.12
 
 
-def readings(metrics: dict, *, width: int, height: int) -> list[str]:
-    """One line per measurement worth acting on, and nothing for the ones that are fine."""
-    out: list[str] = []
+# What a reading is allowed to claim, decided by measurement rather than by how confident
+# the sentence sounds. A validation harness scored all thirteen of these against twelve
+# known-good sprites, two known-bad ones and 146 seeded defects. **One** survived as an
+# absolute verdict.
+#
+# The rest are not worthless. Scored *paired*, the same sprite before and after a seeded
+# defect, five are perfect and most of the others are strong. They are sound as regression
+# guards and unsound as verdicts, and that is what this tier encodes: claiming a sprite is
+# wrong needs evidence the number means the same thing across different art; claiming it
+# changed does not.
+#
+# The arithmetic that forces the split: thirteen readings at a five percent false-positive
+# rate each give `1 - 0.95**13`, about 49 percent, so half of all clean art draws a
+# complaint by chance. Measured on this project's own gallery it was eleven of twelve.
+DEFECT = "defect"
+OBSERVATION = "observation"
+
+
+class _Tiered:
+    """Collects reading lines with the tier each one earned.
+
+    `append` lands in the observation tier, which is the safe default: a reading nobody has
+    scored against a corpus has not earned the right to call a sprite wrong.
+    """
+
+    def __init__(self) -> None:
+        self.found: list[tuple[str, str]] = []
+
+    def append(self, text: str) -> None:
+        self.found.append((OBSERVATION, text))
+
+    def defect(self, text: str) -> None:
+        self.found.append((DEFECT, text))
+
+
+def readings(metrics: dict, *, width: int, height: int,
+             tier: str | None = None) -> list[str]:
+    """One line per measurement worth acting on, and nothing for the ones that are fine.
+
+    `tier` selects what comes back: `None` for everything, which is what callers got
+    before this was split; `DEFECT` for the findings that earned the right to be called
+    faults; `OBSERVATION` for the rest.
+    """
+    out = _Tiered()
     box = metrics.get("bbox")
     if box is None:
         out.append("Nothing is drawn on this frame.")
-        return out
+        return [text for _got, text in out.found]
 
     usage = metrics.get("canvas_usage", 0.0)
     if usage < SPARSE_CANVAS:
@@ -621,7 +746,11 @@ def readings(metrics: dict, *, width: int, height: int) -> list[str]:
     # a waist: a narrowing with more shape below it. The second matters on its own, because
     # the worst case for the welding reading is the figure so completely fused that no row
     # has any gap at all, and counting gaps alone would let exactly that one through.
-    articulated = rows.get("rows_with_air", 0) > 0 or rows.get("waists", 0) > 0
+    # A sheet is excluded outright rather than having its panels judged, because every
+    # reading behind this gate asks a question about one figure, and the answer for a row
+    # of panels is not a worse answer but a meaningless one.
+    articulated = (rows.get("gutters", 0) == 0
+                   and (rows.get("rows_with_air", 0) > 0 or rows.get("waists", 0) > 0))
     if has_silhouette and articulated and drawn_rows:
         air = rows.get("rows_with_air", 0) / drawn_rows
         welded = rows.get("welded_rows", 0) / drawn_rows
@@ -650,7 +779,11 @@ def readings(metrics: dict, *, width: int, height: int) -> list[str]:
     if sep.get("separator"):
         low, high = SEPARATOR_BAND
         if sep["share"] < low:
-            out.append(
+            # DEFECT: scored AUC 1.000 with zero discordant pairs. Only four good and four
+            # bad sprites reach this branch, which is below the corpus floor, so the
+            # specificity claim is weak; it is promoted because nothing contradicts it,
+            # not because much confirms it.
+            out.defect(
                 f"The darkest colour {sep['separator']} is {sep['share']:.0%} of the "
                 f"drawing, against the {low:.0%} to {high:.0%} that work in this style "
                 "spends on separating its masses. A thin or absent keyline is what makes "
@@ -671,11 +804,13 @@ def readings(metrics: dict, *, width: int, height: int) -> list[str]:
                 "interior has no values left to describe form with. Thin it to one pixel "
                 "with add_outline, or spend the difference on mid tones."
             )
-        elif sep["lightness"] > 0.25 and sep["share"] > low:
+        elif sep["contrast"] and sep["contrast"] < WCAG_GRAPHICAL_CONTRAST:
             out.append(
-                f"The darkest colour {sep['separator']} has lightness "
-                f"{sep['lightness']:.0%}, so what is doing the separating is a mid tone. "
-                "A separator needs to be near black to read as one."
+                f"The darkest colour {sep['separator']} only reaches "
+                f"{sep['contrast']:.1f}:1 against a colour it touches, under the "
+                f"{WCAG_GRAPHICAL_CONTRAST:.0f}:1 that WCAG requires for one graphical "
+                "object to be told from another. A separator that does not clear that is "
+                "not separating anything, whatever its own value is."
             )
     chroma = metrics.get("ramp_chroma") or {}
     if chroma and chroma.get("grey_steps"):
@@ -695,11 +830,24 @@ def readings(metrics: dict, *, width: int, height: int) -> list[str]:
     jaggies = metrics.get("jaggy_corners", 0)
     drawn_w, drawn_h = box[2] - box[0] + 1, box[3] - box[1] + 1
     if jaggies > JAGGY_SHARE * (drawn_w + drawn_h):
+        # Kept, but with its headroom written down, because this reading was nearly
+        # withdrawn on a misremembered number. A correctly rastered disc measures 12
+        # corners at 16px, 32 at 32px and 68 at 64px, against budgets of 16.8, 36.0 and
+        # 74.4: silent at every size, but never by more than about a tenth. So what this
+        # fires on is a silhouette with meaningfully more corner than a circle of the
+        # same size, and lowering the share at all would start accusing circles.
         out.append(f"{jaggies} jagged corners across a {drawn_w}x{drawn_h} shape: the "
                    "diagonals are stepping rather than running evenly.")
     conformance = metrics.get("palette_conformance")
     if conformance is not None and conformance < 1.0:
-        out.append(f"{1 - conformance:.0%} of the drawn pixels are off the declared ramp. "
+        # DEFECT: AUC 1.000, zero discordant pairs. Also the only reading here that is
+        # definitional rather than aesthetic, which is why it survives: a pixel is either
+        # on the declared ramp or it is not, and that does not vary with the subject.
+        # Counted rather than given as a share, because a single stray pixel in a large
+        # drawing rounds to "0% off the ramp", which is a complaint that reports nothing.
+        drawn = metrics.get("drawn_pixels", 0)
+        off = round((1 - conformance) * drawn)
+        out.defect(f"{off} of {drawn} drawn pixels are off the declared ramp. "
                    "shift_along_ramp and gradient_map put pixels back on it; a brightness "
                    "or hue filter is what usually takes them off.")
     colours = metrics.get("colors", 0)
@@ -714,4 +862,6 @@ def readings(metrics: dict, *, width: int, height: int) -> list[str]:
     if 0 < asymmetry <= NEARLY_SYMMETRIC * drawn:
         out.append(f"Nearly symmetric, but {asymmetry} pixels differ from their horizontal "
                    "mirror. If that was meant to be symmetric, mirror_layer fixes it.")
-    return out
+    if tier is None:
+        return [text for _got, text in out.found]
+    return [text for got, text in out.found if got == tier]
