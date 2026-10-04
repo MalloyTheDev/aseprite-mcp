@@ -253,7 +253,10 @@ because every measurement above passed on a figure that read as one grey slab:
 * `separator`: what share of the drawing is its darkest colour, and how dark that is.
   In this medium the dark keyline is structural rather than a fallback.
 * `ramp_chroma`, when a `ramp` is declared: its hue span, its saturation floor, and
-  how many of its steps are below the chroma at which hue is visible at all. A ramp
+  how many of its steps are below the chroma at which hue is visible at all. The
+  floor is an HLS saturation, the same scale `generate_ramp`'s `chroma` takes, and
+  not the HSV saturation a colour picker shows: #ff8080 reads 1.00 here and 0.50
+  there. A ramp
   interpolated between two endpoints on opposite sides of the colour wheel routes
   through the neutral axis, so it can rotate hue a long way and render as greys.
 
@@ -276,6 +279,14 @@ Args:
     check_tiling: For a tile, also measure how much worse the wrapping edge looks
         than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
     layer: Measure one layer instead of the flattened frame.
+    standing: Say that the subject is a figure standing on its feet, and the report
+        adds whether its mass sits over them: the signed margin between the mass
+        centroid and the support base. There is no sensible answer for an item, a
+        tile or a scene, so this is asked for rather than guessed.
+    check_cvd: Also re-measure the drawing through red-green and blue-yellow colour
+        vision deficiency, and report where two colours that are distinct to most
+        viewers collapse into one. Off by default because it is the one measurement
+        here that costs about half again as much as everything else at the size cap.
 
 Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
 the measurements, so this is cheap to call after every pass.
@@ -287,6 +298,8 @@ the measurements, so this is cheap to call after every pass.
 | `layer` | string | no | _none_ |
 | `ramp` | array<string> | no | _none_ |
 | `check_tiling` | boolean | no | False |
+| `standing` | boolean | no | False |
+| `check_cvd` | boolean | no | False |
 
 
 ### `diff_sprites`
@@ -3273,6 +3286,10 @@ Args:
     filename: If set with apply, write the ramp into that sprite's palette.
     apply: "none" (just return), "append" (add to palette), or "replace".
     chroma: The saturation the ramp holds, 0 to 1, in place of the base colour's own.
+        **HLS saturation**, which is what `colorsys.rgb_to_hls` reports and not the
+        HSV saturation an eyedropper usually shows. The two part company at the light
+        end: #ff8080 is 1.00 saturated in HLS and 0.50 in HSV, so a caller passing a
+        number read off a colour picker will get a more colourful ramp than intended.
 
 Returns the ramp as a list of "#RRGGBB" colours (darkest first), with `distinct`, how
 many of them are different from each other, and `hue_span`, `sat_floor` and

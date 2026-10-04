@@ -492,6 +492,10 @@ def generate_ramp(
         filename: If set with apply, write the ramp into that sprite's palette.
         apply: "none" (just return), "append" (add to palette), or "replace".
         chroma: The saturation the ramp holds, 0 to 1, in place of the base colour's own.
+            **HLS saturation**, which is what `colorsys.rgb_to_hls` reports and not the
+            HSV saturation an eyedropper usually shows. The two part company at the light
+            end: #ff8080 is 1.00 saturated in HLS and 0.50 in HSV, so a caller passing a
+            number read off a colour picker will get a more colourful ramp than intended.
 
     Returns the ramp as a list of "#RRGGBB" colours (darkest first), with `distinct`, how
     many of them are different from each other, and `hue_span`, `sat_floor` and
