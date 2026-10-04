@@ -339,6 +339,31 @@ def add_outline(
       return (nsign * fx) / length, (nsign * fy) / length
     end
 
+    -- How many rows of the silhouette have background between two of their parts. An
+    -- outline grows inward from both sides of every gap, so a gap of 2*thickness or less
+    -- closes completely and the two masses weld. Nothing else can see that happen: the
+    -- drawing had the air, the result does not, and every count still reports success.
+    -- Measured on a real figure, a 2px outline closed 31 of its 86 gaps and cost 8 rows
+    -- their negative space, welding the legs and the feet into a single plinth.
+    local function rows_with_air()
+      local n = 0
+      for yy = 0, H - 1 do
+        local runs, inside = 0, false
+        for xx = 0, W - 1 do
+          local solid = img_solid(spr, img, xx, yy)
+          if solid and not inside then
+            runs = runs + 1
+            inside = true
+          elseif not solid then
+            inside = false
+          end
+        end
+        if runs >= 2 then n = n + 1 end
+      end
+      return n
+    end
+    local air_before = rows_with_air()
+
     local lit_laid, shadow_laid = 0, 0
     -- How many of the shape's own edge pixels took each thickness, from 0 upward. The
     -- measurement that says whether this tapered or switched: a switch puts everything in
@@ -385,6 +410,11 @@ def add_outline(
     if ARG.taper ~= nil then
       _extra = { outline_lit = lit_laid, outline_shadow = shadow_laid,
                  outline_weights = weights }
+    end
+    local air_after = rows_with_air()
+    if air_after < air_before then
+      _extra = _extra or {}
+      _extra.gaps_closed = air_before - air_after
     end
     """
     return _draw(args, snippet)

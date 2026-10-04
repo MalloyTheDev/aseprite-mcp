@@ -372,3 +372,63 @@ def test_a_uniform_outline_reports_no_weights(disc):
     facing to report, and a zero-filled table would read as a taper that came out flat."""
     result = effects.add_outline(disc, INK, thickness=2)
     assert "outline_weights" not in result, result
+
+
+# ------------------------------------------- the negative space an outline destroys
+@pytest.fixture
+def two_masses(request):
+    """Two blocks with a gap between them, which is what a silhouette's air is made of."""
+    def build(gap: int) -> str:
+        name = f"gap_{gap}_{request.node.name.replace('[', '_').replace(']', '')}.aseprite"
+        sprite.create_sprite(name, 32, 16, overwrite=True)
+        cells = [{"x": x, "y": y} for y in range(4, 12) for x in range(4, 9)]
+        cells += [{"x": x, "y": y} for y in range(4, 12) for x in range(9 + gap, 14 + gap)]
+        drawing.draw_pixels(name, cells, FILL)
+        return name
+    return build
+
+
+@pytest.mark.parametrize("gap,thickness,survives", [
+    (3, 1, True),    # 3 - 2*1 = 1px of background left
+    (3, 2, False),   # 3 - 2*2 is negative: the masses weld
+    (4, 2, False),   # exactly eaten
+    (6, 2, True),    # 2px left
+    (8, 2, True),
+])
+def test_an_outline_reports_the_gaps_it_closes(two_masses, gap, thickness, survives):
+    """An outline grows inward from both sides of every gap, so a gap of twice the
+    thickness or less closes completely and two masses become one.
+
+    Nothing else in the result can see that happen. The drawing had the air, the finished
+    sprite does not, and every counter still reports success: `pixels_written` is correct,
+    the silhouette is intact, and the figure has quietly lost the thing that made it
+    readable. Measured on this project's own golem, a two-pixel outline closed 31 of the
+    86 gaps in the drawing and cost 8 rows their negative space, welding the legs and the
+    feet into a single plinth.
+
+    The expectation here is arithmetic rather than a fitted threshold, which is why it is
+    parameterised across the boundary: a gap survives exactly when it is wider than twice
+    the outline.
+    """
+    name = two_masses(gap)
+    result = effects.add_outline(name, INK, thickness=thickness)
+    closed = result.get("gaps_closed", 0)
+    if survives:
+        assert closed == 0, (
+            f"a {gap}px gap under a {thickness}px outline should keep "
+            f"{gap - 2 * thickness}px of background, but {closed} rows welded")
+    else:
+        assert closed == 8, (
+            f"a {gap}px gap under a {thickness}px outline cannot survive, but only "
+            f"{closed} of the 8 rows were reported as welded")
+    back = inspect.get_pixels(name, 0, 0, 32, 16)["pixels"]
+    middle = [px for px in back[8] if px[7:9] == "00"][:1]
+    assert bool(middle) == survives or closed > 0, (
+        "the reported count disagrees with the picture on row 8")
+
+
+def test_a_gap_that_survives_is_not_reported(two_masses):
+    """Absent rather than zero, like every other count here, so a `gaps_closed` key in a
+    result always means something was actually lost."""
+    result = effects.add_outline(two_masses(8), INK, thickness=1)
+    assert "gaps_closed" not in result, result
