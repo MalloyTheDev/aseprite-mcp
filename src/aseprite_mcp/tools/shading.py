@@ -16,11 +16,12 @@ written), so it is implemented as palette index arithmetic instead.
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import lighting
+from ..core import facets, lighting, occlusion
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_COLOR_LIST_LENGTH,
     MAX_FILL_LIGHT_STRENGTH,
+    MAX_GLOW_RADIUS,
     MAX_OUTLINE_THICKNESS,
     MAX_SPECULAR_PIXELS,
     check_count,
@@ -29,6 +30,7 @@ from ..core.limits import (
 )
 from ..core.models import FRAME_GUARD_LUA
 from .common import LANDED_LUA, lua_path, parse_color, resolve_path, run_ramp_lua
+from .drawing import _write_map
 
 # Shared by every ramp-aware tool here: find the ramp entry a pixel belongs to.
 #
@@ -1136,6 +1138,446 @@ def contact_shadow(
 
 
 @mcp.tool()
+def seam_occlusion(
+    filename: str,
+    rows: list[str],
+    legend: dict,
+    ramp: list[str],
+    radius: int = 2,
+    depth: int = 2,
+    tolerance: float = 24.0,
+    x: int = 0,
+    y: int = 0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Darken the seam where two masses of the **same** material overlap, along its ramp.
+
+    `contact_shadow` does ambient occlusion already and finds the form doing the occluding
+    by colour, which is the one case a figure never presents. An arm against a torso, a
+    pauldron over a shoulder, a thigh against a hip: both sides are the same stone under
+    the same light and no colour separates them, so there is nothing for `occluder_color`
+    to match. Measured on this project's own golem, an armpit where an artist darkens the
+    contact came out +131 in luminance, because nothing here could see the seam.
+
+    What a colour cannot say, the caller can. The map is the same notation
+    `draw_pixel_map` and `shade_facets` take, one character per pixel, except that the
+    legend names **masses** instead of colours or directions, and gives each one a `z`.
+
+    Args:
+        rows: One string per row of the map, one character per pixel. "." is a pixel that
+            belongs to no mass, and is neither darkened nor treated as an occluder.
+        legend: {symbol: z}, where a **higher z is nearer the viewer**. `{"a": 1, "b": 0}`
+            says mass "a" overlaps mass "b", so the seam darkens on "b" and not on "a".
+            Occlusion is asymmetric and that is the whole point: darken both sides of a
+            seam and you have drawn brickwork, darken the side behind and you have put one
+            mass in front of another.
+        ramp: Colours darkest first. Darkened pixels stay on this ramp, so conformance is
+            preserved by construction.
+        radius: How far the darkening reaches from the seam, in pixels. 2 is usually right
+            and is what gives the falloff somewhere to happen.
+        depth: How many ramp steps darker, against the seam itself, tapering to nothing at
+            `radius`. Refused at or above the ramp's length, which would slam the seam to
+            the darkest entry whatever was there.
+        tolerance: How close a pixel must be to a ramp entry to be darkened, as a weighted
+            RGB distance. A pixel further off is left alone, so a seam crossing another
+            material does not drag it onto this ramp.
+        x, y: Where the map's top-left corner lands on the canvas.
+        layer: Target layer (default: top layer).
+        frame: Target frame, 1-based.
+
+    The darkening **falls off with distance** from the seam rather than being a hard line,
+    on the same curve `contact_shadow` uses so the two cannot disagree about what a contact
+    falloff is. That matters more here than it does there: the workaround this replaces, in
+    this project's golem generator, read seam pixels back in Python and slammed them two
+    steps down at a fixed width, and the result read as masonry. A combination that cannot
+    produce a falloff, such as `depth=1` over `radius=2`, is reported as a flat band rather
+    than passed off as one.
+
+    Refuses rather than darkening nothing: a map with one mass, a map whose masses all sit
+    at the same z, masses that do not come within `radius` of each other, and a pass where
+    every pixel it reached was already at the ramp's darkest step are each their own
+    refusal, and each one names the counts behind it.
+
+    Reports `masses` (pixels per symbol), `depths` (the z each resolved to), `by_steps`
+    (how many pixels moved how far, which is the falloff) and `darkened_pixels`.
+    """
+    if len(ramp) < 2:
+        raise ValidationFailed(
+            "ramp needs at least 2 colours: occlusion is a step down a ramp, and with one "
+            "colour there is nowhere to step."
+        )
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    radius = check_count(
+        "radius", radius, MAX_OUTLINE_THICKNESS, minimum=1,
+        remedy="Occlusion reaching further than a couple of pixels is a drop shadow, "
+               "which add_drop_shadow and cast_shadow do properly.",
+    )
+    if depth >= len(ramp):
+        raise ValidationFailed(
+            f"depth is {depth} on a ramp of {len(ramp)}, so every pixel it reached would "
+            f"land on the darkest entry whatever it started as, which is a drawn black "
+            f"line rather than occlusion. The most this ramp can express is "
+            f"{len(ramp) - 1}."
+        )
+    planned = occlusion.plan(
+        rows, legend, radius=radius, depth=int(depth), origin_x=int(x), origin_y=int(y)
+    )
+
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "ramp": [parse_color(c) for c in ramp],
+        "darken": planned["darken"],
+        "tolerance": float(tolerance),
+    }
+    body = FRAME_GUARD_LUA + _RAMP_LUA + LANDED_LUA + """
+    local spr = open_sprite(ARG.src)
+    local layer = find_layer(spr, ARG.layer)
+    if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img = get_draw_image(spr, layer, framenum)
+    local W, H = img.width, img.height
+    local ramp = ARG.ramp
+
+    local mark = landed()
+    -- Counted so a pass that darkened nothing can say which of its reasons it was,
+    -- instead of reporting `darkened_pixels: 0` as a success nobody reads. The plan is
+    -- geometry and knows where the seams are; only the open file knows what is painted
+    -- there, so these four are the ways the two can disagree.
+    local off_canvas, transparent, off_ramp, already_darkest = 0, 0, 0, 0
+    for _, p in ipairs(ARG.darken) do
+      if p.x < 0 or p.y < 0 or p.x >= W or p.y >= H then
+        off_canvas = off_canvas + 1
+      else
+        local r, g, b, a = px_to_rgba(spr, img:getPixel(p.x, p.y))
+        if a == 0 then
+          transparent = transparent + 1
+        else
+          local idx, dist = ramp_match(ramp, r, g, b)
+          if dist > ARG.tolerance then
+            off_ramp = off_ramp + 1
+            note_skipped()
+          else
+            local target = idx - p.steps
+            if target < 1 then target = 1 end
+            if target == idx then
+              already_darkest = already_darkest + 1
+            else
+              local c = ramp[target]
+              img_set(img, p.x, p.y, rgba_to_px(spr, c.r, c.g, c.b, a))
+            end
+          end
+        end
+      end
+    end
+
+    local darkened = landed() - mark
+    if darkened == 0 then
+      error(string.format(
+        "This seam occlusion darkened nothing, so the sprite is unchanged. The map put " ..
+        "%d pixels within reach of a nearer mass; of those %d are off the canvas, %d " ..
+        "are transparent on this layer, %d are further than tolerance %.1f from any " ..
+        "ramp entry, and %d were already at the ramp's darkest step. If most are " ..
+        "transparent or off the canvas the map is not where the art is: check x, y and " ..
+        "the layer. If most are off the ramp, this is not the ramp the masses are " ..
+        "painted on.",
+        #ARG.darken, off_canvas, transparent, off_ramp, ARG.tolerance,
+        already_darkest), 0)
+    end
+
+    commit_image(spr, layer, framenum, img)
+    save_sprite(spr)
+    RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
+               seam_pixels = #ARG.darken, darkened_pixels = darkened,
+               pixels_off_ramp = off_ramp, pixels_already_darkest = already_darkest }
+    """
+    result = run_ramp_lua(body, args)
+    if isinstance(result, dict):
+        result["masses"] = planned["masses"]
+        result["depths"] = planned["depths"]
+        result["by_steps"] = planned["by_steps"]
+        result["pixels_in_reach"] = planned["pixels_in_reach"]
+        result["map_width"] = planned["width"]
+        result["map_height"] = planned["height"]
+        # Said in Python because only Python holds the step profile, and a flat band is
+        # invisible in the picture: it looks like a line somebody meant to draw.
+        note = occlusion.flat_band_note(
+            planned["by_steps"], radius=radius, depth=int(depth)
+        )
+        if note:
+            existing = result.get("warnings")
+            result["warnings"] = [*existing, note] if isinstance(existing, list) else [note]
+    return result
+
+
+@mcp.tool()
+def surface_emission(
+    filename: str,
+    ramp: list[str],
+    source_color: str,
+    radius: int = 4,
+    depth: int = 3,
+    falloff: str = "quadratic",
+    tolerance: float = 24.0,
+    source_tolerance: float | None = None,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Light an interior source onto the surface around it, up that surface's own ramp.
+
+    `glow` builds a halo on a layer **below** the artwork, and its docstring says plainly
+    that "a body blocks the halo of a gem inside it". So a glowing core inside a silhouette
+    gets nothing at all: on this project's golem, `glow` contributed zero pixels to the
+    export, which was confirmed by counting the colours in the committed PNG (nine: eight
+    stone steps and one core colour), and the longest comment in the old generator defended
+    a layer with nothing on it. What light from an interior source actually does is warm the
+    surface it sits in, and that is this.
+
+    It is neither a halo nor a gradient. Each pixel within `radius` of the source is moved
+    **up the ramp it is already on**, by a number of steps that falls off with distance, so
+    the surface keeps its own form: a crack near the core stays darker than the stone around
+    it, and both brighten. Painting a colour per ring instead, which is what a hand-rolled
+    bloom does, flattens every tone inside the radius to one value and reads as a gradient
+    laid over the figure.
+
+    Args:
+        ramp: Colours darkest first, and **the ramp the surface is painted on**: this moves
+            pixels along it, so a pixel further than `tolerance` from every entry is left
+            alone rather than dragged onto a palette it was never on. The warmth therefore
+            comes from the ramp's upper end, which is where a hue-shifted ramp is warm
+            (`generate_ramp` with `light_hue`). To tint as well as brighten, hand it a ramp
+            built from the surface's midtone up into the source's colour and the lift walks
+            into that hue.
+        source_color: The colour of the thing emitting, for example a gem or a molten core.
+            Source pixels are never repainted; they are where the light comes from.
+        radius: How many rings of surface the light reaches, in pixels.
+        depth: How many ramp steps the ring touching the source is lifted. The outermost
+            ring is always lifted by at least 1, because a ring that moves nothing should
+            not be in the radius. Refused at or above the ramp's length.
+        falloff: "quadratic" keeps the lift concentrated near the source, which is how light
+            falls off and what reads as a source; "linear" spreads it evenly.
+        tolerance: How close a pixel must be to a ramp entry to be lifted, as a weighted RGB
+            distance.
+        source_tolerance: How close a pixel must be to `source_color` to count as the
+            source. Defaults to `tolerance`, and it wants to be **tight** for the reason
+            `contact_shadow` documents at `occluder_tolerance`: the source is a flat colour
+            you named, while `tolerance` has to stay loose enough for shaded art that
+            varies, and one number cannot be both. The result warns when `source_color`
+            cannot be told apart from a ramp entry, because then the surface is partly its
+            own source and the light spreads from the wrong pixels.
+        layer: The layer whose surface is lit, and the one written (default: top layer).
+        frame: Target frame, 1-based.
+
+    **Why this is not an argument to `glow`.** `glow` writes a new layer below the subject
+    and promises the subject's cel is untouched, so deleting one layer removes the effect;
+    this writes into the subject's cel, because light landing on a surface is part of that
+    surface. `glow` paints only where the art is not; this paints only where the art is.
+    `glow` refuses when it runs out of room outside the silhouette; this refuses when it
+    finds no surface on the ramp inside it. An argument that reversed all three would be two
+    tools sharing one name, and it would make `glow`'s central promise conditional on a flag.
+
+    Refuses rather than reporting a pass that did nothing: no pixel matching `source_color`
+    is an error, and so is a source with no surface on the declared ramp around it. The
+    refusal carries the counts that say which it was.
+
+    Reports `per_ring`, how many pixels were lifted at each distance, which is the number
+    that says the falloff happened, alongside `lifts`, the steps each ring was given.
+    """
+    if len(ramp) < 2:
+        raise ValidationFailed(
+            "ramp needs at least 2 colours: emission is a step up a ramp, and with one "
+            "colour there is nowhere to step."
+        )
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    if falloff not in lighting.FALLOFFS:
+        raise ValidationFailed(
+            f'falloff must be "linear" or "quadratic"; got {falloff!r}.'
+        )
+    radius = check_count(
+        "radius", radius, MAX_GLOW_RADIUS, minimum=1,
+        remedy="Light reaching further than a few pixels across a sprite is a fill, "
+               "which fill_gradient does properly.",
+    )
+    if depth < 1:
+        raise ValidationFailed(
+            f"depth is {depth}; the minimum is 1 ramp step. A pass that moves a pixel "
+            "zero steps along its ramp leaves the sprite exactly as it was."
+        )
+    if depth >= len(ramp):
+        raise ValidationFailed(
+            f"depth is {depth} on a ramp of {len(ramp)}, so every pixel it reached would "
+            f"land on the brightest entry whatever it started as, which erases the form "
+            f"it was supposed to light. The most this ramp can express is {len(ramp) - 1}."
+        )
+    if tolerance < 0:
+        raise ValidationFailed("tolerance must not be negative.")
+    source_tol = float(tolerance) if source_tolerance is None else float(source_tolerance)
+    if source_tol < 0:
+        raise ValidationFailed("source_tolerance must not be negative.")
+
+    # Decided in Python so the Lua does a table lookup, and so the falloff is a list of
+    # integers that can be asserted on rather than a bloom that can only be looked at.
+    lifts = lighting.emission_lift(radius, int(depth), falloff)
+    parsed_ramp = [parse_color(c) for c in ramp]
+    parsed_source = parse_color(source_color)
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frame": int(frame),
+        "ramp": parsed_ramp,
+        "source": parsed_source,
+        "lifts": lifts,
+        "radius": radius,
+        "tolerance": float(tolerance),
+        "source_tolerance": source_tol,
+    }
+    body = FRAME_GUARD_LUA + _RAMP_LUA + _FIELD_LUA + LANDED_LUA + """
+    local spr = open_sprite(ARG.src)
+    local layer = find_layer(spr, ARG.layer)
+    if layer.isGroup then
+      error("Cannot light a group layer: " .. layer.name ..
+            ". Name one of the layers inside it.", 0)
+    end
+    local framenum = require_frame(spr, ARG.frame, "frame")
+    local img = get_draw_image(spr, layer, framenum)
+    local W, H = img.width, img.height
+    local ramp, source = ARG.ramp, ARG.source
+
+    -- Two masks in one pass. The emitting set is stored already inverted, as `outside`,
+    -- because the chamfer field measures distance out from whatever the mask is false at,
+    -- so what it wants is a mask that is true where the source is not. Building it
+    -- inverted here keeps one full-canvas table alive instead of two.
+    local outside, opaque = {}, {}
+    local sources, solid = 0, 0
+    for y = 0, H - 1 do
+      outside[y], opaque[y] = {}, {}
+      for x = 0, W - 1 do
+        local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+        local is_solid = a > 0
+        local is_source = false
+        if is_solid then
+          solid = solid + 1
+          local dr, dg, db = r - source.r, g - source.g, b - source.b
+          -- Its own tolerance, not the ramp's, for the reason contact_shadow documents:
+          -- a surface that cannot be told apart from its own light source spreads the
+          -- light from the wrong pixels.
+          is_source =
+            math.sqrt(0.299*dr*dr + 0.587*dg*dg + 0.114*db*db) <= ARG.source_tolerance
+        end
+        outside[y][x] = not is_source
+        opaque[y][x] = is_solid
+        if is_source then sources = sources + 1 end
+      end
+    end
+
+    if sources == 0 then
+      error("No pixel matched source_color, so there is no light to spread. Check the " ..
+            "colour, or raise source_tolerance.", 0)
+    end
+
+    -- One O(canvas) pass whatever the radius, where scanning a neighbourhood per pixel
+    -- would have been O(canvas * radius^2). The field counts 3 per orthogonal step and 4
+    -- per diagonal one, so a pixel touching the source reads 3 and lands in ring 1.
+    local dist = distance_field(outside, W, H)
+    outside = nil
+
+    local lifts = ARG.lifts
+    local mark = landed()
+    local per_ring = {}
+    for i = 1, ARG.radius do per_ring[i] = 0 end
+    local in_reach, off_ramp, already_brightest = 0, 0, 0
+    for y = 0, H - 1 do
+      for x = 0, W - 1 do
+        -- A distance of 0 is a source pixel: it is where the light comes from, so it is
+        -- never repainted. Transparency is not a surface and takes no light, which is the
+        -- whole difference between this and a halo.
+        if opaque[y][x] and dist[y][x] > 0 then
+          local ring = math.floor(dist[y][x] / 3.0 + 0.5)
+          if ring >= 1 and ring <= ARG.radius then
+            in_reach = in_reach + 1
+            local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+            local idx, d = ramp_match(ramp, r, g, b)
+            if d > ARG.tolerance then
+              off_ramp = off_ramp + 1
+              note_skipped()
+            else
+              local target = idx + lifts[ring]
+              if target > #ramp then target = #ramp end
+              if target == idx then
+                already_brightest = already_brightest + 1
+              else
+                local c = ramp[target]
+                -- Tallied from what landed, not from the offer: `img_set` refuses a write
+                -- outside the active selection, so counting the offer would report a
+                -- falloff that was never painted.
+                local before = landed()
+                img_set(img, x, y, rgba_to_px(spr, c.r, c.g, c.b, a))
+                if landed() > before then per_ring[ring] = per_ring[ring] + 1 end
+              end
+            end
+          end
+        end
+      end
+    end
+
+    local lifted = landed() - mark
+    if lifted == 0 then
+      error(string.format(
+        "This emission lit nothing, so the sprite is unchanged. %d of the %d opaque " ..
+        "pixels matched source_color (at source_tolerance %.1f), %d surface pixels lay " ..
+        "within %d rings of one, %d of those were further than tolerance %.1f from any " ..
+        "ramp entry, and %d were already at the ramp's brightest step. If nothing lay " ..
+        "within reach, the source is not inside anything: this lights a surface, and " ..
+        "glow is the tool for a halo in open space. If most were off the ramp, this is " ..
+        "not the ramp the surface is painted on.",
+        sources, solid, ARG.source_tolerance, in_reach, ARG.radius, off_ramp,
+        ARG.tolerance, already_brightest), 0)
+    end
+
+    commit_image(spr, layer, framenum, img)
+    save_sprite(spr)
+    RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
+               source_pixels = sources, surface_pixels = solid,
+               pixels_in_reach = in_reach, lifted_pixels = lifted, per_ring = per_ring,
+               pixels_off_ramp = off_ramp,
+               pixels_already_brightest = already_brightest }
+    """
+    result = run_ramp_lua(body, args)
+    if isinstance(result, dict):
+        result["lifts"] = lifts
+        notes = []
+        # Said in Python because only Python holds both lists, and the overlap is invisible
+        # otherwise: the pass simply spreads light from pixels of the surface itself.
+        overlap = _ramp_entries_within(parsed_source, parsed_ramp, source_tol)
+        if overlap:
+            named = ", ".join(
+                f"ramp[{i}] {colour} at {dist:.1f}" for i, colour, dist in overlap
+            )
+            notes.append(
+                f"source_color is within source_tolerance ({source_tol:.1f}) of {named}, "
+                "so pixels of those ramp steps are being treated as the light source "
+                "rather than as surface to light. Lower source_tolerance, or give the "
+                "source a colour the ramp does not come near."
+            )
+        if radius > 1 and len(set(lifts)) == 1:
+            notes.append(
+                f"every ring lifts by the same {lifts[0]} step(s), so this is a flat band "
+                f"{radius} pixels wide rather than light falling off: at depth {depth} "
+                f"there is only one lift to give. Raise depth to at least {radius} so the "
+                "surface near the source goes further up the ramp than the surface away "
+                "from it."
+            )
+        if notes:
+            existing = result.get("warnings")
+            result["warnings"] = (
+                [*existing, *notes] if isinstance(existing, list) else notes
+            )
+    return result
+
+
+@mcp.tool()
 def outline_smart(
     filename: str,
     ramp: list[str],
@@ -1591,3 +2033,87 @@ def gradient_map(
                steps = #ramp, per_step = histogram }
     """
     return run_ramp_lua(body, args)
+
+
+@mcp.tool()
+def shade_facets(
+    filename: str,
+    rows: list[str],
+    legend: dict,
+    ramp: list[str],
+    light_angle: float = 135.0,
+    light_z: float = 0.5,
+    fill_strength: float = 0.35,
+    ambient: float = 0.16,
+    x: int = 0,
+    y: int = 0,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Shade a form built from flat planes, one tone per plane, from a map of directions.
+
+    Args:
+        rows: One string per row of the map, one character per pixel, as `draw_pixel_map`
+            takes. "." leaves a pixel alone.
+        legend: {symbol: facet direction}. A direction is an angle in degrees in the same
+            convention as `light_angle` (0 faces right, 90 up, 135 up and to the left),
+            the word "front" for a plane square to the viewer, or `[angle, z]` to tilt a
+            plane toward the viewer as well, which is how a chamfer is said.
+        ramp: Colours darkest first. Facet tones are entries of this and nothing else.
+        light_angle, light_z: The key light.
+        fill_strength: How much bounce comes back from roughly opposite, as a share of the
+            key. Without it every plane facing away from the key clamps to the same
+            ambient value and the whole shadow side comes out one flat colour.
+        ambient: The floor, so a plane facing away is dark rather than black.
+        x, y: Where the map's top-left corner lands.
+
+    `shade_region_by_light` reads a surface normal out of how far each pixel sits from the
+    silhouette's edge. That is right for anything round and wrong for everything hard: a
+    distance field cannot know where an edge is, so it rounds the form over, and a crate
+    comes out as a cushion. This takes the normals from the caller instead, because which
+    way a plane faces is a fact about the drawing that only the person drawing it knows.
+
+    Every pixel of one facet gets the same value. That flatness is the point: it is what
+    reads as cut rather than inflated, and it is the thing a gradient cannot imitate.
+
+    Returns the usual write counts plus `facet_steps`, the ramp step each symbol resolved
+    to, so a caller can see the value structure it just asked for. A pass whose facets all
+    land on the same step is refused rather than painting a flat fill.
+    """
+    if len(ramp) < facets.MIN_RAMP:
+        raise ValidationFailed(
+            f"ramp needs at least {facets.MIN_RAMP} colours to describe a form; got "
+            f"{len(ramp)}."
+        )
+    check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+    steps = facets.plan(
+        legend, steps=len(ramp), light_angle=float(light_angle),
+        light_z=float(light_z), fill_strength=float(fill_strength),
+        ambient=float(ambient),
+    )
+    # Delegated rather than reimplemented: the expansion, every refusal a hand-written
+    # grid earns, the selection mask and the clipping counters all already live on that
+    # path. A second write path here would have had to grow its own and would have
+    # forgotten one.
+    result = _write_map(
+        filename, rows, {symbol: ramp[step] for symbol, step in steps.items()},
+        x=int(x), y=int(y), layer=layer, frame=frame, ramp=ramp,
+    )
+    result["facet_steps"] = steps
+    # Two planes given different directions and handed the same tone will read as one
+    # plane, and the caller cannot see that from the picture: the facet it authored is
+    # simply not there. Surfaced rather than left to be noticed, because the fix is a
+    # choice between three things and only the caller knows which. Absent when it did not
+    # happen, like every other count here.
+    by_step: dict[int, list[str]] = {}
+    for symbol, step in steps.items():
+        by_step.setdefault(step, []).append(symbol)
+    merged = {step: sorted(syms) for step, syms in by_step.items() if len(syms) > 1}
+    if merged:
+        result["warnings"] = [
+            f"facets {syms} all resolved to ramp step {step}, so they will read as one "
+            "plane rather than as separate ones. Separate their angles, tilt one toward "
+            "the viewer with [angle, z], or give the pass a longer ramp."
+            for step, syms in sorted(merged.items())
+        ]
+    return result

@@ -10,9 +10,10 @@ every Aseprite version.
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import lighting
+from ..core import edges, lighting
 from ..core.errors import ValidationFailed
 from ..core.limits import (
+    MAX_ASSESS_PIXELS,
     MAX_COLOR_LIST_LENGTH,
     MAX_GLOW_RADIUS,
     MAX_OUTLINE_THICKNESS,
@@ -152,31 +153,116 @@ def add_outline(
     thickness: int = 1,
     connectivity: int = 8,
     where: str = "outside",
+    light_angle: float | None = None,
+    lit_thickness: int | None = None,
     layer: str | None = None,
     frame: int = 1,
 ) -> dict:
-    """Add a pixel outline around the artwork on a layer.
+    """Add a pixel outline around the artwork on a layer, optionally weighted by light.
 
     Args:
         color: Outline colour.
-        thickness: Outline width in pixels (default 1).
+        thickness: Outline width in pixels (default 1). With `light_angle`, this is the
+            width on the edges that face away from the light.
         connectivity: 4 (orthogonal only) or 8 (includes diagonals, default).
         where: "outside" (grow into transparency, default) or "inside"
             (recolour the shape's border pixels).
+        light_angle: Degrees, 0 from the right and 90 from above, as the shading tools
+            state it. Given, the outline's width varies by which way each edge faces:
+            `thickness` where the form turns away from the light, `lit_thickness` where
+            it faces into it, and **everything between the two across the band of edge in
+            between**.
+        lit_thickness: Width on the edges facing the light. 0 drops the outline there
+            entirely. Defaults to one pixel less than `thickness`. A value above
+            `thickness` is allowed and puts the weight on the lit side instead, which is
+            a rim light rather than a weighted outline.
+
+    A constant-width border is the single thing that most reliably makes a sprite read as
+    a die-cut sticker: nothing lit has an edge of uniform darkness, so the eye sees card
+    stamped out with a punch rather than a form in light. Hand-drawn work in this style
+    gathers the weight where the surface turns away and lets it vanish on the lit top
+    faces. `thickness=2, light_angle=135, lit_thickness=0` is that look.
+
+    The weight **tapers** rather than switching. The lit and shadow widths are the two ends
+    of a run of integers, and each edge pixel takes the one its facing selects, so a 2-to-0
+    keyline passes through 2, then 1, then 0 across a band of edge instead of flipping
+    between two values at the terminator. Facing is measured over a neighbourhood rather
+    than over the touching pixels, which is what makes the band continuous on a lumpy
+    silhouette: at a radius of one, a single-pixel bump swings the facing by ninety degrees
+    and the keyline comes apart into scraps. Measured by walking the boundary ring of a disc
+    with twelve bumps on it, the old per-pixel test crossed between outlined and bare 30
+    times, which is fifteen separate pieces of keyline; the taper crosses twice, which is
+    one arc. That fragmenting is why `lit_thickness=0` had to be reverted to 1 on this
+    project's own golem, where it measured better and looked damaged.
+
+    With the two widths one apart there are only two integers to choose from and the
+    changeover sits at the same facing the old comparison used, so
+    `thickness=2, lit_thickness=1` draws exactly what it drew before. The taper appears once
+    they differ by two or more, which is the case that was broken.
+
+    Reports `outline_weights` alongside the lit and shadow counts: how many of the
+    silhouette's own boundary pixels took each thickness, from 0 upward. That is the number
+    that says whether a pass tapered or switched, since a switch leaves the entries between
+    its two widths empty.
+
+    For an outline in colours taken from the artwork's own ramp rather than one flat
+    colour, see `outline_smart`, which varies hue instead of width.
     """
     if connectivity not in (4, 8):
         raise ValidationFailed("connectivity must be 4 or 8")
     if where not in ("outside", "inside"):
         raise ValidationFailed('where must be "outside" or "inside"')
+    if lit_thickness is not None and light_angle is None:
+        raise ValidationFailed(
+            "lit_thickness needs light_angle: which edges are lit is not knowable "
+            "without a light direction. Pass light_angle=135 for the usual key light."
+        )
+    shadow_side = check_count(
+        "thickness", max(1, int(thickness)), MAX_OUTLINE_THICKNESS, minimum=1,
+        remedy="Each pixel of thickness is another full-canvas pass; outline in "
+               "several calls if you really need more.",
+    )
+    if light_angle is None:
+        lit_side = shadow_side
+    elif lit_thickness is None:
+        if shadow_side == 1:
+            # Accepting this would take a light direction and draw exactly the border it
+            # drew before, which is the kind of silent no-op this project treats as worse
+            # than an error.
+            raise ValidationFailed(
+                "light_angle with thickness=1 has nothing to redistribute: one pixel on "
+                "the shadow side and one on the lit side is the uniform outline it would "
+                "have drawn anyway. Raise thickness to 2 so the shadow side is heavier, "
+                "or pass lit_thickness=0 to drop the outline on the lit side instead."
+            )
+        lit_side = shadow_side - 1
+    else:
+        lit_side = check_count(
+            "lit_thickness", int(lit_thickness), MAX_OUTLINE_THICKNESS, minimum=0,
+            remedy="Each pixel of thickness is another full-canvas pass; outline in "
+                   "several calls if you really need more.",
+        )
     args = {
         "src": lua_path(resolve_path(filename)),
         "layer": layer, "frame": int(frame),
         "color": parse_color(color),
-        "thickness": check_count(
-            "thickness", max(1, int(thickness)), MAX_OUTLINE_THICKNESS, minimum=1,
-            remedy="Each pixel of thickness is another full-canvas pass; outline in "
-                   "several calls if you really need more.",
-        ),
+        "thickness": shadow_side,
+        "lit_thickness": lit_side,
+        # The loop has to follow the larger of the two, or a rim light's extra passes
+        # never run and `lit_thickness` above `thickness` would silently clamp.
+        "passes": max(shadow_side, lit_side),
+        # Built here rather than in Lua so the angle convention has one definition, in
+        # core, shared with every other tool that takes a light angle. z=0 because this
+        # is a question about the screen plane: an edge faces left, not toward the viewer.
+        "light": (None if light_angle is None
+                  else list(lighting.light_vector(light_angle, 0.0)[:2])),
+        # The thickness at each facing, innermost-shadow first. Built in core so the taper
+        # is a list of integers rather than arithmetic transcribed into Lua, and absent
+        # when no light was given, which is what switches the whole facing pass off and
+        # leaves a call with no light drawing exactly the uniform border it always drew.
+        "taper": (None if light_angle is None
+                  else lighting.taper_weights(shadow_side, lit_side)),
+        "facing_radius": lighting.TAPER_RADIUS,
         "connectivity": connectivity,
         "where": where,
     }
@@ -190,23 +276,145 @@ def add_outline(
       end
       return n
     end
-    for _pass = 1, ARG.thickness do
-      local mark = {}
-      for yy = 0, img.height - 1 do
-        for xx = 0, img.width - 1 do
+    local W, H = img.width, img.height
+    local done = {}
+    local function key(x, y) return y * W + x end
+
+    -- An outside outline grows: what a pass lays down is solid, so the next pass finds
+    -- the next ring out by itself. An inside one does not, because recolouring a border
+    -- pixel leaves it just as opaque as it was. Every pass therefore used to re-mark the
+    -- same border, and `thickness` had no effect at all beyond the first pixel: an inside
+    -- outline came out one pixel wide whatever was asked for. Carrying `done` forward and
+    -- treating it as already-outlined is what makes the second pass step inward.
+    local function is_seed(x, y)
+      if ARG.where == "inside" then
+        return (not img_solid(spr, img, x, y)) or done[key(x, y)] == true
+      end
+      return img_solid(spr, img, x, y)
+    end
+    local function is_candidate(x, y)
+      if ARG.where == "inside" then
+        return img_solid(spr, img, x, y) and done[key(x, y)] ~= true
+      end
+      return not img_solid(spr, img, x, y)
+    end
+
+    -- Whether this pixel is on the boundary at all: does anything across the edge touch
+    -- it. A membership test only, and deliberately at a radius of one, because the ring a
+    -- pass lays down is the pixels adjacent to what came before.
+    local function touches_seed(xx, yy)
+      for _, nb in ipairs(neighbors(xx, yy)) do
+        if is_seed(nb[1], nb[2]) then return true end
+      end
+      return false
+    end
+    -- An outside outline's seeds are the shape, so its outward normal is the negation of
+    -- the direction to them; an inside outline's seeds are already outside the shape, so
+    -- there it is that direction itself.
+    local nsign = 1
+    if ARG.where == "outside" then nsign = -1 end
+
+    -- Which way the edge faces here, as the sum of the directions to everything across it
+    -- within `facing_radius`, each weighted by one over its distance squared. Summed
+    -- rather than taken from one neighbour because a pixel in a concave corner is seeded
+    -- from two sides at once and the average is the direction the edge actually faces;
+    -- summed over a neighbourhood rather than over the touching pixels because at a radius
+    -- of one a single-pixel bump swings the answer by ninety degrees, and the outline then
+    -- changes weight pixel by pixel instead of across a band. The weighting is what keeps
+    -- the mass behind an edge in charge of the bump in front of it.
+    local R = ARG.facing_radius
+    local function facing(xx, yy)
+      local fx, fy = 0.0, 0.0
+      for dy = -R, R do
+        for dx = -R, R do
+          local d2 = dx * dx + dy * dy
+          if d2 > 0 and d2 <= R * R and is_seed(xx + dx, yy + dy) then
+            fx = fx + dx / d2
+            fy = fy + dy / d2
+          end
+        end
+      end
+      local length = math.sqrt(fx * fx + fy * fy)
+      if length < 1e-9 then return nil end
+      return (nsign * fx) / length, (nsign * fy) / length
+    end
+
+    -- How many rows of the silhouette have background between two of their parts. An
+    -- outline grows inward from both sides of every gap, so a gap of 2*thickness or less
+    -- closes completely and the two masses weld. Nothing else can see that happen: the
+    -- drawing had the air, the result does not, and every count still reports success.
+    -- Measured on a real figure, a 2px outline closed 31 of its 86 gaps and cost 8 rows
+    -- their negative space, welding the legs and the feet into a single plinth.
+    local function rows_with_air()
+      local n = 0
+      for yy = 0, H - 1 do
+        local runs, inside = 0, false
+        for xx = 0, W - 1 do
           local solid = img_solid(spr, img, xx, yy)
-          if ARG.where == "inside" and solid then
-            for _, nb in ipairs(neighbors(xx, yy)) do
-              if not img_solid(spr, img, nb[1], nb[2]) then mark[#mark+1] = {xx, yy}; break end
+          if solid and not inside then
+            runs = runs + 1
+            inside = true
+          elseif not solid then
+            inside = false
+          end
+        end
+        if runs >= 2 then n = n + 1 end
+      end
+      return n
+    end
+    local air_before = rows_with_air()
+
+    local lit_laid, shadow_laid = 0, 0
+    -- How many of the shape's own edge pixels took each thickness, from 0 upward. The
+    -- measurement that says whether this tapered or switched: a switch puts everything in
+    -- two entries, and a taper fills the ones between them. Tallied on the first pass,
+    -- where the candidates are exactly the silhouette's boundary ring.
+    local weights = {}
+    for i = 1, ARG.passes + 1 do weights[i] = 0 end
+    for _pass = 1, ARG.passes do
+      local mark = {}
+      for yy = 0, H - 1 do
+        for xx = 0, W - 1 do
+          if is_candidate(xx, yy) and touches_seed(xx, yy) then
+            local allowed, lit = ARG.thickness, false
+            if ARG.taper ~= nil then
+              local nx, ny = facing(xx, yy)
+              -- A facing that cancels exactly is not determinate: a one-pixel sliver has
+              -- background on both sides at once. Such a pixel is still an edge and still
+              -- gets outlined, at the shadow side's weight, because the alternative is
+              -- dropping it and breaking the silhouette.
+              if nx ~= nil then
+                local toward = nx * ARG.light[1] + ny * ARG.light[2]
+                if toward < -1 then toward = -1 elseif toward > 1 then toward = 1 end
+                -- The table is built in core.lighting, so the shape of the taper is a
+                -- list of integers that can be asserted on rather than a band of pixels
+                -- that can only be looked at.
+                local bucket = math.floor((toward + 1) * 0.5 * (#ARG.taper - 1) + 0.5) + 1
+                allowed = ARG.taper[bucket]
+                lit = toward > 0
+              end
             end
-          elseif ARG.where == "outside" and not solid then
-            for _, nb in ipairs(neighbors(xx, yy)) do
-              if img_solid(spr, img, nb[1], nb[2]) then mark[#mark+1] = {xx, yy}; break end
+            if _pass == 1 then weights[allowed + 1] = weights[allowed + 1] + 1 end
+            if _pass <= allowed then
+              mark[#mark+1] = {xx, yy}
+              if lit then lit_laid = lit_laid + 1 else shadow_laid = shadow_laid + 1 end
             end
           end
         end
       end
-      for _, p in ipairs(mark) do img_set(img, p[1], p[2], oc) end
+      for _, p in ipairs(mark) do
+        img_set(img, p[1], p[2], oc)
+        done[key(p[1], p[2])] = true
+      end
+    end
+    if ARG.taper ~= nil then
+      _extra = { outline_lit = lit_laid, outline_shadow = shadow_laid,
+                 outline_weights = weights }
+    end
+    local air_after = rows_with_air()
+    if air_after < air_before then
+      _extra = _extra or {}
+      _extra.gaps_closed = air_before - air_after
     end
     """
     return _draw(args, snippet)
@@ -1259,14 +1467,6 @@ def fill_checkerboard(
 # counter for every tool that uses it. Erasing is a second count and a different promise,
 # so it is attached here, after that harness has built RESULT, rather than by widening a
 # block every drawing tool shares for the sake of one of them.
-_STRAY_TAIL = """
-if _stray_erased ~= nil then
-  RESULT.erased = _stray_erased
-  RESULT.erased_clusters = _stray_erased_clusters
-end
-"""
-
-
 @mcp.tool()
 def remove_stray_pixels(
     filename: str,
@@ -1537,10 +1737,186 @@ def remove_stray_pixels(
       if gone == #members then clusters = clusters + 1 end
     end
 
-    _stray_replaced = replaced
+    _extra = { replaced = replaced }
     if ARG.erase_isolated then
-      _stray_erased = erased
-      _stray_erased_clusters = clusters
+      _extra.erased = erased
+      _extra.erased_clusters = clusters
     end
     """
-    return run_lua(_OPEN + LANDED_LUA + snippet + _CLOSE + _STRAY_TAIL, args)
+    return run_lua(_OPEN + LANDED_LUA + snippet + _CLOSE, args)
+
+
+# Reads the silhouette and nothing else. One run-length row per pixel row, alternating
+# "not drawn" then "drawn", always starting with "not drawn", so a row that begins with
+# art opens with a zero. A 64x64 silhouette comes back as a few hundred integers rather
+# than 4,096 colour strings, which is what makes reading the whole frame affordable.
+_SILHOUETTE_LUA = FRAME_GUARD_LUA + """
+local spr = open_sprite(ARG.src)
+local layer = find_layer(spr, ARG.layer)
+if layer.isGroup then
+  error("Cannot read a silhouette off a group layer: " .. layer.name ..
+        ". Name one of the layers inside it.", 0)
+end
+local framenum = require_frame(spr, ARG.frame, "frame")
+if spr.width * spr.height > ARG.max_pixels then
+  error("This frame is " .. spr.width .. "x" .. spr.height .. " (" ..
+        (spr.width * spr.height) .. " px); normalize_edge_runs reads at most " ..
+        ARG.max_pixels .. ". Normalise a smaller sprite, or crop a copy of this one.", 0)
+end
+local img = get_draw_image(spr, layer, framenum)
+
+local rows, drawn = {}, 0
+for yy = 0, spr.height - 1 do
+  local row, n, state, length = {}, 0, false, 0
+  for xx = 0, spr.width - 1 do
+    local _, _, _, a = px_to_rgba(spr, img:getPixel(xx, yy))
+    local solid = a > 0
+    if solid then drawn = drawn + 1 end
+    if solid == state then
+      length = length + 1
+    else
+      n = n + 1; row[n] = length
+      state, length = solid, 1
+    end
+  end
+  n = n + 1; row[n] = length
+  rows[yy + 1] = row
+end
+
+RESULT = { ok = true, filename = spr.filename, layer = layer.name, frame = framenum,
+           width = spr.width, height = spr.height, rows = rows, drawn_pixels = drawn }
+"""
+
+
+def _silhouette(measured: dict) -> list[list[bool]]:
+    """The run-length rows back as rows of booleans, which is what `core.edges` reads."""
+    width = measured["width"]
+    mask = []
+    for row in measured["rows"]:
+        cells: list[bool] = []
+        state = False
+        for length in row:
+            cells.extend([state] * int(length))
+            state = not state
+        # The encoder emits the final run even when it is empty, and a row of pure
+        # transparency is a single run, so the lengths always sum to the width. Checked
+        # rather than trusted, because a short row here would silently shift every pixel
+        # after it and the plan would be made against a different shape than the sprite.
+        if len(cells) != width:
+            raise ValidationFailed(
+                f"the silhouette read back as {len(cells)} cells on a row of a "
+                f"{width}-wide sprite, so the encoding and the canvas disagree. Nothing "
+                "was written."
+            )
+        mask.append(cells)
+    return mask
+
+
+@mcp.tool()
+def normalize_edge_runs(
+    filename: str,
+    min_span: int = edges.MIN_SPAN,
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Even out the run lengths along a silhouette's diagonals, conservatively.
+
+    A hand-drawn diagonal is built from runs of consistent length: a 1:2 slope is two
+    pixels, two pixels, two pixels, held steady, and broken only on purpose. A generated
+    one wanders, runs of 3, 1, 2, 1, 4 where a person would have drawn 2, 2, 2, 2, and
+    that wander is the most recognisable tell in generated pixel art, ahead of both colour
+    and shading. `assess_sprite` already counts it as `jaggy_corners`, which on a boundary
+    stepping one way is exactly the number of steps; this is what to do about the count.
+
+    What it changes is narrow on purpose: a run of **exactly one**, with a run of at least
+    two on either side, stepping the same way on both sides, by exactly one pixel each
+    time. That run is merged into whichever neighbour lies further out, which paints one
+    pixel in the colour of the pixel beside it. Everything else is left alone and counted
+    under `kept`, so a pass that declines to touch something says which rule stopped it:
+
+    * `diagonal`: the run sits next to another one-pixel run, so this is a 1:1 diagonal,
+      already the most even edge there is;
+    * `feature`: the run is further out, or further in, than both its neighbours. That is a
+      spike or a notch, a local extremum, and somebody drew it: a horn, a finger, a chip
+      in the stone;
+    * `step`: the step either side is more than one pixel, so this is a change of slope;
+    * `thin`: the edge belongs to something thinner than `min_span`, where adding a pixel
+      reshapes the feature instead of smoothing its edge;
+    * `no_gain`: the merge would not lower the jagged-corner count, measured over the four
+      2x2 windows the one new pixel can change.
+
+    Because it only ever adds a pixel, and only ever a value the boundary already held
+    somewhere else, **the silhouette's extent cannot move and nothing can be eaten**. Both
+    are checked rather than promised: a plan whose bounding box differs from the
+    original's is refused and nothing is written.
+
+    Args:
+        min_span: How thick the mass behind an edge has to be before its edge is treated
+            as an edge, measured as the unbroken run of drawn pixels inward from the
+            boundary. The default of 3 is the smallest value at which the added pixel is a
+            minority of what it joins. Raise it to protect thin limbs; 2 is the floor.
+        layer: The layer whose silhouette is read and written (default: top layer).
+        frame: Target frame, 1-based.
+
+    Returns `jaggy_corners_before` and `jaggy_corners_after` every call, so the claim is in
+    the result rather than in this docstring, along with `runs_merged` and `by_side`. A
+    pass with nothing to merge is **refused**, and the refusal carries the tally above: a
+    silhouette this cannot improve is the normal case for art that was drawn by hand.
+
+    Two Aseprite launches, one to read the silhouette and one to paint: the decision about
+    which runs are stumbles is arithmetic over the whole shape, and the shape is only
+    knowable with the file open. The read ignores any active selection, because the
+    geometry is a fact about the whole silhouette, while the write honours it like every
+    other drawing tool. When the mask refuses some of the planned pixels, the after figure
+    is withheld rather than reported against a shape that was not painted.
+    """
+    src = resolve_path(filename)
+    measured = run_lua(_SILHOUETTE_LUA, {
+        "src": lua_path(src), "layer": layer, "frame": int(frame),
+        "max_pixels": MAX_ASSESS_PIXELS,
+    })
+    if not measured.get("drawn_pixels"):
+        raise ValidationFailed(
+            f"layer {measured['layer']!r} has nothing drawn on frame {measured['frame']}, "
+            "so there is no silhouette to even out."
+        )
+    planned = edges.plan(_silhouette(measured), min_span=int(min_span))
+
+    result = _draw(
+        {
+            "src": lua_path(src), "layer": layer, "frame": int(frame), "color": None,
+            "pixels": planned["add"],
+        },
+        """
+        for _, p in ipairs(ARG.pixels) do
+          -- The colour of the neighbour this run is being merged into, read off the image
+          -- rather than passed in. Nothing new can appear in the sprite, so a drawing on
+          -- a ramp stays on it without this tool having to know what a ramp is.
+          img_set(img, p.x, p.y, img:getPixel(p.from_x, p.from_y))
+        end
+        """,
+    )
+    result["runs_examined"] = planned["runs_examined"]
+    result["runs_merged"] = planned["runs_merged"]
+    result["by_side"] = planned["by_side"]
+    result["jaggy_corners_before"] = planned["jaggy_before"]
+    result["bbox"] = planned["bbox"]
+    if planned["kept"]:
+        result["kept"] = planned["kept"]
+    written = result.get("pixels_written")
+    if written == len(planned["add"]):
+        result["jaggy_corners_after"] = planned["jaggy_after"]
+    else:
+        # The plan was scored against a silhouette with every merge in it. With some of
+        # them masked out the shape on disk is a different one, and reporting the planned
+        # figure against it would be a measurement of something that was not painted.
+        note = (
+            f"{written} of the {len(planned['add'])} planned pixels were written, so the "
+            f"silhouette on disk is not the one the plan was scored against: "
+            f"jaggy_corners_after is withheld rather than reported as "
+            f"{planned['jaggy_after']}. deselect and run this again, or call "
+            "assess_sprite to measure what is actually there."
+        )
+        existing = result.get("warnings")
+        result["warnings"] = [*existing, note] if isinstance(existing, list) else [note]
+    return result

@@ -10,7 +10,7 @@ from pathlib import Path
 from mcp.server.mcpserver import Image
 
 from ..app import mcp
-from ..core import config, indexed, quality, spritediff
+from ..core import config, figure, indexed, quality, ramplint, spritediff
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_ASSESS_PIXELS,
@@ -360,6 +360,8 @@ def assess_sprite(
     layer: str | None = None,
     ramp: list[str] | None = None,
     check_tiling: bool = False,
+    standing: bool = False,
+    check_cvd: bool = False,
 ) -> dict:
     """Measure the drawing itself and say what is worth fixing.
 
@@ -370,8 +372,35 @@ def assess_sprite(
     Reports how many colours are in use and roughly how many ramps they form, pixels with
     no neighbour of their own colour (noise), jagged corners on diagonals, the drawn
     bounding box, how much of the canvas it fills, whether it sits centred, and how far
-    the silhouette is from its own mirror. Each measurement that is worth acting on comes
-    back with a line saying why, so the numbers do not have to be interpreted.
+    the silhouette is from its own mirror.
+
+    It also reports five things about whether the drawing has *form*, which were added
+    because every measurement above passed on a figure that read as one grey slab:
+
+    * `row_structure`: how many drawn rows have background between two parts of the
+      silhouette, how many are a single run across most of the width, and the widest run.
+      A creature reads because air cuts between its limbs, and nothing else here notices
+      when it does not.
+    * `edge_contact`: drawn pixels sitting on the canvas border, where a silhouette is cut
+      off and cannot take an outline.
+    * `tone_shares`: the most-used colour and what share of the drawing it covers. One
+      tone over a large share of a surface is a fill, not a form.
+    * `separator`: what share of the drawing is its darkest colour, and how dark that is.
+      In this medium the dark keyline is structural rather than a fallback.
+    * `ramp_chroma`, when a `ramp` is declared: its hue span, its saturation floor, and
+      how many of its steps are below the chroma at which hue is visible at all. The
+      floor is an HLS saturation, the same scale `generate_ramp`'s `chroma` takes, and
+      not the HSV saturation a colour picker shows: #ff8080 reads 1.00 here and 0.50
+      there. A ramp
+      interpolated between two endpoints on opposite sides of the colour wheel routes
+      through the neutral axis, so it can rotate hue a long way and render as greys.
+
+    The silhouette and form readings are withheld for art that fills its canvas (a scene
+    has no silhouette) and for art using fewer than three colours (a flat shape is not a
+    surface without form), because a reading that cannot be acted on is noise.
+
+    Each measurement that is worth acting on comes back with a line saying why, so the
+    numbers do not have to be interpreted.
 
     Args:
         ramp: Declare the ramp the art should be on and the report adds palette
@@ -385,6 +414,14 @@ def assess_sprite(
         check_tiling: For a tile, also measure how much worse the wrapping edge looks
             than the interior, per axis. Near 1.0 wraps; much above 1.0 has a seam.
         layer: Measure one layer instead of the flattened frame.
+        standing: Say that the subject is a figure standing on its feet, and the report
+            adds whether its mass sits over them: the signed margin between the mass
+            centroid and the support base. There is no sensible answer for an item, a
+            tile or a scene, so this is asked for rather than guessed.
+        check_cvd: Also re-measure the drawing through red-green and blue-yellow colour
+            vision deficiency, and report where two colours that are distinct to most
+            viewers collapse into one. Off by default because it is the one measurement
+            here that costs about half again as much as everything else at the size cap.
 
     Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
     the measurements, so this is cheap to call after every pass.
@@ -410,6 +447,55 @@ def assess_sprite(
     })
     grid = _expand(measured)
     metrics = quality.score(grid, ramp)
+    # The form and colour measures, which live in `core.figure` and `core.ramplint`
+    # because they are judgement over a grid and nothing else.
+    #
+    # What is unconditional here and what is a flag was decided by timing them, at the
+    # size cap and at a real size, rather than by taste.
+    #
+    # At 1024x1024, MAX_ASSESS_PIXELS, `quality.score` above already costs about 39
+    # seconds. The figure measures add roughly 4 and the notan about 4, a tenth each of a
+    # cost already being paid, while the colour-vision recheck adds 18 and so nearly half
+    # again: that one is the flag. On the 64x64 golem the same list reads 119ms for
+    # `quality.score`, 21ms for the figure measures, 13ms for the notan and 48ms for the
+    # recheck, so the unconditional additions are a worse *proportion* at a small size
+    # and irrelevant in absolute terms, because the `run_lua` above launches Aseprite and
+    # that subprocess dominates both. The flag is therefore chosen for the cap, where the
+    # cost is real, and nothing here is withheld to save tens of milliseconds.
+    mask = figure.mask_from_grid(grid)
+    line = figure.centerline(mask)
+    topo = figure.topology(mask)
+    metrics["form"] = {
+        # A deliberate lean drifts smoothly and a misplaced part jumps, so this is the
+        # second difference of the row midpoints and not their spread.
+        "centerline_peak": round(line.peak, 2),
+        "centerline_normalized": round(line.normalized, 3),
+        "centerline_rows_measured": line.rows_measured,
+        "components": len(topo.components),
+        "holes": len(topo.holes),
+        "thin_parts": len(figure.thin_parts(mask)),
+    }
+    metrics["notan"] = ramplint.notan(grid)
+    if standing:
+        # Only when the caller says the subject stands. `base_of_support` is about
+        # whether the mass sits over the feet, and that question has no answer for an
+        # item, a tile or a scene, so the module takes the claim as an argument rather
+        # than guessing it from the pixels.
+        support = figure.base_of_support(mask, standing=True)
+        if support is not None:
+            metrics["form"]["support"] = {
+                "centroid_x": round(support.centroid_x, 2),
+                "base": list(support.base) if support.base else None,
+                "margin": round(support.margin, 2) if support.margin is not None else None,
+                "contact_runs": support.contact_runs,
+            }
+    if ramp:
+        # The ramp itself, as opposed to how well the pixels sit on it. Conformance
+        # cannot fault a declared ramp that is not monotone in lightness or that steps
+        # unevenly, because every pixel is on it: the ramp is the thing at fault.
+        metrics["ramp_lints"] = ramplint.ramp_lints(ramp)
+    if check_cvd:
+        metrics["cvd"] = ramplint.cvd_recheck(grid)
     if check_tiling:
         horizontal, vertical = quality.tile_seam_ratio(grid)
         metrics["tile_seam"] = {"horizontal": round(horizontal, 3),
@@ -420,6 +506,13 @@ def assess_sprite(
     # read: on an indexed sprite whose palette does not hold the declared ramp, the
     # conformance number is measuring the palette rather than the shading.
     notes.extend(indexed.ramp_readings(measured.get("ramp_on_palette") or {}))
+    # Qualified rather than imported bare, because `indexed` has a function of the same
+    # name immediately above and the two answer different questions: that one is about
+    # what an indexed palette can hold, this one about whether the ramp is well formed.
+    if "ramp_lints" in metrics:
+        notes.extend(ramplint.ramp_readings(metrics["ramp_lints"]))
+    if "cvd" in metrics:
+        notes.extend(ramplint.cvd_readings(metrics["cvd"]))
     if check_tiling and "tile_seam" in metrics:
         seam = metrics["tile_seam"]
         for axis in ("horizontal", "vertical"):
