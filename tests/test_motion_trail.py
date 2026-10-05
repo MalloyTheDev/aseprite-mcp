@@ -141,3 +141,12 @@ def test_a_scale_past_the_canvas_caps_is_refused_from_the_header():
     name = _moving_dot("mt/huge.aseprite", [1, 3])
     with pytest.raises(ExportError, match="past the caps"):
         export.export_motion_trail(name, "mt/huge.png", scale=4000, overwrite=True)
+
+
+def test_a_whole_sprite_is_held_to_the_same_frame_cap_as_a_list(monkeypatch):
+    """The cap was on the explicit list only; a tag or the whole sprite composited every
+    frame however many there were. Lowered here rather than building 513 frames."""
+    monkeypatch.setattr(export, "MAX_MOTION_FRAMES", 2)
+    name = _moving_dot("mt/capped.aseprite", [1, 3, 5])
+    with pytest.raises(AsepriteError, match="that is 3 frames; a motion trail composites at most 2"):
+        export.export_motion_trail(name, "mt/capped.png", overwrite=True)

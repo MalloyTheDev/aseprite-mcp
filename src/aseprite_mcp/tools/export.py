@@ -736,6 +736,7 @@ def export_motion_trail(
         "scale": scale,
         "max_dimension": MAX_CANVAS_DIMENSION,
         "max_pixels": MAX_CANVAS_PIXELS,
+        "max_frames": MAX_MOTION_FRAMES,
     }
     body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
@@ -755,6 +756,12 @@ def export_motion_trail(
       for i, f in ipairs(ARG.frames) do list[i] = require_frame(spr, f, "frames[" .. i .. "]") end
     else
       for f = 1, #spr.frames do list[f] = f end
+    end
+    -- The same cap as an explicit list, for a tag or the whole sprite: each frame is a
+    -- full-canvas composite, and only here is the count of either known.
+    if #list > ARG.max_frames then
+      error(string.format("that is %d frames; a motion trail composites at most %d. " ..
+            "Pass a tag or a shorter frames list.", #list, ARG.max_frames), 0)
     end
 
     local W, H = spr.width, spr.height
