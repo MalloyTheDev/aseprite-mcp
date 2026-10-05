@@ -32,6 +32,17 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **Four tools opened an outside image without the size guard.** `check_image_dimensions`
+  refuses an image whose header declares more than the canvas caps, because a
+  solid-colour PNG a few kilobytes on disk can declare 16384x16384 and Aseprite allocates
+  all of it on open. Only the two stamping tools ran it; `import_image`, `stamp_pattern`,
+  `add_reference_layer` and `import_reference_sequence` opened their images unchecked.
+  All four now refuse before anything is launched or created, every image of a
+  reference sequence included, and a test over all five entry points pins that the
+  refusal comes before the launch.
+
+### Fixed
+
 - **`add_frame(copy_from=N)` and `duplicate_frame(N)` named the original as the new
   frame, and `add_frame` gave it the duration meant for the copy** (#222). Both returned
   `newFrame: N`. Aseprite's `spr:newFrame(n)` inserts the copy at n + 1 and returns frame
