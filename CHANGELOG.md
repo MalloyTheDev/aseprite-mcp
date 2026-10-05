@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **On an indexed sprite's Background, the transparent index's own colour could not be
+  drawn.** A colour resolves to the nearest palette entry, and the transparent index is
+  left out of the search because on an ordinary layer it is invisible (#138). On a
+  Background Aseprite draws it, so a request for that exact colour was painted in the
+  nearest *other* entry and reported ok: a Background whose index 0 is `#0a141e` came out
+  red when filled with `#0a141e`. That is the state an opaque PNG is in after
+  `import_image` and `set_color_mode("indexed")`, whose dominant colour lands on index 0,
+  so repainting with the background's own colour failed on exactly the art that route
+  produces. A tool now names the layer it is about to write (`draw_target`), and on an
+  indexed Background the search includes the transparent index. The drawing tools, the
+  batch operations (named per operation, so one cannot leak into the next) and the
+  shading tools do; a tool that names no target behaves exactly as before. Not covered:
+  tools that read their own surface before writing it, such as `add_outline` and the
+  shading tools' masks, still read the transparent index on a Background as empty.
+
+### Fixed
+
 - **An indexed sprite's Background was read as transparent wherever it held the
   transparent palette index**, which Aseprite draws as a colour there. On an ordinary layer
   that index means "no pixel", and every reader decoded it that way on a Background too.

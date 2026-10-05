@@ -284,6 +284,13 @@ local function mkcolor(c)
   return Color{ r = clamp255(r), g = clamp255(g), b = clamp255(b), a = clamp255(a) }
 end
 
+-- Whether the image about to be written is an indexed Background, set by `draw_target`.
+-- False unless a tool says otherwise, which is today's behaviour everywhere: a tool that
+-- never calls it cannot regress, and the dangerous direction (letting the transparent
+-- index through onto an ordinary layer, where it is invisible, #138) needs a tool to
+-- name a Background as its target and then write somewhere else.
+local _draw_opaque = false
+
 -- Which palette entry best matches an opaque colour. Entries that cannot draw a
 -- visible pixel are not candidates, however near they are.
 --
@@ -310,6 +317,10 @@ local function nearest_index(spr, r, g, b)
   -- Hoisted: a fill resolves a colour per pixel, so a property read inside this loop is
   -- paid palette-size times per pixel. It cannot change while the loop runs.
   local clear_at = spr.transparentColor
+  -- Except onto a Background (`draw_target`), where the transparent index is a colour
+  -- like any other: Aseprite draws it, so excluding it there painted a request for that
+  -- exact colour in the nearest *other* entry, and reported ok.
+  if _draw_opaque then clear_at = nil end
   local best, bestd = nil, nil
   for i = 0, #pal - 1 do
     if i ~= clear_at then
@@ -336,6 +347,14 @@ local function nearest_index(spr, r, g, b)
       what, clear_at, math.floor(r), math.floor(g), math.floor(b)), 0)
   end
   return best
+end
+
+-- Name the layer a tool is about to write. On an indexed sprite's Background the
+-- transparent index becomes a colour `nearest_index` may answer with, because Aseprite
+-- draws it there; anywhere else, and with no call at all, nothing changes. Pass nil to
+-- clear it, as each batch operation does before it runs.
+local function draw_target(spr, layer)
+  _draw_opaque = layer ~= nil and spr.colorMode == ColorMode.INDEXED and layer.isBackground
 end
 
 -- What a declared ramp actually becomes on this sprite's palette.
