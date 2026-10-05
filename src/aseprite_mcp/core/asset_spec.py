@@ -606,3 +606,121 @@ def _export_step(fname: str, name: str, exp: dict, spec: dict) -> dict:
                      {"filename": fname, "output": exp.get("output", f"{name}.png"), "scale": scale},
                      "flattened PNG")
     raise ValueError(f"unknown export format: {fmt!r}")
+
+
+# ============================================================ the loop closer
+# `validate_spec` asks whether a document is well formed and `plan_spec` asks what it
+# would do. Neither asks the question that actually bites: **did the thing that got built
+# match what was asked for?**
+#
+# That gap is not theoretical. In one session a figure shipped with no keyline at all
+# because `add_outline` was pointed at an empty layer, and every count in the result
+# reported success; three ramps clipped to pure black and beat their own outline while
+# passing every check that existed; a measured report claimed a 2.33:1 waist on a figure
+# whose waist measured 1.64:1. In each case the declaration and the artifact disagreed and
+# nothing was watching the gap.
+#
+# This is deliberately structure-only, for the same reason `build_asset_from_spec` is:
+# the spec layer declares canvas, layers, frames, tags, slices, palette and exports, and
+# says nothing about pixels. A pixel-level counterpart belongs with `quality` and `craft`,
+# which already have the measurements for it.
+
+
+def _layer_names(observed: dict) -> list[str]:
+    """Every layer name in the observed tree, groups and children alike."""
+    found: list[str] = []
+
+    def walk(nodes) -> None:
+        for node in nodes or ():
+            if isinstance(node, dict):
+                name = node.get("name")
+                if isinstance(name, str):
+                    found.append(name)
+                walk(node.get("layers"))
+
+    walk(observed.get("layers"))
+    return found
+
+
+def compare_to_built(spec: dict, observed: dict) -> dict:
+    """Does a built sprite match the spec it was built from.
+
+    Pure, so it is testable without launching Aseprite: `observed` is whatever
+    `get_sprite_info` returned. That split is the same one `plan_spec` keeps, and for the
+    same reason, which is that the interesting logic should not need an editor to exercise.
+
+    Reports every field it checked, not only the ones that failed, because "nothing was
+    reported" and "nothing was checked" look identical otherwise and that is precisely the
+    failure this exists to stop.
+    """
+    mismatches: list[dict] = []
+    checked: list[str] = []
+
+    def note(field: str, declared, actual, detail: str) -> None:
+        mismatches.append({"field": field, "declared": declared,
+                           "observed": actual, "detail": detail})
+
+    canvas = spec.get("canvas") or {}
+    if isinstance(canvas, dict) and canvas.get("width") and canvas.get("height"):
+        checked.append("canvas")
+        if (observed.get("width"), observed.get("height")) != (canvas["width"],
+                                                               canvas["height"]):
+            note("canvas", f"{canvas['width']}x{canvas['height']}",
+                 f"{observed.get('width')}x{observed.get('height')}",
+                 "the sprite is not the size the spec declared")
+
+    declared_layers = [n for n in (spec.get("layers") or []) if isinstance(n, str)]
+    if declared_layers:
+        checked.append("layers")
+        present = set(_layer_names(observed))
+        missing = [n for n in declared_layers if n not in present]
+        if missing:
+            note("layers", declared_layers, sorted(present),
+                 f"declared layer(s) not in the sprite: {', '.join(missing)}")
+
+    anims = [a for a in (spec.get("animations") or []) if isinstance(a, dict)]
+    if anims:
+        checked.append("animations")
+        want = sum(a.get("frame_count", 0) for a in anims)
+        got = len(observed.get("frames") or ())
+        if want and got < want:
+            note("animations", f"{want} frame(s)", f"{got} frame(s)",
+                 "the sprite has fewer frames than the animations declare")
+        tags = {t.get("name") for t in (observed.get("tags") or ())
+                if isinstance(t, dict)}
+        absent = [a["name"] for a in anims
+                  if isinstance(a.get("name"), str) and a["name"] not in tags]
+        if absent:
+            note("tags", [a.get("name") for a in anims], sorted(n for n in tags if n),
+                 f"declared animation(s) with no tag: {', '.join(absent)}")
+
+    slices = [s for s in (spec.get("slices") or []) if isinstance(s, dict)]
+    if slices:
+        checked.append("slices")
+        have = {s.get("name") for s in (observed.get("slices") or ())
+                if isinstance(s, dict)}
+        absent = [s["name"] for s in slices
+                  if isinstance(s.get("name"), str) and s["name"] not in have]
+        if absent:
+            note("slices", [s.get("name") for s in slices],
+                 sorted(n for n in have if n),
+                 f"declared slice(s) not in the sprite: {', '.join(absent)}")
+
+    declared_palette = [c for c in (spec.get("palette") or []) if isinstance(c, str)]
+    if declared_palette and observed.get("palette") is not None:
+        checked.append("palette")
+        size = observed.get("palette")
+        size = size.get("size") if isinstance(size, dict) else size
+        if isinstance(size, int) and size < len(declared_palette):
+            note("palette", f"{len(declared_palette)} colour(s)", f"{size} entries",
+                 "the palette holds fewer entries than the spec declares, so some "
+                 "declared colours cannot be on it")
+
+    return {
+        "ok": not mismatches,
+        "checked": checked,
+        "mismatches": mismatches,
+        # Said explicitly, because a spec that declares nothing verifiable would otherwise
+        # come back clean and look like a passing check rather than an absent one.
+        "verifiable": bool(checked),
+    }

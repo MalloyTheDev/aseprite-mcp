@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **160 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **161 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -29,7 +29,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Minecraft resource packs](#minecraft-resource-packs) (4)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (9)
-- [Asset spec (declarative build)](#asset-spec-declarative-build) (3)
+- [Asset spec (declarative build)](#asset-spec-declarative-build) (4)
 - [Batch operations](#batch-operations) (1)
 - [GUI companion mode](#gui-companion-mode) (2)
 - [Health & self-test](#health--self-test) (1)
@@ -4404,6 +4404,39 @@ returns the validation report instead.
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `spec` | object | yes |  |
+
+
+### `validate_asset_against_spec`
+
+Does a built sprite actually match the spec it was built from.
+
+The loop closer. `validate_asset_spec` asks whether a document is well formed and
+`plan_asset_spec` asks what it would do; this asks the question that bites, which is
+whether the artifact and the declaration agree.
+
+That gap is where this project's worst bugs have lived. A figure shipped with no
+keyline at all because the outline was drawn onto an empty layer, and every count in
+the result reported success. Three ramps clipped to pure black and beat their own
+outline while passing every check that existed. Nothing was comparing what was asked
+for against what arrived.
+
+**Structure only, like `build_asset_from_spec`:** canvas size, layer names, frame
+count, tag names, slice names and palette capacity. The spec layer declares no pixels,
+so this verifies no pixels; `assess_sprite` is where the drawing itself is judged.
+
+Args:
+    filename: The sprite to check. Defaults to the spec's own ``<name>.aseprite``,
+        which is what `build_asset_from_spec` would have written.
+
+Returns `ok`, the list of fields `checked`, and a `mismatches` list naming the
+declared value, the observed one and what the difference means. `verifiable` is false
+when the spec declares nothing this can check, so an empty result is never mistaken
+for a passing one.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `spec` | object | yes |  |
+| `filename` | string | no | _none_ |
 
 
 ### `validate_asset_spec`

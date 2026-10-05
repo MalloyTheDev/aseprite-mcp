@@ -16,6 +16,8 @@
   <img src="docs/assets/showcase/zorder.gif" height="112" alt="A sword swung past a round shield, passing behind it and then in front, with the layers never reordered">
   &nbsp;
   <img src="docs/assets/showcase/throw.gif" height="112" alt="A shaded ball thrown along an arc, its shadow tracking along the ground">
+  &nbsp;
+  <img src="docs/assets/showcase/deathknight_plates.png" height="112" alt="A hand-drawn dark-armour death knight with a horned helm, glowing runeblade and purple cape">
 </p>
 <p align="center">
   <sub>Drawn, shaded, animated, timed and then <strong>measured</strong>: entirely through MCP
@@ -35,7 +37,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **160 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **161 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -123,7 +125,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 160 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 161 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -714,6 +716,7 @@ deterministic scaffolding, no AI generation.
 | `export_slice_metadata` | Engine-agnostic `<sprite>_slices.json`: hitbox/hurtbox/collision/attach/9-slice/pivot from slice names or JSON data. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
 | `validate_asset_spec` / `plan_asset_spec` / `build_asset_from_spec` | Describe an asset once (`aseprite_mcp.asset_spec.v1`), then validate it, dry-run the plan, or build it (structure only, canvas/layers/frames/tags/slices/palette + exports; you draw the art). |
+| `validate_asset_against_spec` | Closes the loop: does the sprite that got built actually match the spec it was built from. Canvas, layer names, frame count, tags, slices, palette capacity. Reports what it checked as well as what failed, so "nothing was wrong" and "nothing was checked" cannot be confused. |
 
 > "Make me an idle-animated hero and a game-ready bundle."
 
@@ -737,7 +740,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 `selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
 section of their own, because the sections above each describe the *product* while these
 are a verdict on the *call*, and because every other result in this server reports them
-there: one rule reads them across all 160 tools. They are **absent rather than zero**, so a
+there: one rule reads them across all 161 tools. They are **absent rather than zero**, so a
 key that is present at all means there is something to read, and a tool that writes no
 pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
 them, which let a batch report `status: applied` for an op whose every pixel an active
