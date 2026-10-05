@@ -10,7 +10,7 @@ from pathlib import Path
 from mcp.server.mcpserver import Image
 
 from ..app import mcp
-from ..core import config, figure, indexed, quality, ramplint, spritediff
+from ..core import config, craft, figure, indexed, quality, ramplint, spritediff
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_ASSESS_PIXELS,
@@ -476,6 +476,11 @@ def assess_sprite(
         "thin_parts": len(figure.thin_parts(mask)),
     }
     metrics["notan"] = ramplint.notan(grid)
+    # How the drawing was made, as opposed to what it depicts. Cheap (one pass for the
+    # regions, one for the edges) and reported without judgement: every threshold
+    # proposed for these failed the ranking gate on the corpus, which `core.craft`
+    # records rather than hides.
+    metrics["craft"] = craft.score(grid)
     if standing:
         # Only when the caller says the subject stands. `base_of_support` is about
         # whether the mass sits over the feet, and that question has no answer for an
