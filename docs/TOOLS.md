@@ -4484,7 +4484,7 @@ Operations and their arguments ('?' marks an optional argument):
   add_frame(duration_ms=int?, copy_from=frame?)
   add_layer(name=str, group=str?, opacity=int?, blend_mode=str?, visible=bool?)
   add_slice(name=str, x=int, y=int, width=int, height=int, color=color?)
-  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?)  [also accepts from_frame for from, to_frame for to]
+  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?, repeats=int?)  [also accepts from_frame for from, to_frame for to]
   clear_layer(layer=str?, frame=frame?)
   copy_cel(layer=str, from=frame, to=frame, to_layer=str?)  [also accepts from_frame for from, to_frame for to]
   delete_cel(layer=str, frame=frame)

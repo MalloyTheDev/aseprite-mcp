@@ -824,28 +824,27 @@ def scaffold_cycle(
             f"scaffold onto a single-frame sprite."
         )
 
-    # Launch count: one read, one batch for the frames, one per tag, two for the timing
-    # curve (it reads the spacing before it writes), and one read back. An 8-frame walk is
-    # 14 launches, measured end to end at 3.4s on this machine (0.234s a launch).
+    # Launch count: one read, one batch for the frames and every tag, two for the timing
+    # curve (it reads the spacing before it writes), and one read back. Five, whatever the
+    # frame count.
     #
-    # The tags are a launch each because `core/oplib.py`'s `add_tag` operation takes
-    # name/from/to/direction/color and *not* `repeats`, so a one-shot cannot be written
-    # inside the batch at all. Writing every tag the same way is the price of not having
-    # two paths where only one of them can state the loop verdict: a cycle's `repeats=0`
-    # is then a fact this tool wrote rather than Aseprite's default inherited by accident.
-    # Adding `repeats` to that op spec would collapse all of them into the frame batch.
+    # It used to be fourteen for an 8-frame walk, measured end to end at 3.4s (0.234s a
+    # launch), because the tags were a launch each: `core/oplib.py`'s `add_tag` op could
+    # not take `repeats`, so a one-shot could not be written inside a batch (#223). Every
+    # tag still goes through the same path, so a cycle's `repeats=0` remains a fact this
+    # tool wrote rather than Aseprite's default inherited by accident; that path is now
+    # the batch rather than the tool.
     missing = max(0, count - info["frameCount"])
-    if missing:
-        batch.apply_operations(
-            filename,
-            [{"op": "add_frame", "args": {"duration_ms": base, "copy_from": 1}}
-             for _ in range(missing)],
-        )
-
     repeats = 0 if spec.loops else 1
-    tags.add_tag(filename, kind, 1, count, "forward", repeats=repeats)
+    ops = [{"op": "add_frame", "args": {"duration_ms": base, "copy_from": 1}}
+           for _ in range(missing)]
+    ops.append({"op": "add_tag", "args": {"name": kind, "from": 1, "to": count,
+                                          "direction": "forward", "repeats": repeats}})
     for number, phase_tag in enumerate(phase_tags, start=1):
-        tags.add_tag(filename, phase_tag, number, number, "forward", repeats=repeats)
+        ops.append({"op": "add_tag", "args": {"name": phase_tag, "from": number,
+                                              "to": number, "direction": "forward",
+                                              "repeats": repeats}})
+    batch.apply_operations(filename, ops)
 
     timed = animation.apply_timing_curve(
         filename,

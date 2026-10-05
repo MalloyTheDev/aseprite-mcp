@@ -195,8 +195,8 @@ def test_the_two_older_scaffolds_are_still_registered():
 def built():
     """Every kind scaffolded once: the manifest, and a fresh read of the saved sprite.
 
-    Module-scoped because each scaffold is fourteen-odd Aseprite launches (about three
-    seconds) and nothing below mutates what it is handed.
+    Module-scoped because each scaffold launches Aseprite several times and nothing below
+    mutates what it is handed.
     """
     out = {}
     for kind in CONVENTIONS:
@@ -383,3 +383,39 @@ def test_an_odd_frame_count_says_which_frames_the_holds_landed_on():
     assert roles["contactL"] == "extreme"
     assert roles["passL"] == "extreme"  # the misalignment the warning is about
     assert roles["contactR"] == "passing"
+
+
+def test_the_tags_go_into_the_frame_batch_not_one_launch_each(monkeypatch):
+    """Issue #223: every tag used to cost its own Aseprite launch.
+
+    An 8-frame walk was fourteen launches, about 3.4 seconds, because the batch `add_tag`
+    op could not take `repeats` and so every tag went through the standalone tool, each
+    one opening and saving the same sprite to set one integer. With `repeats` on the op
+    the tags ride in the frame batch.
+
+    Counted off the real launches rather than inferred from the code, and asserted as an
+    exact number so a regression to one-launch-per-tag cannot hide inside a looser bound.
+    """
+    from aseprite_mcp.core import runner
+
+    name = "cyc/launches.aseprite"
+    sprite.create_sprite(name, 16, 16, "rgb", overwrite=True)
+    seen: list[int] = []
+    real = runner.run_lua
+
+    def counting_run_lua(body, args=None, timeout=None):
+        seen.append(1)
+        return real(body, args, timeout)
+
+    for mod in (workflow.inspect, workflow.batch, animation):
+        monkeypatch.setattr(mod, "run_lua", counting_run_lua)
+
+    manifest = workflow.scaffold_cycle(name, "walk")
+    # One read, one batch for the frames and all nine tags, two for the timing curve,
+    # one read back. Fourteen before.
+    assert len(seen) == 5, f"{len(seen)} launches; the tags are being set one at a time"
+    tags = {t["name"]: t for t in inspect.get_sprite_info(name)["tags"]}
+    assert len(tags) == 9, sorted(tags)
+    # A walk is a cycle, so every tag must say "forever", read back off the file.
+    assert all(t["repeats"] == 0 for t in tags.values()), tags
+    assert manifest["animation"]["loops"] is True

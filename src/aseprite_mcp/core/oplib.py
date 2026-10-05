@@ -13,7 +13,12 @@ layer, or a frame past the end, which `FRAME_GUARD_LUA` rejects inside Aseprite)
 from __future__ import annotations
 
 from .errors import ValidationFailed
-from .limits import MAX_BATCH_OPERATIONS, MAX_PIXEL_LIST_LENGTH, check_list_length
+from .limits import (
+    MAX_BATCH_OPERATIONS,
+    MAX_PIXEL_LIST_LENGTH,
+    check_list_length,
+    tag_repeat_count,
+)
 from .models import FRAME_GUARD_LUA, ColorSpec, FrameRef
 
 # Arg kinds. `frame` is an int that must name an existing 1-based frame: the lower bound
@@ -52,7 +57,8 @@ OP_SPECS: dict[str, dict] = {
     "delete_cel": {"layer": (_STR, True), "frame": (_FRAME, True)},
     # tags
     "add_tag": {"name": (_STR, True), "from": (_FRAME, True), "to": (_FRAME, True),
-                "direction": (_STR, False), "color": (_COLOR, False)},
+                "direction": (_STR, False), "color": (_COLOR, False),
+                "repeats": (_INT, False)},
     "remove_tag": {"name": (_STR, True)},
     # drawing
     "set_pixel": {**_DRAW_TARGET, "x": (_INT, True), "y": (_INT, True), "color": (_COLOR, True)},
@@ -134,6 +140,22 @@ def _canonical_args(index: int, name: str, args: dict) -> dict:
     return out
 
 
+# Checks an op needs beyond its argument types, run after the generic coercion. Kept as a
+# table so the shared loop below does not grow a branch for every op with one extra rule.
+#
+# `add_tag` is here because `repeats` has a meaning the type cannot express: Aseprite
+# stores a negative count as 0, which is "play forever", the opposite of what anyone
+# typing a negative number wants. The tool already refused it; the op could not take
+# `repeats` at all, so a one-shot tag was impossible inside a batch.
+def _check_add_tag(norm: dict) -> dict:
+    if "repeats" in norm:
+        norm["repeats"] = tag_repeat_count(norm["repeats"])
+    return norm
+
+
+_POST_CHECKS = {"add_tag": _check_add_tag}
+
+
 def validate_operations(operations) -> list[dict]:
     """Validate + normalize a list of operations. Raises ValidationFailed (with the
     offending op index) on shape errors. Colours are parsed to dicts; ints coerced."""
@@ -201,6 +223,12 @@ def validate_operations(operations) -> list[dict]:
                 raise ValidationFailed(f"op {i} ({name}): {exc}") from exc
             except (ValueError, TypeError) as exc:
                 raise ValidationFailed(f"op {i} ({name}): bad value for '{arg}': {exc}") from exc
+        check = _POST_CHECKS.get(name)
+        if check is not None:
+            try:
+                norm = check(norm)
+            except ValidationFailed as exc:
+                raise ValidationFailed(f"op {i} ({name}): {exc}") from exc
         normalized.append({"op": name, "args": norm})
     return normalized
 
@@ -342,6 +370,7 @@ local function run_op(op)
     local t = spr:newTag(f1, f2); t.name = a.name
     if a.direction ~= nil then t.aniDir = anidir_from(a.direction) end
     if a.color ~= nil then t.color = mkcolor(a.color) end
+    if a.repeats ~= nil then t.repeats = a.repeats end
     return "added tag '" .. a.name .. "' on frames " .. f1 .. "-" .. f2
   elseif name == "remove_tag" then
     local found = nil

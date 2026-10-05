@@ -250,3 +250,36 @@ def test_the_generated_operations_reference_is_interpreter_independent():
     for line in entries:
         indent = len(line) - len(line.lstrip())
         assert indent == 2, f"entry indented {indent}, expected 2: {line!r}"
+
+
+# --- issue #223: the add_tag op takes repeats, and refuses what the tool refuses --------
+
+
+def test_add_tag_op_accepts_repeats_and_keeps_it_optional():
+    ok = oplib.validate_operations([
+        {"op": "add_tag", "args": {"name": "attack", "from": 1, "to": 3, "repeats": 1}},
+        {"op": "add_tag", "args": {"name": "idle", "from": 1, "to": 2}},
+    ])
+    assert ok[0]["args"]["repeats"] == 1
+    # Absent stays absent, so the Lua side leaves Aseprite's default of "forever".
+    assert "repeats" not in ok[1]["args"]
+
+
+@pytest.mark.parametrize("bad", [-1, 65_536])
+def test_add_tag_op_and_tool_refuse_the_same_values_with_the_same_sentence(bad):
+    """The op and the tool must disagree about nothing, which is why they share one
+    validator in `core.limits` rather than keeping two copies of the same rule.
+
+    -1 is the dangerous one: Aseprite stores it as 0, which means "play forever", the
+    exact opposite of the one-shot a caller typing a negative number was after.
+    """
+    from aseprite_mcp.core.limits import tag_repeat_count
+
+    with pytest.raises(ValidationFailed) as direct:
+        tag_repeat_count(bad)
+    with pytest.raises(ValidationFailed) as batched:
+        oplib.validate_operations([
+            {"op": "add_tag", "args": {"name": "t", "from": 1, "to": 1, "repeats": bad}}])
+    # The batch wraps the sentence with the op's position; the sentence itself is shared.
+    assert str(direct.value) in str(batched.value)
+    assert str(batched.value).startswith("op 0 (add_tag): ")
