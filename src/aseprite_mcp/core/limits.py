@@ -245,6 +245,18 @@ MAX_GRID_CELLS = 1_024
 # the 65,535 the file format can store; 4,096 is a 64x64 grid, larger than any animation
 # sheet, so a request past it is a cell-size mistake and is named as one before launch.
 MAX_SHEET_FRAMES = 4_096
+# The longer side of the image `render_preview` returns, past which it lowers the scale.
+# The image goes back to the client, and a vision model downsamples anything much past
+# this anyway, so a bigger render only costs time and transfer: a 1920x1080 scene at the
+# default scale of 8 was a 15360x8640 image, 132 Mpx and six seconds, which Pillow's own
+# decompression-bomb check warned about on the way back. A sprite already longer than
+# this is shown at 1x, never shrunk.
+MAX_PREVIEW_EDGE = 2_048
+# Pixels of padding a sprite sheet export may put around and between frames. Padding keeps
+# a texture filter from bleeding one frame into the next, which takes 1 to 4 px, and
+# extrude covers a frame's own edge. The sheet grows by the padding around every cell, so
+# with no ceiling it was a size request with none either; 64 is far past any use.
+MAX_SHEET_PADDING = 64
 
 # --- Declarative asset specs ----------------------------------------------- #
 # The spec layer amplifies harder than any tool: one integer becomes two batch operations

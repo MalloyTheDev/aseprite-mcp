@@ -10,12 +10,13 @@ from pathlib import Path
 from mcp.server.mcpserver import Image
 
 from ..app import mcp
-from ..core import config, craft, figure, indexed, quality, ramplint, spritediff
+from ..core import asefile, config, craft, figure, indexed, quality, ramplint, spritediff
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_ASSESS_PIXELS,
     MAX_COLOR_LIST_LENGTH,
     MAX_DIFF_COLORS,
+    MAX_PREVIEW_EDGE,
     MAX_READ_REGION_PIXELS,
     check_list_length,
     check_region_size,
@@ -45,12 +46,25 @@ def render_preview(filename: str, frame: int = 1, scale: int = 8) -> Image:
     """Render a single frame to a PNG and return it as an image you can view.
 
     Use this to *see* your work. frame is 1-based; scale enlarges small sprites
-    (default 8x) so individual pixels are visible.
+    (default 8x) so individual pixels are visible. A large sprite is shown at a lower
+    scale, so the image is at most 2048 px on its longer side; one already longer than
+    that is shown at 1x. A frame the sprite does not have is refused, not swapped for
+    another.
     """
     src = resolve_path(filename)
     if not src.exists():
         raise AsepriteError(f"No such sprite: {src}")
     scale = max(1, min(int(scale), 32))
+    head = asefile.read_header(src)
+    if head is not None:
+        # Both from the header, so neither costs a launch. Aseprite renders frame 1 for a
+        # frame range past the end, which showed the caller a frame it had not asked for.
+        if not 1 <= int(frame) <= head.frames:
+            raise ValidationFailed(
+                f"frame {frame} does not exist; the sprite has {head.frames} frame(s), "
+                f"numbered 1-{head.frames}."
+            )
+        scale = min(scale, max(1, MAX_PREVIEW_EDGE // max(head.width, head.height)))
     f0 = max(0, int(frame) - 1)
 
     fd, out = tempfile.mkstemp(suffix=".png", prefix="asemcp_prev_")

@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`export_motion_trail`: every frame of a motion composited into one image, the oldest
+  faintest** (#77). The way to judge whether a whole motion reads: arc shape, spacing and
+  squash are visible at once in a still that can be studied, where a GIF moves on before a
+  defect can be seen and `export_onion_skin` shows only a few frames either side of one.
+  Frame i of n is drawn at opacity 255 * i / n, so the last is opaque and on top; frames
+  come from a tag, an explicit list in the order given, or the whole sprite. An opaque
+  Background would bury every frame under the next, the last at full opacity covering the
+  lot, so when there is one it is laid once underneath and the frames contribute their
+  other layers. The scaled image is held to the canvas caps before anything is scaled.
+
+### Fixed
+
+- **No export bounded `scale`, and `render_preview` ignored the sprite's size.** Every
+  export handed `scale` straight to Aseprite, so a 16x16 sprite at scale 50000 asked for
+  an 800,000-pixel-square image. They now refuse a scaled image past the canvas caps
+  before anything is launched, naming the largest scale that fits; a sprite sheet is
+  bounded by all its frames at once. `render_preview` clamped its scale to 32 whatever the
+  sprite, so a 1920x1080 scene previewed at the default 8 came back 15360x8640, 132 Mpx
+  in six seconds, which Pillow's own decompression-bomb check warned about; it now lowers
+  the scale so the image is at most 2048 px on its longer side (a sprite already longer
+  is shown at 1x). It also rendered frame 1 for a frame the sprite did not have, the
+  silent swap every export already refuses; it now refuses too. All of it is read from
+  the `.aseprite` header (`core/asefile.py`), which also saves each `export_png` and
+  `export_layer` the launch it spent counting frames.
+
+- **Sprite sheet padding was unbounded.** `export_spritesheet` passed `padding` to
+  Aseprite unchecked in both directions, and the sheet grows by it around every cell;
+  `export_spritesheet_packed` refused a negative value only. Both now take 0 to 64
+  (`MAX_SHEET_PADDING`): an engine needs 1 to 4 px to stop frames bleeding, and extrude
+  covers a frame's own edge.
+
 ### Fixed
 
 - **On an indexed sprite's Background, the transparent index's own colour could not be

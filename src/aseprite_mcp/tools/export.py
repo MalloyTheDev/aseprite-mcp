@@ -6,10 +6,21 @@ same workspace rules as everything else.
 
 from __future__ import annotations
 
+import math
+
 from ..app import mcp
-from ..core import gifmeta
+from ..core import asefile, gifmeta
 from ..core.errors import ExportError, ValidationFailed
-from ..core.models import FRAME_GUARD_LUA
+from ..core.limits import (
+    MAX_CANVAS_DIMENSION,
+    MAX_CANVAS_PIXELS,
+    MAX_MOTION_FRAMES,
+    MAX_SHEET_PADDING,
+    MAX_SPRITE_TOTAL_PIXELS,
+    check_count,
+    check_list_length,
+)
+from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.paths import (
     discard_selection_sidecar,
     ensure_output_path,
@@ -59,13 +70,22 @@ def _sprite_facts(src) -> dict:
     return run_lua(body, {"src": lua_path(src)})
 
 
+def _frame_count(src) -> int:
+    """From the file's header when it is an .aseprite, which costs a read rather than the
+    launch `_sprite_facts` is; from that launch for anything else."""
+    head = asefile.read_header(src)
+    if head is not None:
+        return head.frames
+    return len(_sprite_facts(src).get("frames") or [])
+
+
 def _require_frame(src, frame: int) -> int:
     """Aseprite silently exports a DIFFERENT frame when asked for one out of range.
 
     The old code clamped with max(0, frame-1) and then reported the requested number back,
     so export_png(frame=99) on a one-frame sprite wrote frame 1 and answered {"frame": 99}.
     """
-    count = len(_sprite_facts(src).get("frames") or [])
+    count = _frame_count(src)
     if not 1 <= int(frame) <= count:
         raise ExportError(
             f"frame {frame} does not exist; the sprite has {count} frame(s), numbered 1-{count}."
@@ -73,11 +93,70 @@ def _require_frame(src, frame: int) -> int:
     return int(frame)
 
 
-def _require_scale(scale: int) -> int:
+def _canvas_of(src) -> tuple[int, int, int] | None:
+    """(width, height, frames), from the header of an .aseprite and from Pillow for an
+    image (which also runs the decompression-bomb guard), or None when neither can say."""
+    head = asefile.read_header(src)
+    if head is not None:
+        return head.width, head.height, head.frames
+    size = check_image_dimensions(str(src))
+    return (size[0], size[1], 1) if size is not None else None
+
+
+def largest_fitting_scale(width: int, height: int, count: int = 1) -> int:
+    """The largest scale at which `count` frames of `width` x `height` stay inside the
+    canvas caps, 0 when none does.
+
+    Computed, not searched for: counting down from the scale asked for ran a trillion
+    times for scale=10**12, a hang inside the guard against exactly that request. Each cap
+    bounds the scale on its own, and the integer square root of an area cap over the area
+    of one scale unit is exact.
+    """
+    return min(MAX_CANVAS_DIMENSION // width, MAX_CANVAS_DIMENSION // height,
+               math.isqrt(MAX_CANVAS_PIXELS // (width * height)),
+               math.isqrt(MAX_SPRITE_TOTAL_PIXELS // (count * width * height)))
+
+
+def _require_scale(scale: int, src=None, *, every_frame: bool = False) -> int:
+    """A scale of at least 1, whose scaled image the canvas caps would allow.
+
+    Nothing bounded the top: every export passed `scale` straight to Aseprite, so a 16x16
+    sprite at scale 50000 asked for an 800,000-pixel-square image. Checked from the file's
+    header before anything is launched, with the largest scale that fits named. A sheet
+    holds `every_frame` at once, so its total is bounded as one sprite's storage is.
+    """
     value = int(scale)
     if value < 1:
         raise ExportError(f"scale must be at least 1 (got {scale}).")
+    canvas = _canvas_of(src) if src is not None else None
+    if canvas is None:
+        return value
+    w, h, frames = canvas
+    if w < 1 or h < 1:
+        return value
+    ow, oh = w * value, h * value
+    count = max(1, frames) if every_frame else 1
+    if (ow > MAX_CANVAS_DIMENSION or oh > MAX_CANVAS_DIMENSION
+            or ow * oh > MAX_CANVAS_PIXELS or count * ow * oh > MAX_SPRITE_TOTAL_PIXELS):
+        fit = largest_fitting_scale(w, h, count)
+        what = f"{count} frames of {ow}x{oh}" if count > 1 else f"a {ow}x{oh} image"
+        remedy = (f"The largest scale that fits is {fit}." if fit
+                  else "No scale fits; export a smaller sprite or fewer frames.")
+        raise ExportError(
+            f"a {w}x{h} sprite at scale {value} is {what}, past the caps "
+            f"({MAX_CANVAS_DIMENSION} px per axis, {MAX_CANVAS_PIXELS} px per image, "
+            f"{MAX_SPRITE_TOTAL_PIXELS} px in all). {remedy}"
+        )
     return value
+
+
+def _require_padding(padding: int) -> int:
+    """Sheet padding from 0 to MAX_SHEET_PADDING. `export_spritesheet` passed it to Aseprite
+    unchecked in both directions; the packed export refused a negative one only."""
+    return check_count(
+        "padding", padding, MAX_SHEET_PADDING, minimum=0,
+        remedy="Engines need 1 to 4 px to stop frames bleeding; extrude covers the frame's edge.",
+    )
 
 
 def _require_tag(src, tag: str) -> str:
@@ -156,8 +235,8 @@ def export_png(
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
+    scale = _require_scale(scale, src)
     frame = _require_frame(src, frame)
-    scale = _require_scale(scale)
     f0 = frame - 1
     run_cli([
         str(src),
@@ -190,7 +269,7 @@ def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = Fal
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
-    scale = _require_scale(scale)
+    scale = _require_scale(scale, src)
     run_cli([str(src), "--scale", str(scale), "--save-as", str(out)])
     if not loop:
         # After the CLI has written it, because Aseprite has no flag for this and always
@@ -215,7 +294,7 @@ def export_tag_gif(
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     tag = _require_tag(src, tag)
-    scale = _require_scale(scale)
+    scale = _require_scale(scale, src)
     run_cli([
         str(src),
         "--tag", tag,
@@ -274,10 +353,11 @@ def export_spritesheet(
         str(src),
         "--sheet", str(out),
         "--sheet-type", sheet_type,
-        "--scale", str(_require_scale(scale)),
+        "--scale", str(_require_scale(scale, src, every_frame=True)),
     ]
+    padding = _require_padding(padding)
     if padding:
-        cli += ["--shape-padding", str(int(padding)), "--border-padding", str(int(padding))]
+        cli += ["--shape-padding", str(padding), "--border-padding", str(padding)]
     if layer:
         cli += ["--layer", _require_layer(src, layer)]
     if ignore_layer:
@@ -356,8 +436,7 @@ def export_spritesheet_packed(
             "data_format only applies to data_output, and no data_output was given, so "
             "nothing would be written in that format."
         )
-    if padding < 0:
-        raise ValidationFailed(f"padding cannot be negative (got {padding}).")
+    padding = _require_padding(padding)
 
     src = resolve_path(filename)
     # Every target is validated before anything runs, so a two-file export cannot fail
@@ -481,8 +560,8 @@ def export_layer(
     # instead, so the returned values are the ones actually used.
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     layer = _require_layer(src, layer)
+    scale = _require_scale(scale, src)
     frame = _require_frame(src, frame)
-    scale = _require_scale(scale)
     run_cli([
         str(src), "--layer", layer,
         "--frame-range", f"{frame - 1},{frame - 1}",
@@ -514,7 +593,7 @@ def export_layers(
         raise ValidationFailed('output_pattern must contain "{layer}".')
     src = resolve_path(filename)
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
-    cli = [str(src), "--split-layers", "--scale", str(max(1, int(scale)))]
+    cli = [str(src), "--split-layers", "--scale", str(_require_scale(scale, src))]
     if include_hidden:
         cli.append("--all-layers")
     cli += ["--save-as", str(out)]
@@ -539,7 +618,7 @@ def export_tags(
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     run_cli([
         str(src), "--split-tags",
-        "--scale", str(max(1, int(scale))),
+        "--scale", str(_require_scale(scale, src)),
         "--save-as", str(out),
     ])
     return {"ok": True, "output_pattern": str(out)}
@@ -565,15 +644,17 @@ def export_onion_skin(
         scale: Integer upscaling factor for the output PNG.
         overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
+    src = resolve_path(filename)
+    scale = _require_scale(scale, src)
     out_path = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     args = {
-        "src": lua_path(resolve_path(filename)),
+        "src": lua_path(src),
         "output": lua_path(out_path),
         "frame": int(frame),
         "previous": max(0, int(previous)),
         "next": max(0, int(next)),
         "ghost_opacity": max(0, min(255, int(ghost_opacity))),
-        "scale": max(1, int(scale)),
+        "scale": scale,
     }
     body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
@@ -610,6 +691,148 @@ def export_onion_skin(
 
 
 @mcp.tool()
+def export_motion_trail(
+    filename: str,
+    output: str,
+    tag: str | None = None,
+    frames: list[int] | None = None,
+    scale: int = 6,
+    overwrite: bool = False,
+) -> dict:
+    """Export every frame of a motion composited into one image, the oldest faintest.
+
+    The way to judge whether a whole motion reads: arc shape, spacing and squash are all
+    visible at once in a still image that can be studied, where a GIF moves on before a
+    defect can be seen, and `export_onion_skin` shows only a few frames either side of one.
+
+    Args:
+        filename: The sprite.
+        output: The image to write. Use .png: the fades are alpha, which a GIF cannot keep.
+        tag: Composite this tag's frames.
+        frames: Or these frames (1-based), in the order given. Pass neither for every
+            frame of the sprite, and not both.
+        scale: Integer upscaling of the output (default 6). The scaled image is held to
+            the same caps as any canvas.
+        overwrite: Replace `output` if it already exists (default False = no-clobber).
+
+    Frame i of n is drawn at opacity 255 * i / n, so the last is fully opaque and on top.
+    An opaque Background layer would bury every frame under the next, so when there is one
+    it is drawn once, as of the last frame, and the frames contribute their other layers.
+
+    Returns the frames used, the opacity each was drawn at, and whether a Background was
+    laid underneath.
+    """
+    if tag is not None and frames is not None:
+        raise ValidationFailed("pass tag or frames, not both: they name the same thing twice.")
+    frame_list = None
+    if frames is not None:
+        if not frames:
+            raise ValidationFailed("frames is empty; pass at least one frame, or omit it "
+                                   "for every frame of the sprite.")
+        check_list_length("frames", frames, MAX_MOTION_FRAMES,
+                          remedy="Composite a shorter stretch, or a tag.")
+        frame_list = [FrameRef.arg(f"frames[{i}]", f) for i, f in enumerate(frames, 1)]
+    scale = check_count("scale", scale, MAX_CANVAS_DIMENSION, minimum=1)
+    src = resolve_path(filename)
+    # From the header, before the launch; the Lua check below is the backstop for a
+    # source whose header cannot be read.
+    scale = _require_scale(scale, src)
+    out_path = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
+    args = {
+        "src": lua_path(src),
+        "output": lua_path(out_path),
+        "tag": tag,
+        "frames": frame_list,
+        "scale": scale,
+        "max_dimension": MAX_CANVAS_DIMENSION,
+        "max_pixels": MAX_CANVAS_PIXELS,
+        "max_frames": MAX_MOTION_FRAMES,
+    }
+    body = FRAME_GUARD_LUA + """
+    local spr = open_sprite(ARG.src)
+    local list = {}
+    if ARG.tag ~= nil then
+      local found, names = nil, {}
+      for _, t in ipairs(spr.tags) do
+        names[#names + 1] = t.name
+        if t.name == ARG.tag then found = t end
+      end
+      if found == nil then
+        error("the sprite has no tag named '" .. ARG.tag .. "'; its tags are: " ..
+              (#names > 0 and table.concat(names, ", ") or "none") .. ".", 0)
+      end
+      for f = found.fromFrame.frameNumber, found.toFrame.frameNumber do list[#list + 1] = f end
+    elseif ARG.frames ~= nil then
+      for i, f in ipairs(ARG.frames) do list[i] = require_frame(spr, f, "frames[" .. i .. "]") end
+    else
+      for f = 1, #spr.frames do list[f] = f end
+    end
+    -- The same cap as an explicit list, for a tag or the whole sprite: each frame is a
+    -- full-canvas composite, and only here is the count of either known.
+    if #list > ARG.max_frames then
+      error(string.format("that is %d frames; a motion trail composites at most %d. " ..
+            "Pass a tag or a shorter frames list.", #list, ARG.max_frames), 0)
+    end
+
+    local W, H = spr.width, spr.height
+    local OW, OH = W * ARG.scale, H * ARG.scale
+    if OW > ARG.max_dimension or OH > ARG.max_dimension or OW * OH > ARG.max_pixels then
+      error(string.format("a %dx%d sprite at scale %d is a %dx%d image, past the canvas " ..
+            "caps (%d px per axis, %d px in all). Use a smaller scale.",
+            W, H, ARG.scale, OW, OH, ARG.max_dimension, ARG.max_pixels), 0)
+    end
+
+    -- The Background, if a visible one exists, is laid once underneath and kept out of the
+    -- frames: every frame of an opaque sprite is opaque, so the last one, drawn at full
+    -- opacity, would otherwise cover the whole trail. Its visibility is changed in memory
+    -- only; this sprite is never saved.
+    local bg = nil
+    for _, lyr in ipairs(spr.layers) do
+      if lyr.isBackground and lyr.isVisible then bg = lyr end
+    end
+    local out = Image(W, H, ColorMode.RGB)
+    out:clear()
+    if bg ~= nil then
+      local shown = {}
+      for _, lyr in ipairs(spr.layers) do
+        if not lyr.isBackground and lyr.isVisible then
+          lyr.isVisible = false
+          shown[#shown + 1] = lyr
+        end
+      end
+      local base = Image(W, H, ColorMode.RGB)
+      base:clear()
+      base:drawSprite(spr, list[#list])
+      out:drawImage(base, Point(0, 0), 255, BlendMode.NORMAL)
+      for _, lyr in ipairs(shown) do lyr.isVisible = true end
+      bg.isVisible = false
+    end
+
+    local opacities = {}
+    for i, f in ipairs(list) do
+      local op = math.floor(255 * i / #list + 0.5)
+      local img = Image(W, H, ColorMode.RGB)
+      img:clear()
+      img:drawSprite(spr, f)
+      out:drawImage(img, Point(0, 0), op, BlendMode.NORMAL)
+      opacities[i] = op
+    end
+    if bg ~= nil then bg.isVisible = true end
+
+    local osp = Sprite(W, H, ColorMode.RGB)
+    osp.cels[1].image = out
+    app.sprite = osp
+    if ARG.scale > 1 then
+      app.command.SpriteSize{ ui = false, width = OW, height = OH, method = "nearest" }
+    end
+    osp:saveAs(ARG.output)
+    RESULT = { ok = true, output = ARG.output, frames = list, opacities = opacities,
+               background = (bg ~= nil), width = OW, height = OH }
+    """
+    return run_lua(body, args)
+
+
+@mcp.tool()
 def export_frames(
     filename: str, output_pattern: str, scale: int = 1, overwrite: bool = False
 ) -> dict:
@@ -624,7 +847,7 @@ def export_frames(
         raise ValidationFailed('output_pattern must contain "{frame}", e.g. "out_{frame}.png".')
     src = resolve_path(filename)
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
-    run_cli([str(src), "--scale", str(max(1, int(scale))), "--save-as", str(out)])
+    run_cli([str(src), "--scale", str(_require_scale(scale, src)), "--save-as", str(out)])
     return {"ok": True, "output_pattern": str(out), "scale": int(scale)}
 
 
