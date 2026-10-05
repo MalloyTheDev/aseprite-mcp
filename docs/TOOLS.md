@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **161 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **162 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -20,7 +20,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Effects & colour adjustments](#effects--colour-adjustments) (13)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
-- [Image stamping](#image-stamping) (2)
+- [Image stamping](#image-stamping) (3)
 - [Palette](#palette) (15)
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
@@ -3172,6 +3172,45 @@ anything larger, write the file into the workspace and use `stamp_file`.
 | `blend_mode` | string | no | normal |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
+
+
+### `import_spritesheet`
+
+Turn a sprite sheet image into an animated sprite, one frame per cell.
+
+The inbound seam for art made elsewhere, such as a PixelPrep strip, and the reverse of
+`export_spritesheet`. Aseprite's own Import Sprite Sheet does the slicing.
+
+Args:
+    filename: The .aseprite file to create.
+    source: The sheet: a PNG, or anything else Aseprite opens, in the workspace.
+    frame_width: One cell's width in pixels.
+    frame_height: One cell's height in pixels. Both must divide the sheet exactly in
+        the direction the layout reads it: a partial cell is refused, never cropped
+        or padded, and the refusal names the sizes that would divide.
+    layout: "horizontal" reads one row left to right, so frame_height must be the
+        sheet's height. "vertical" reads one column top to bottom, so frame_width
+        must be its width. "grid" reads rows left to right, top to bottom.
+    overwrite: Replace `filename` if it already exists (default False = no-clobber).
+
+The sprite is one cell in size, with one layer holding every frame, in the sheet's
+colour mode and palette. An opaque sheet keeps its Background layer, which on an
+indexed sheet is what keeps the colour at the transparent palette index visible.
+Frames are 100ms: time them with `set_all_frame_durations` or `apply_timing_curve`.
+A cell with nothing in it still becomes a frame, and `empty_frames` lists them, so a
+grid's spare cells are visible as such. A sheet with frames of its own, such as a
+GIF, is refused rather than sliced from its first frame. At most 4,096 frames.
+
+Returns the sprite's info, plus `layer` and `empty_frames`.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `source` | string | yes |  |
+| `frame_width` | integer | yes |  |
+| `frame_height` | integer | yes |  |
+| `layout` | string | no | horizontal |
+| `overwrite` | boolean | no | False |
 
 
 ### `stamp_file`

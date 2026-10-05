@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`import_spritesheet`: a sheet image becomes a sprite with one frame per cell** (#93).
+  The inbound seam for art made elsewhere, a PixelPrep strip or a downloaded sheet, and the
+  reverse of `export_spritesheet`. Aseprite's own Import Sprite Sheet does the slicing;
+  `layout` is `horizontal` (one row), `vertical` (one column) or `grid` (rows, read left to
+  right and top to bottom). A cell size that does not divide the sheet is refused, never
+  cropped or padded, and the refusal happens in Python from the image header before
+  Aseprite is launched, naming the sizes that would divide; an `.aseprite` sheet, which has
+  no header Pillow reads, gets the same refusal once it is open. A cell that holds nothing
+  still becomes a frame, and `empty_frames` lists them, so a grid's spare cells at the end
+  are visible as such. A sheet with frames of its own (a GIF) is refused rather than sliced
+  from its first frame. At most 4,096 frames: measured, 16,384 frames of 2x2 import in
+  0.6s, so the cap is not about time but about a cell-size mistake on a large sheet asking
+  for millions of frames.
+
+  **An opaque indexed sheet keeps its Background, and with it the colour at the transparent
+  palette index.** Measured while building this: the importer renders the cells onto a new,
+  transparent layer, where that index means "no pixel", so on a PNG with no transparency
+  whatever was drawn in palette entry 0 vanished (a whole frame of the test sheet). The
+  layer is made a Background again with the fill set to that same index, which rewrites
+  those pixels with the value they already hold. Restoring the Background with Aseprite's
+  default fill instead painted them with an entry the palette did not have.
+
 ### Fixed
 
 - **`add_frame(copy_from=N)` and `duplicate_frame(N)` named the original as the new

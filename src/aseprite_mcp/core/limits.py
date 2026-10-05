@@ -239,6 +239,12 @@ MAX_FRAMES_PER_DIRECTION = 32
 # Each cell is a placeholder plus a named slice, so cells cost launches. 1,024 cells is
 # a 32x32 grid: a larger atlas than any of these scaffolds is meant to start.
 MAX_GRID_CELLS = 1_024
+# Frames one `import_spritesheet` call may create. Not a time bound: measured, 16,384
+# frames of 2x2 import in 0.6s. It is here because the frame count is the sheet's area
+# divided by the cell's, so a 1x1 cell on a large sheet asks for millions of frames, past
+# the 65,535 the file format can store; 4,096 is a 64x64 grid, larger than any animation
+# sheet, so a request past it is a cell-size mistake and is named as one before launch.
+MAX_SHEET_FRAMES = 4_096
 
 # --- Declarative asset specs ----------------------------------------------- #
 # The spec layer amplifies harder than any tool: one integer becomes two batch operations
