@@ -506,12 +506,14 @@ ramp's top step. A highlight turned out to be load-bearing.
 And on a *shaded* subject the reading then fires anyway, in both modes, because the darker
 pixels run out of ramp before the trail ends and clamp at the dark entry. That is not
 avoidable by drawing better: the only subject that cannot clamp is one painted in a single
-colour. The warning is right that those copies come out the same colour, and wrong about
-why, which is filed as
-[#226](https://github.com/MalloyTheDev/aseprite-mcp/issues/226): it blames the palette and
-suggests adding colours while its own numbers say the palette holds every target exactly.
-So the generator asserts on `trail_on_palette`'s counts rather than on the sentence, and
-those counts are what separate a clamped ramp from a palette that is genuinely too small.
+colour. The reading used to blame the palette for it and suggest adding colours, while its
+own numbers said the palette held every target exactly
+([#226](https://github.com/MalloyTheDev/aseprite-mcp/issues/226)). It now tells the two
+apart, a clamp being copies that wanted one colour and a short palette copies that wanted
+several, and gives each its own remedy: for a stretch, `mode='echo'`. The generator asserts
+on the sentence as well as on `trail_on_palette`'s counts, and the "crushed palette" case it
+builds turned out to be clamps too: the two colours there that share a palette entry belong
+to different parts of the subject, so no copy merges because of the palette.
 
 ### Scaffold a whole asset in one call
 
@@ -724,6 +726,29 @@ deterministic scaffolding, no AI generation.
 4. `validate_sprite_for_game_export("hero.aseprite", expected_width=32, required_tags=["idle"])` confirms it is game-ready.
 5. `export_game_asset_bundle("hero.aseprite", scale=8)` writes PNG/GIF/sheet+JSON/manifest into `hero_bundle/`.
 
+### Bring art in from elsewhere
+
+Art made outside the server (a PixelPrep conversion, a downloaded sheet, a screenshot)
+comes in through two tools, and the rest of the toolset then works on it as on anything
+drawn here.
+
+1. `import_image("scene.png", "scene.aseprite")` for one picture. A PNG with an alpha
+   channel, which is what PixelPrep writes, arrives as an ordinary layer; an opaque one
+   without alpha, or an opaque indexed PNG, arrives as a **Background**, which Aseprite
+   draws opaque everywhere.
+2. `import_spritesheet("walk.aseprite", "walk_strip.png", 32, 48)` for a strip, a column
+   (`layout="vertical"`) or a grid (`layout="grid"`) of frames. A cell size that does not
+   divide the sheet is refused before anything is launched, and spare grid cells come back
+   as `empty_frames`.
+3. `set_color_mode("scene.aseprite", "indexed")` to limit the palette. An opaque scene keeps
+   every pixel: one of its colours can land on the transparent index (in both scenes tried
+   while building this it was the darkest), which a Background shows as a colour, and the
+   readers and drawing tools treat it as one.
+4. `assess_sprite` and `render_preview` to look at it (a large scene previews at a scale that
+   keeps the image within 2048 px), then edit it like any other sprite.
+5. For animation, `export_motion_trail` shows every frame of a motion in one image, so arcs
+   and spacing can be judged before anything is exported.
+
 ### Workflow manifest contract
 
 Every workflow tool returns a standardized **`workflow_manifest.v1`** object (defined in
@@ -813,7 +838,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | Tool | Description |
 | --- | --- |
 | `get_sprite_info` | Full structured state: size, mode, frames, layer tree, tags, palette. |
-| `render_preview` | Render a frame to a PNG image you can view (scaled). |
+| `render_preview` | Render a frame to a PNG image you can view, scaled up for small sprites; a large one is fitted to 2048 px on its longer side. A frame the sprite does not have is refused. |
 | `get_pixels` | Read the pixel colours of a region, composited or from one named layer, as rows or as a compact symbol map (≤ 64×64 per call). |
 | `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why. |
 | `diff_sprites` | Compare two frames pixel for pixel: pixels added to or removed from the silhouette, repainted inside it, or changed in alpha alone, plus the colours involved and the box they sit in. Says so loudly when nothing changed, and takes `expect=` to turn the measurement into a pass or a fail. |
@@ -1138,6 +1163,9 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
   pixel/tile/colour lists are capped, canvases are capped at 16384px per axis **and**
   16,777,216 pixels of area (so two individually-legal axes can't add up to gigabytes),
   inline base64 images at 32 MB, and text rasterization is budgeted while it renders.
+  An outside image whose header declares more than the canvas caps is refused before it
+  is opened, an export's `scale` and a sheet's `padding` are held so the rendered image
+  stays inside them, and `render_preview` fits a large sprite to 2048 px.
   `ASEPRITE_MCP_TIMEOUT` is clamped to 1-3600s so it can't be set to something that
   disables the timeout.
 - **No shell, no injection.** Aseprite is invoked with list-form arguments (never a
@@ -1164,6 +1192,16 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 - `get_pixels` is capped at 4096 px (e.g. 64×64) per call; read in tiles for larger areas.
 - Anti-aliasing (`antialias=True`) only applies to RGB sprites; it's ignored on
   indexed/gray. Tilemaps and reference layers require **Aseprite 1.3+**.
+- **Indexed sprites and the Background.** On an ordinary layer the transparent palette
+  index means "no pixel". On a Background Aseprite draws it as a colour, and so do
+  `get_pixels`, `assess_sprite`, `diff_sprites`, the palette tools, `trim_sprite`,
+  `set_color_mode`'s conversion check and the drawing tools here. Not yet: effects that
+  read their own layer before writing it, such as `add_outline`'s seed test and the
+  shading masks, still treat it as empty on a Background.
+- **Fills start from Aseprite's factory colours.** Where a Background gains pixels
+  (`convert_layer_to_background`, or growing its canvas with `resize_canvas` or
+  `crop_sprite`) they are black, or the transparent index on an indexed sprite, whatever
+  the editor's colour bar holds. A headless run used to inherit that colour bar.
 
 ## Troubleshooting
 
