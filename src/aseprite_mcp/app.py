@@ -42,6 +42,9 @@ Workflow notes:
     blue, yellow, cyan, magenta, transparent, ...).
   * Call `render_preview` to get a PNG image of your work so you can see the result
     before continuing. Call `get_sprite_info` for the structured state of a sprite.
+  * Art made elsewhere comes in with `import_image` (one picture) or
+    `import_spritesheet` (a strip or grid of frames). `export_motion_trail` shows a
+    whole motion in one image, which is how to judge its arcs and spacing.
   * Recommended first step for a new asset: `create_sprite`, then draw, then preview.
 """
 
@@ -200,6 +203,11 @@ READ_ONLY_TOOLS = frozenset({
     "list_sprites",
     "plan_asset_spec",
     "render_preview",
+    # Validates the spec document, reads the sprite through `get_sprite_info` and compares
+    # the two in Python; nothing is saved. It shipped without this entry, the same miss
+    # the paragraph above describes for three earlier tools, so a client prompted before
+    # every check of a built sprite against its spec.
+    "validate_asset_against_spec",
     "validate_asset_spec",
     "validate_loop",
     "validate_minecraft_texture",

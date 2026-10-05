@@ -225,6 +225,14 @@ def test_the_tools_an_agent_calls_after_every_pass_are_read_only():
         assert name in READ_ONLY_TOOLS, f"{name} writes nothing and should say so"
 
 
+def test_the_spec_check_is_read_only():
+    """Named for the same reason as the three above: it reads a sprite and compares it with
+    a spec, and it shipped without the annotation anyway."""
+    from aseprite_mcp.app import READ_ONLY_TOOLS
+
+    assert "validate_asset_against_spec" in READ_ONLY_TOOLS
+
+
 def test_every_read_only_tool_actually_exists():
     """A renamed tool would leave a stale name here, silently annotating nothing."""
     import asyncio

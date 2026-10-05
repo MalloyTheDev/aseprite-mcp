@@ -26,6 +26,9 @@ in. Every claim here is marked with how it was established; see
 | scope an edit to a region across calls | Works, with care | The `.msk` sidecar in [`tools/selection.py`](../src/aseprite_mcp/tools/selection.py), and mask the write yourself |
 | keep state between calls | **No** | Each call is a fresh process. Put the state in the file or in an argument |
 | run a menu command | Sometimes | Check it is not in [section 2](#2-returns-success-and-does-nothing) below, then test it |
+| use the frame `Sprite:newFrame(n)` hands back | **Returns the original** | Look the copy up as `spr.frames[n + 1]`: `copy_frame_after` in [`core/models.py`](../src/aseprite_mcp/core/models.py), and [section 7](#7-answers-that-are-not-what-they-look-like) |
+| fill the pixels a Background gains (convert a layer, grow the canvas) | **Uses the editor's colour bar** | Set the colour first; the prelude already starts every script from the factory colours ([section 4](#4-present-and-must-not-be-touched)) |
+| read an indexed sprite that has a Background | **Decodes wrong** in its own colour mode | Read Aseprite's RGB render: `readable_composite` in [`core/luagen.py`](../src/aseprite_mcp/core/luagen.py), and section 7 |
 
 ### The one-line test for "am I in batch mode"
 
@@ -135,6 +138,18 @@ tool argument instead.
 This is the one claim in this file that was deliberately **not** re-tested, because
 testing it is the harm.
 
+**The colour bar is a different case, and it was measured.** `app.fgColor` and
+`app.bgColor` are the editor's state too, but here the trap is that a headless run *reads*
+them. `BackgroundFromLayer`, and growing a Background with `Sprite:crop`, fill the new
+pixels with the background colour, so the same call filled with `#a25ef6` at alpha 186 on
+the machine this was found on, and with palette entry 4 of a 3-entry palette on an indexed
+sprite. Writing them was tested before anything relied on it: one run set `app.bgColor` and
+the next read it, and the second saw the editor's own colour, so a headless run does not
+save the colour bar back. The prelude therefore starts every script from Aseprite's factory
+colours (`data/pref.xml`, the `color_bar` section: a white foreground and a black
+background). None of this is a licence to write `app.preferences`: the colour bar was
+measured, and the rest of this section was not.
+
 ## 5. Possible, but only as manual pixel work
 
 `app.transform` does not exist, and the `MaskContent` drag handles are a GUI affordance
@@ -172,7 +187,7 @@ with `target="sprite"`, and `SpriteSize` for scaling, all work
   (sprite target), `SpriteSize`, `NewLayer`, `MergeDownLayer`, `DuplicateLayer`,
   `LayerFromBackground`, `BackgroundFromLayer`, `LinkCels`, `UnlinkCel`, `ReverseFrames`,
   `ChangePixelFormat`, `ColorQuantization`, `MaskByColor`, `ModifySelection`, `InvertMask`,
-  `SaveMask`, `LoadMask`. Of those, the first four were re-run directly for this file as a
+  `SaveMask`, `LoadMask`, `ImportSpriteSheet`. Of those, the first four were re-run directly for this file as a
   control on the no-op probes.
 - `app.range`, the timeline selection, which exists headlessly and is how cel linking is
   driven (see [`tools/cels.py`](../src/aseprite_mcp/tools/cels.py)).
@@ -190,6 +205,34 @@ active layer, the active frame) survives between calls. Tools take explicit file
 coordinates and frame numbers for that reason. The selection sidecar is the single
 deliberate exception, and it is deliberate state outside the sprite file: copying or
 renaming a sprite leaves its selection behind.
+
+## 7. Answers that are not what they look like
+
+Neither crashes nor no-ops, which makes these the easiest to trust. Each was measured on
+**2026-10-05** against Aseprite 1.3.18.6 (API 41), and the code that depends on each says
+so where it does.
+
+- **`Sprite:newFrame(n)` returns frame n, the original, not the copy.** The copy goes in at
+  n + 1. The two are pixel-identical, so every colour check agrees with either story. A
+  linked cel settles it: link frame n to a later frame, copy frame n, and the frame still
+  sharing the original's image is n. Aseprite's source agrees (it pushes the requested
+  frame number, not the inserted one). Take the copy as `spr.frames[n + 1]`:
+  `copy_frame_after` in [`core/models.py`](../src/aseprite_mcp/core/models.py).
+- **An indexed Background is drawn over its transparent index's colour.** That index is
+  opaque there, a palette entry whose own alpha is 0 shows the base colour, and a
+  half-transparent entry blends with it (`#0000c8` at 50% over `#0a141e` renders as
+  `#050a73`). Decoding the indices yourself gets all three wrong; read Aseprite's RGB render
+  instead, which is what `readable_composite` and `readable_layer` in
+  [`core/luagen.py`](../src/aseprite_mcp/core/luagen.py) do, in that case only.
+- **`ImportSpriteSheet` renders the cells onto a new, transparent layer.** On an opaque
+  indexed sheet that turns everything drawn in the transparent index into "no pixel": a
+  whole frame of the test sheet. Make the layer a Background again with the fill set to
+  that same index, which rewrites those pixels with the value they already hold:
+  `import_spritesheet` in [`tools/image.py`](../src/aseprite_mcp/tools/image.py). Aseprite's
+  default fill painted them with an entry the palette did not have.
+- **`Image:drawSprite` into an indexed image keeps every index**, 32 and above included,
+  unlike `Image:drawImage` with the default blend mode (the reason for `BlendMode.SRC` in
+  `get_draw_image`), so the composite readers do not suffer that loss.
 
 ## The binary is the source of truth, not the documentation
 
@@ -255,6 +298,10 @@ sprites in a temporary workspace:
   tier.
 - The 169 commands in `data/gui.xml`, by counting distinct `command="..."` values in the
   shipped file.
+
+Measured on **2026-10-05**, same build and route, for section 7 and the colour-bar
+paragraph in section 4: each claim by the probe described beside it, the colour bar by one
+run setting `app.bgColor` and the next reading it back.
 
 **Taken on trust from [#96](https://github.com/MalloyTheDev/aseprite-mcp/issues/96),
 on purpose:**

@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **`validate_asset_against_spec` did not carry `readOnlyHint`**, so a client that
+  auto-approves read-only tools prompted before every check of a built sprite against its
+  spec. It validates the spec document, reads the sprite through `get_sprite_info` and
+  compares the two in Python, and saves nothing. It shipped without the entry in
+  `READ_ONLY_TOOLS`, the same miss the set's own comment records for three earlier tools,
+  and a test now names it as it names them.
+
+### Changed
+
+- **The documentation describes what merged with #231 to #235.** The README gains a
+  "Bring art in from elsewhere" workflow (`import_image`, `import_spritesheet`, palette
+  limiting, `export_motion_trail`), and its `render_preview` row, smear section (written
+  while #226 was open), security bounds and notes on indexed Backgrounds and fills are
+  brought up to date. `SECURITY.md` records the image check on every tool that opens an
+  outside image and the new bounds on rendered output. `docs/HEADLESS.md` gains a section
+  of measured answers that are not what they look like (`Sprite:newFrame` returning the
+  original, an indexed Background drawn over its transparent index's colour,
+  `ImportSpriteSheet` rendering onto a transparent layer) and the colour-bar measurement
+  that justifies the prelude setting it, beside the section warning against writing
+  preferences. `docs/CLIENTS.md` counts twenty-one read-only tools, and the server's
+  instructions say how outside art comes in.
+
 ### Added
 
 - **`export_motion_trail`: every frame of a motion composited into one image, the oldest
@@ -17,6 +41,7 @@ All notable changes to this project are documented here. The format is based on
   Background would bury every frame under the next, the last at full opacity covering the
   lot, so when there is one it is laid once underneath and the frames contribute their
   other layers. The scaled image is held to the canvas caps before anything is scaled.
+  (163 tools.)
 
 ### Fixed
 
@@ -120,7 +145,7 @@ All notable changes to this project are documented here. The format is based on
   whatever was drawn in palette entry 0 vanished (a whole frame of the test sheet). The
   layer is made a Background again with the fill set to that same index, which rewrites
   those pixels with the value they already hold. Restoring the Background with Aseprite's
-  default fill instead painted them with an entry the palette did not have.
+  default fill instead painted them with an entry the palette did not have. (162 tools.)
 
 ### Fixed
 
