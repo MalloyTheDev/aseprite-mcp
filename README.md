@@ -16,8 +16,6 @@
   <img src="docs/assets/showcase/zorder.gif" height="112" alt="A sword swung past a round shield, passing behind it and then in front, with the layers never reordered">
   &nbsp;
   <img src="docs/assets/showcase/throw.gif" height="112" alt="A shaded ball thrown along an arc, its shadow tracking along the ground">
-  &nbsp;
-  <img src="docs/assets/showcase/deathknight_plates.png" height="112" alt="A hand-drawn dark-armour death knight with a horned helm, glowing runeblade and purple cape">
 </p>
 <p align="center">
   <sub>Drawn, shaded, animated, timed and then <strong>measured</strong>: entirely through MCP
