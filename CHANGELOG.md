@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **Refusals now reach MCP clients.** Every refusal this server writes is an
+  `AsepriteMCPError` whose message names the way out, and none of it arrived: the 2.x
+  SDK forwards only its own `ToolError` into the `is_error` result and masks every
+  other exception to `Error executing tool <name>`, with the text going to the server
+  log. Measured on the live server, a ragged `draw_pixel_map` grid cost two blind
+  retries because the row count that named the defect never arrived. `call_tool` now
+  translates `AsepriteMCPError` into `ToolError` with the message intact and the typed
+  error chained as `__cause__`, for refusals raised inside a tool and for the
+  unknown-argument check alike; a genuine crash stays masked exactly as the SDK
+  intends. Verified through a real stdio client session, not only at the boundary.
+
 - **`validate_asset_against_spec` did not carry `readOnlyHint`**, so a client that
   auto-approves read-only tools prompted before every check of a built sprite against its
   spec. It validates the spec document, reads the sprite through `get_sprite_info` and

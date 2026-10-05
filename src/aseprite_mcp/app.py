@@ -19,9 +19,10 @@ import json
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import ToolAnnotations
 
-from .core.errors import UnknownArgumentError
+from .core.errors import AsepriteMCPError, UnknownArgumentError
 
 INSTRUCTIONS = """\
 This server drives Aseprite (a pixel-art / sprite editor) headlessly to create and
@@ -319,6 +320,15 @@ class StrictMCPServer(MCPServer):
 
     The same registration hook attaches each tool's annotations, and `list_tools` puts the
     input schemas into their portable wire form.
+
+    `call_tool` also translates this server's own refusals into the SDK's `ToolError`.
+    The 2.x SDK treats any other exception as a crash and withholds its message: the
+    client reads only `Error executing tool <name>` while the text goes to the server
+    log. Every refusal here is an `AsepriteMCPError` whose message names the way out,
+    and measured on the live server, a ragged `draw_pixel_map` grid cost two blind
+    retries because the row that named the defect never arrived. The translation keeps
+    the message and chains the typed error as `__cause__`; anything that is not an
+    `AsepriteMCPError` stays masked, exactly as the SDK intends for a crash.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -358,18 +368,31 @@ class StrictMCPServer(MCPServer):
     async def call_tool(  # type: ignore[override]
         self, name: str, arguments: dict[str, Any], *args: Any, **kwargs: Any
     ):
-        accepted = self._accepted.get(name)
-        if accepted is not None:
-            unknown = sorted(set(arguments) - accepted)
-            if unknown:
-                raise UnknownArgumentError(
-                    f"{name} does not accept {', '.join(repr(u) for u in unknown)}. "
-                    f"Accepted arguments: {', '.join(sorted(accepted))}."
-                )
-        # Forwarded positionally/by keyword rather than enumerated: call_tool gained a
-        # `context` parameter in the 2.x SDK, and an override that pins the older
-        # two-argument shape silently stops receiving anything added after it.
-        return await super().call_tool(name, arguments, *args, **kwargs)
+        try:
+            accepted = self._accepted.get(name)
+            if accepted is not None:
+                unknown = sorted(set(arguments) - accepted)
+                if unknown:
+                    raise UnknownArgumentError(
+                        f"{name} does not accept {', '.join(repr(u) for u in unknown)}. "
+                        f"Accepted arguments: {', '.join(sorted(accepted))}."
+                    )
+            # Forwarded positionally/by keyword rather than enumerated: call_tool gained a
+            # `context` parameter in the 2.x SDK, and an override that pins the older
+            # two-argument shape silently stops receiving anything added after it.
+            return await super().call_tool(name, arguments, *args, **kwargs)
+        except AsepriteMCPError as exc:
+            # Raised above, or leaked raw by an SDK that does not wrap crashes itself.
+            raise ToolError(f"{type(exc).__name__}: {exc}") from exc
+        except UnexpectedToolError as exc:
+            # The SDK's crash wrapper chains what the tool raised as __cause__ (one more
+            # wrapper deep for a nested tool), so walk the chain for a refusal of ours.
+            cause = exc.__cause__
+            while cause is not None and not isinstance(cause, AsepriteMCPError):
+                cause = cause.__cause__
+            if cause is None:
+                raise
+            raise ToolError(f"{type(cause).__name__}: {cause}") from cause
 
 
 mcp = StrictMCPServer("aseprite", instructions=INSTRUCTIONS)
