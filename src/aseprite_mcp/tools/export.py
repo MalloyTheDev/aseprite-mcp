@@ -6,6 +6,8 @@ same workspace rules as everything else.
 
 from __future__ import annotations
 
+import math
+
 from ..app import mcp
 from ..core import asefile, gifmeta
 from ..core.errors import ExportError, ValidationFailed
@@ -100,6 +102,20 @@ def _canvas_of(src) -> tuple[int, int, int] | None:
     return (size[0], size[1], 1) if size is not None else None
 
 
+def largest_fitting_scale(width: int, height: int, count: int = 1) -> int:
+    """The largest scale at which `count` frames of `width` x `height` stay inside the
+    canvas caps, 0 when none does.
+
+    Computed, not searched for: counting down from the scale asked for ran a trillion
+    times for scale=10**12, a hang inside the guard against exactly that request. Each cap
+    bounds the scale on its own, and the integer square root of an area cap over the area
+    of one scale unit is exact.
+    """
+    return min(MAX_CANVAS_DIMENSION // width, MAX_CANVAS_DIMENSION // height,
+               math.isqrt(MAX_CANVAS_PIXELS // (width * height)),
+               math.isqrt(MAX_SPRITE_TOTAL_PIXELS // (count * width * height)))
+
+
 def _require_scale(scale: int, src=None, *, every_frame: bool = False) -> int:
     """A scale of at least 1, whose scaled image the canvas caps would allow.
 
@@ -115,17 +131,13 @@ def _require_scale(scale: int, src=None, *, every_frame: bool = False) -> int:
     if canvas is None:
         return value
     w, h, frames = canvas
+    if w < 1 or h < 1:
+        return value
     ow, oh = w * value, h * value
     count = max(1, frames) if every_frame else 1
     if (ow > MAX_CANVAS_DIMENSION or oh > MAX_CANVAS_DIMENSION
             or ow * oh > MAX_CANVAS_PIXELS or count * ow * oh > MAX_SPRITE_TOTAL_PIXELS):
-        fit = 0
-        for s in range(value - 1, 0, -1):
-            sw, sh = w * s, h * s
-            if (sw <= MAX_CANVAS_DIMENSION and sh <= MAX_CANVAS_DIMENSION
-                    and sw * sh <= MAX_CANVAS_PIXELS and count * sw * sh <= MAX_SPRITE_TOTAL_PIXELS):
-                fit = s
-                break
+        fit = largest_fitting_scale(w, h, count)
         what = f"{count} frames of {ow}x{oh}" if count > 1 else f"a {ow}x{oh} image"
         remedy = (f"The largest scale that fits is {fit}." if fit
                   else "No scale fits; export a smaller sprite or fewer frames.")

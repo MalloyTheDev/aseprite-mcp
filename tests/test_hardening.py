@@ -21,6 +21,8 @@ import pathlib
 import sys
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from aseprite_mcp import server  # noqa: F401  importing registers every tool
 from aseprite_mcp.app import mcp
@@ -1256,3 +1258,30 @@ def test_a_preview_fits_its_longer_side_to_the_edge(tmp_path, monkeypatch, width
     inspect_tools.render_preview(str(src), scale=asked)
 
     assert seen["scale"] == used
+
+
+def test_a_huge_scale_is_refused_at_once(tmp_path, nothing_launches):
+    """The first version of this guard searched downward for the scale that fits, which
+    for scale=10**12 is a trillion steps: a hang inside the check against the request."""
+    import time
+
+    src = _ase(tmp_path / "s.aseprite", 16, 16)
+    started = time.perf_counter()
+    with pytest.raises(ExportError, match="largest scale that fits is 256"):
+        export.export_png(str(src), str(tmp_path / "o.png"), scale=10**12)
+    assert time.perf_counter() - started < 1.0
+
+
+@given(width=st.integers(1, 16_384), height=st.integers(1, 16_384),
+       count=st.integers(1, 4_096))
+@settings(max_examples=300, deadline=None)
+def test_the_largest_fitting_scale_fits_and_one_more_does_not(width, height, count):
+    def fits(s):
+        w, h = width * s, height * s
+        return (w <= limits.MAX_CANVAS_DIMENSION and h <= limits.MAX_CANVAS_DIMENSION
+                and w * h <= limits.MAX_CANVAS_PIXELS
+                and count * w * h <= limits.MAX_SPRITE_TOTAL_PIXELS)
+
+    fit = export.largest_fitting_scale(width, height, count)
+    assert fit == 0 or fits(fit)
+    assert not fits(fit + 1)
