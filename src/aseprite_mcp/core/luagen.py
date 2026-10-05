@@ -125,6 +125,16 @@ local MAX_READ_REGION = {MAX_READ_REGION_PIXELS}
 """
 
 PRELUDE = _LIMITS_LUA + r"""
+-- The colour bar is the editor's own state and persists between sessions, and a headless
+-- run inherits it. Aseprite fills from it whenever a Background needs a pixel it does not
+-- have (growing the canvas, converting a layer to a Background), so the same call filled
+-- with this machine's #a25ef6 at alpha 186, and on an indexed sprite with palette entry 4
+-- of 3, where a fresh install fills with black. Every script starts from Aseprite's
+-- factory colours instead (data/pref.xml, color_bar). Measured: a headless run does not
+-- save these back, so the editor's own colours are untouched.
+app.fgColor = Color{ r = 255, g = 255, b = 255, a = 255 }
+app.bgColor = Color{ r = 0, g = 0, b = 0, a = 255 }
+
 -- A shape's cost is the extent it was given, not the canvas it lands on: img_set throws
 -- away the off-canvas writes, but only after the loop has run. So a rectangle, ellipse
 -- or line whose extent is larger than any canvas could show is not a harmless no-op,
@@ -355,6 +365,16 @@ end
 -- clear it, as each batch operation does before it runs.
 local function draw_target(spr, layer)
   _draw_opaque = layer ~= nil and spr.colorMode == ColorMode.INDEXED and layer.isBackground
+end
+
+-- What a Background is filled with where it gains a pixel. The prelude's black, unless
+-- the sprite is indexed: then its transparent index, which a Background shows as that
+-- entry's colour, so the fill introduces no colour and changes no index, and converting
+-- the layer back gives the transparency back. Call after opening the sprite.
+local function background_fill(spr)
+  if spr.colorMode == ColorMode.INDEXED then
+    app.bgColor = Color{ index = spr.transparentColor }
+  end
 end
 
 -- What a declared ramp actually becomes on this sprite's palette.

@@ -23,6 +23,17 @@ All notable changes to this project are documented here. The format is based on
   tools that read their own surface before writing it, such as `add_outline` and the
   shading tools' masks, still read the transparent index on a Background as empty.
 
+- **A Background's fill came from the editor's colour bar, so the same call gave a
+  different file on every machine.** `convert_layer_to_background`, and `resize_canvas`
+  and `crop_sprite` where they grow a Background, filled new pixels with whatever the
+  editor last had as its background colour, user state a headless run inherits: on the
+  machine this was found on, a purple at alpha 186, and on an indexed sprite palette entry
+  4 of a 3-entry palette. Every script now starts from Aseprite's factory colours, a black
+  background and a white foreground. Measured, a headless run never saves the colour bar
+  back, so the editor's own colours are untouched. On an indexed sprite the fill is the
+  transparent index, which a Background shows as that entry's colour, so no index changes
+  and converting the layer back restores the transparency.
+
 ### Fixed
 
 - **An indexed sprite's Background was read as transparent wherever it held the
