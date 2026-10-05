@@ -359,7 +359,9 @@ def ramp_readings(state: dict) -> list[str]:
 # --------------------------------------------------------------------------- #
 # A resolved shift table against the palette that has to hold its targets     #
 # --------------------------------------------------------------------------- #
-def shift_table_readings(state: dict, collisions: list[dict]) -> list[str]:
+def shift_table_readings(state: dict, collisions: list[dict], *,
+                         mode: str | None = None,
+                         headroom_warned: bool = False) -> list[str]:
     """What is worth saying about a smear's trail colours on an indexed palette.
 
     A sibling of `ramp_readings` rather than a reuse of it, because the thing that merges
@@ -383,6 +385,28 @@ def shift_table_readings(state: dict, collisions: list[dict]) -> list[str]:
     resolved to entry 1. Frame 3 came out with 88 pixels of #2c1b2e, 44 of #b04a5a and
     none at all of #6b2d4a, while `warnings` was empty and `ramp_headroom` was correctly
     silent (the subject had four steps below it and the deepest shift was four).
+
+    **Two causes, told apart per collision group (#226).** Shifts can land on one palette
+    entry because the palette is short, or because the ramp itself gave them one colour.
+    The second happens on any shaded subject: `ramp_headroom` measures only the subject's
+    *lightest* colour, which a specular highlight keeps clear of the ramp's bottom, while
+    the darker pixels sit nearer it and clamp there. Measured on a shaded sphere with the
+    whole eleven-step ramp on its palette, a stretch smear collided at shifts 5 through 10,
+    all wanting #1b2b4a, while every palette entry came back exact. The single sentence
+    this used to write said the palette held 10 of 10 colours and, in the same breath,
+    that it did not hold what the ramp reached, then offered three remedies of which none
+    could help: adding entries changes nothing when the targets are already one colour,
+    the ramp *was* held, and "fewer steps" does not exist on `stretch`.
+
+    So a group whose wants are one colour is a clamp and a group whose wants differ is a
+    short palette, and each gets its own sentence. Classified per group rather than from
+    `exact == declared` overall, because one smear can have both: a short palette under
+    some subject colours and a clamp under others.
+
+    `mode` makes the clamp remedy usable: a stretch's step count is the ramp's length, so
+    the only escape is `echo` with an explicit `steps`. `headroom_warned` suppresses the
+    clamp sentence when `ramp_headroom` has already said the copies collapse onto the
+    darkest entry, since saying it twice is noise rather than a second finding.
     """
     if state.get("undrawable_palette"):
         # Cannot be reached from `smear_frame` today: it refuses an indexed sprite with no
@@ -400,23 +424,40 @@ def shift_table_readings(state: dict, collisions: list[dict]) -> list[str]:
     if not declared or not collisions:
         return []
 
+    short = [group for group in collisions if len(set(group["wants"])) > 1]
+    clamped = [group for group in collisions if len(set(group["wants"])) == 1]
+
+    out: list[str] = []
+    if short:
+        out.append(_short_palette_sentence(short, declared, resolved))
+    if clamped and not headroom_warned:
+        out.append(_clamp_sentence(clamped, mode))
+    return out
+
+
+def _listed(shifts: list[int]) -> str:
+    """"3 and 4", not "3, 4": the sentence names copies an animator has to go and look at,
+    and a two-item comma list reads as a truncated one."""
+    merged = [str(shift) for shift in sorted(set(shifts))]
+    if len(merged) < 3:
+        return " and ".join(merged)
+    return ", ".join(merged[:-1]) + " and " + merged[-1]
+
+
+def _short_palette_sentence(groups: list[dict], declared: int, resolved: int) -> str:
+    """The palette genuinely cannot hold what the ramp reaches (#173). Wording unchanged:
+    it is correct for this case, and the showcase pins it."""
     named = "; ".join(
         "shifts {} ({}) all draw as palette entry {}".format(
             " and ".join(str(shift) for shift in group["shifts"]),
             ", ".join(group["wants"]),
             group["index"],
         )
-        for group in collisions[:4]
+        for group in groups[:4]
     )
-    rest = f", and {len(collisions) - 4} more" if len(collisions) > 4 else ""
-    merged = [str(shift) for shift in
-              sorted({shift for group in collisions for shift in group["shifts"]})]
-    # "3 and 4", not "3, 4": the sentence names copies an animator has to go and look at,
-    # and a two-item comma list reads as a truncated one.
-    listed = " and ".join(merged) if len(merged) < 3 else (
-        ", ".join(merged[:-1]) + " and " + merged[-1]
-    )
-    return [
+    rest = f", and {len(groups) - 4} more" if len(groups) > 4 else ""
+    listed = _listed([shift for group in groups for shift in group["shifts"]])
+    return (
         f"This sprite is indexed and its palette holds {resolved} of the {declared} "
         f"colours this trail asks for as distinct entries: {named}{rest}. The copies at "
         f"shifts {listed} therefore come out the "
@@ -425,37 +466,51 @@ def shift_table_readings(state: dict, collisions: list[dict]) -> list[str]:
         "enough, the palette does not hold what it reaches. Add the missing colours with "
         "add_palette_color or set_palette, pass a ramp the palette already holds, or ask "
         "for fewer steps."
-    ]
+    )
 
 
-# --------------------------------------------------------------------------- #
-# Palette cycling, and the indices worth cycling                              #
-# --------------------------------------------------------------------------- #
-# Aseprite's file format carries a palette per frame, but its Lua API does not expose
-# one, which is the question issue #128 opened with. Measured against the installed
-# editor, `app.version == "1.3.18.6"`:
-#
-#   * `#spr.palettes` is 1 on a fresh indexed sprite.
-#   * `Palette(4).frame` is nil, and assigning it raises
-#     "attempt to index a nil value (field '__setters')".
-#   * `spr.palettes[2] = Palette(4)`, `table.insert(spr.palettes, ...)` and
-#     `spr.palettes.length = 2` all raise that same `__setters` error, so the collection
-#     is read-only.
-#   * `Sprite:newPalette` and `Sprite:deletePalette` do not exist ("Field newPalette does
-#     not exist").
-#   * `Palette{ frame = 2 }` is not an error and not a Palette either: it returns a plain
-#     Lua table, which `setPalette` then rejects with "PaletteObj expected, got table".
-#   * `spr:setPalette(alt)` with `app.frame` set to frame 2 succeeds, replaces palette
-#     *1*, leaves `#spr.palettes` at 1, and the reopened file has one palette.
-#   * `app.command.LoadPalette{ filename = ... }` on frame 3 behaves the same way.
-#
-# So the real thing is not reachable and `cycle_palette` ships the fallback the issue
-# names: the frames are generated, and what rotates is the pixels' own indices rather
-# than the palette. On an indexed sprite those are the same picture. Rotating the palette
-# by +step moves the colour at a slot forward; with the palette held still, a pixel shows
-# that same colour by moving its index back by step. The remap is exact, with no
-# `nearest_index` anywhere in it, and the palette comes out of the call byte for byte as
-# the artist wrote it, which rotating it would not.
+def _clamp_sentence(groups: list[dict], mode: str | None) -> str:
+    """The ramp itself gave several copies one colour, so the palette is not the cause and
+    no palette edit can help (#226).
+
+    Grouped by the colour the copies collapse onto, not by the subject colour they came
+    from. On a real shaded subject every clamped group lands on the same entry, the ramp's
+    darkest: measured on the smear showcase's sphere, five groups (one per subject colour)
+    all collapsed onto #1b2b4a, and listing them one group at a time read as the same
+    clause five times. Several distinct colours only happen when the ramp repeats an
+    entry, which `ramplint` reports in its own right.
+    """
+    by_colour: dict[str, set[int]] = {}
+    for group in groups:
+        by_colour.setdefault(group["wants"][0], set()).update(group["shifts"])
+    listed = _listed([shift for shifts in by_colour.values() for shift in shifts])
+    if len(by_colour) == 1:
+        (colour,) = by_colour
+        what = f"come out the same colour, {colour}, because the ramp gives them that colour"
+    else:
+        kept = list(by_colour.items())[:4]
+        rest = f", and {len(by_colour) - 4} more" if len(by_colour) > 4 else ""
+        named = "; ".join(f"shifts {_listed(sorted(shifts))} as {colour}"
+                          for colour, shifts in kept)
+        what = (f"come out the same colour within each set ({named}{rest}), because the "
+                "ramp gives them those colours")
+    if mode == "stretch":
+        remedy = (
+            "A stretch trail asks for one shift per ramp entry, so its depth cannot be "
+            "shortened: use mode='echo' with an explicit steps no deeper than the darker "
+            "colours can fall, or a ramp whose dark end sits further below the subject."
+        )
+    else:
+        remedy = (
+            "Ask for fewer steps, or pass a ramp whose dark end sits further below the "
+            "subject's darker colours."
+        )
+    return (
+        f"The trail copies at shifts {listed} {what} before the palette is consulted. "
+        "They clamp at the bottom of the ramp under the subject's darker pixels, which sit "
+        "nearer it than the lightest colour the headroom check measures. The palette is "
+        "not the cause and adding entries to it will not change this. " + remedy
+    )
 
 
 def usage_runs(used: list[int]) -> list[dict]:
