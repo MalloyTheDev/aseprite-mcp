@@ -151,6 +151,35 @@ MAX_SHADOW_ELLIPSE_POINTS = 2_097_152
 # 0 as "forever", which is how a cycle is marked; the cap is the format's, not ours.
 MAX_TAG_REPEATS = 65_535
 
+
+def tag_repeat_count(repeats: int | None) -> int | None:
+    """Validate a tag's repeat count before Aseprite gets a chance to reinterpret it.
+
+    Aseprite takes -1 and stores 0, which means "forever": the opposite of the one-shot
+    anybody typing a negative number is after. It is refused here rather than quietly
+    turned into its own opposite.
+
+    Lives in `core` rather than beside the `add_tag` tool because both the tool and the
+    batch op have to refuse the same values with the same sentence, and `core` may not
+    import from `tools`. It used to be private to `tools/tags.py`, which is why the batch
+    op could not reuse it and so could not take `repeats` at all.
+    """
+    if repeats is None:
+        return None
+    count = int(repeats)
+    if count < 0:
+        raise ValidationFailed(
+            f"repeats must be 0 or more; got {count}. Aseprite stores a negative count "
+            "as 0, which means 'play forever', the opposite of a one-shot. Use 1 for a "
+            "tag that plays once."
+        )
+    if count > MAX_TAG_REPEATS:
+        raise ValidationFailed(
+            f"repeats is {count}; the file format stores at most {MAX_TAG_REPEATS}. "
+            "Use 0 for a tag that plays forever."
+        )
+    return count
+
 # Frames one call may move a cel across. The distribution is computed in Python and
 # applied inside a single transaction, so the work is one launch whatever the count; the
 # cap is here because the frame list comes from the caller, and a request for more frames

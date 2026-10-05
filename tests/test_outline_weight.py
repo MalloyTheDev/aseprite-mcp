@@ -432,3 +432,41 @@ def test_a_gap_that_survives_is_not_reported(two_masses):
     result always means something was actually lost."""
     result = effects.add_outline(two_masses(8), INK, thickness=1)
     assert "gaps_closed" not in result, result
+
+
+# --- an outline of nothing is refused, not reported as success ---------------------------
+
+
+@pytest.mark.parametrize("where", ["outside", "inside"])
+def test_an_outline_on_a_layer_with_no_art_is_refused(where):
+    """Pointed at an empty layer, the outline used to return `ok` with no `pixels_written`
+    at all, which a caller cannot tell apart from success. That is how a figure in this
+    repository shipped with no keyline: the outline was aimed at a freshly created layer
+    in the hope of drawing the keyline onto it, and the build reported it drawn.
+
+    `pixels_written` being absent rather than zero mattered too. The module's own advice
+    is to compare that count against what was asked for instead of trusting `ok`, and on
+    the empty path there was no count to compare.
+    """
+    from aseprite_mcp.core.runner import LuaToolError
+    from aseprite_mcp.tools import layers
+
+    name = f"ow/empty_{where}.aseprite"
+    sprite.create_sprite(name, 24, 24, overwrite=True)
+    drawing.draw_rectangle(name, 6, 6, 10, 10, FILL, filled=True)
+    layers.add_layer(name, "keyline")
+    with pytest.raises(LuaToolError, match="layer 'keyline' has no drawn pixels on frame 1"):
+        effects.add_outline(name, INK, thickness=1, where=where, layer="keyline")
+    # Nothing was written to the empty layer, and the art layer is untouched by the attempt.
+    assert inspect.get_sprite_info(name)["layers"][-1]["name"] == "keyline"
+
+
+def test_the_refusal_leaves_an_outline_of_real_art_exactly_as_it_was():
+    """The check runs before the first pass and changes nothing about a layer that has art:
+    the same call on the art layer writes the same pixels it always did."""
+    name = "ow/real_art.aseprite"
+    sprite.create_sprite(name, 24, 24, overwrite=True)
+    drawing.draw_rectangle(name, 6, 6, 10, 10, FILL, filled=True)
+    result = effects.add_outline(name, INK, thickness=1)
+    # A 10x10 square's 8-connected one pixel ring is 12 * 12 - 10 * 10 pixels.
+    assert result["pixels_written"] == 12 * 12 - 10 * 10

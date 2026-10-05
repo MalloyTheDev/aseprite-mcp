@@ -160,6 +160,11 @@ def add_outline(
 ) -> dict:
     """Add a pixel outline around the artwork on a layer, optionally weighted by light.
 
+    The outline is drawn around the art **already on the layer given, onto that same
+    layer**. It does not outline other layers, so it cannot draw a keyline onto a fresh
+    empty layer of its own; a layer with no drawn pixels on the frame is refused rather
+    than reported as an outline that drew nothing.
+
     Args:
         color: Outline colour.
         thickness: Outline width in pixels (default 1). With `light_angle`, this is the
@@ -277,6 +282,29 @@ def add_outline(
       return n
     end
     local W, H = img.width, img.height
+
+    -- Nothing to outline is refused rather than reported as success. Pointed at a layer
+    -- with no art, every pass found no seed, wrote nothing and returned ok with no
+    -- pixels_written at all, so a caller following this module's own advice (compare
+    -- pixels_written, do not trust ok) had nothing to compare. A figure shipped from this
+    -- repository with no keyline that way: the outline was aimed at a freshly created,
+    -- empty layer in the hope of drawing the keyline onto it, and the build reported it
+    -- drawn.
+    local any_art = false
+    for yy = 0, H - 1 do
+      for xx = 0, W - 1 do
+        if img_solid(spr, img, xx, yy) then any_art = true; break end
+      end
+      if any_art then break end
+    end
+    if not any_art then
+      error("layer '" .. tostring(ARG.layer or "(active)") .. "' has no drawn pixels on "
+        .. "frame " .. tostring(ARG.frame or 1) .. ", so there is nothing to outline. "
+        .. "add_outline draws around the art already on the layer it is given, onto that "
+        .. "same layer; it does not outline other layers. Point it at the layer that "
+        .. "holds the art.", 0)
+    end
+
     local done = {}
     local function key(x, y) return y * W + x end
 

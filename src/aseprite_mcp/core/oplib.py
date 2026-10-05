@@ -13,7 +13,12 @@ layer, or a frame past the end, which `FRAME_GUARD_LUA` rejects inside Aseprite)
 from __future__ import annotations
 
 from .errors import ValidationFailed
-from .limits import MAX_BATCH_OPERATIONS, MAX_PIXEL_LIST_LENGTH, check_list_length
+from .limits import (
+    MAX_BATCH_OPERATIONS,
+    MAX_PIXEL_LIST_LENGTH,
+    check_list_length,
+    tag_repeat_count,
+)
 from .models import FRAME_GUARD_LUA, ColorSpec, FrameRef
 
 # Arg kinds. `frame` is an int that must name an existing 1-based frame: the lower bound
@@ -52,7 +57,8 @@ OP_SPECS: dict[str, dict] = {
     "delete_cel": {"layer": (_STR, True), "frame": (_FRAME, True)},
     # tags
     "add_tag": {"name": (_STR, True), "from": (_FRAME, True), "to": (_FRAME, True),
-                "direction": (_STR, False), "color": (_COLOR, False)},
+                "direction": (_STR, False), "color": (_COLOR, False),
+                "repeats": (_INT, False)},
     "remove_tag": {"name": (_STR, True)},
     # drawing
     "set_pixel": {**_DRAW_TARGET, "x": (_INT, True), "y": (_INT, True), "color": (_COLOR, True)},
@@ -134,6 +140,22 @@ def _canonical_args(index: int, name: str, args: dict) -> dict:
     return out
 
 
+# Checks an op needs beyond its argument types, run after the generic coercion. Kept as a
+# table so the shared loop below does not grow a branch for every op with one extra rule.
+#
+# `add_tag` is here because `repeats` has a meaning the type cannot express: Aseprite
+# stores a negative count as 0, which is "play forever", the opposite of what anyone
+# typing a negative number wants. The tool already refused it; the op could not take
+# `repeats` at all, so a one-shot tag was impossible inside a batch.
+def _check_add_tag(norm: dict) -> dict:
+    if "repeats" in norm:
+        norm["repeats"] = tag_repeat_count(norm["repeats"])
+    return norm
+
+
+_POST_CHECKS = {"add_tag": _check_add_tag}
+
+
 def validate_operations(operations) -> list[dict]:
     """Validate + normalize a list of operations. Raises ValidationFailed (with the
     offending op index) on shape errors. Colours are parsed to dicts; ints coerced."""
@@ -201,6 +223,12 @@ def validate_operations(operations) -> list[dict]:
                 raise ValidationFailed(f"op {i} ({name}): {exc}") from exc
             except (ValueError, TypeError) as exc:
                 raise ValidationFailed(f"op {i} ({name}): bad value for '{arg}': {exc}") from exc
+        check = _POST_CHECKS.get(name)
+        if check is not None:
+            try:
+                norm = check(norm)
+            except ValidationFailed as exc:
+                raise ValidationFailed(f"op {i} ({name}): {exc}") from exc
         normalized.append({"op": name, "args": norm})
     return normalized
 
@@ -241,6 +269,13 @@ BATCH_LUA_BODY = FRAME_GUARD_LUA + r"""
 local spr = open_sprite(ARG.src)
 local applied = {}
 
+-- How a frame-adding op's summary ends: empty when the new frame is the last one, and
+-- otherwise the renumber it caused, which a caller holding frame numbers needs (#222).
+local function moved_after(fr)
+  if fr.frameNumber >= #spr.frames then return "" end
+  return "; the old frames " .. fr.frameNumber .. " and later moved up by one"
+end
+
 local function run_op(op)
   local a = op.args
   local name = op.op
@@ -272,14 +307,21 @@ local function run_op(op)
     return "removed layer '" .. tostring(a.layer) .. "'"
   -- frames
   elseif name == "add_frame" then
-    local fr
-    if a.copy_from ~= nil then fr = spr:newFrame(require_frame(spr, a.copy_from, "copy_from"))
+    -- The same placement, duration and report as the tool (#222): a batch and a direct
+    -- call must not disagree about where a frame landed or which frame took the duration.
+    local fr, src
+    if a.copy_from ~= nil then
+      src = require_frame(spr, a.copy_from, "copy_from")
+      fr = copy_frame_after(spr, src)
     else fr = spr:newEmptyFrame(#spr.frames + 1) end
     if a.duration_ms ~= nil then fr.duration = a.duration_ms / 1000.0 end
-    return "added frame " .. fr.frameNumber
+    local said = "added frame " .. fr.frameNumber
+    if src ~= nil then said = said .. ", a copy of frame " .. src end
+    return said .. moved_after(fr)
   elseif name == "duplicate_frame" then
-    local fr = spr:newFrame(require_frame(spr, a.frame, "frame"))
-    return "duplicated frame -> " .. fr.frameNumber
+    local src = require_frame(spr, a.frame, "frame")
+    local fr = copy_frame_after(spr, src)
+    return "duplicated frame " .. src .. " as frame " .. fr.frameNumber .. moved_after(fr)
   elseif name == "set_frame_duration" then
     local n = require_frame(spr, a.frame, "frame")
     spr.frames[n].duration = a.duration_ms / 1000.0
@@ -342,6 +384,7 @@ local function run_op(op)
     local t = spr:newTag(f1, f2); t.name = a.name
     if a.direction ~= nil then t.aniDir = anidir_from(a.direction) end
     if a.color ~= nil then t.color = mkcolor(a.color) end
+    if a.repeats ~= nil then t.repeats = a.repeats end
     return "added tag '" .. a.name .. "' on frames " .. f1 .. "-" .. f2
   elseif name == "remove_tag" then
     local found = nil

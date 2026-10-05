@@ -39,19 +39,25 @@ def add_frame(
     duration_ms: int = 100,
     copy_from: int | None = None,
 ) -> dict:
-    """Add a frame: appended when it is empty, inserted when it copies another.
+    """Add a frame: an empty one goes at the end, a copy goes right after the frame it copies.
 
     Args:
-        duration_ms: Frame duration in milliseconds (default 100).
-        copy_from: If given (1-based), duplicate the content of that frame; otherwise the
-            new frame is empty and goes at the end. Must name an existing frame: an
-            out-of-range number is rejected, not clamped. **A copy is inserted, not
-            appended**, so every frame from that point on is renumbered: on a two-frame
-            sprite, `copy_from=1` gives three frames whose second is the original first.
-            Pass no `copy_from` and the sprite's existing frames keep their numbers.
+        duration_ms: The new frame's duration in milliseconds (default 100). With
+            `copy_from` it is set on the copy; the frame copied keeps its own.
+        copy_from: If given (1-based), the new frame duplicates that frame and is
+            **inserted directly after it**, so every later frame is renumbered: on a red,
+            blue sprite, `copy_from=1` gives red, red, blue, the copy being frame 2 and
+            blue moving from 2 to 3. Copying the last frame moves nothing. Tags follow
+            their frames: one that covered the copied frame grows by one to take in the
+            copy, and one after it moves up by one. Must name an existing frame: an
+            out-of-range number is rejected, not clamped. Without `copy_from` the new
+            frame is empty, goes at the end, and nothing moves.
 
-    Returns the new frame number and updated frame count. With `copy_from`, `newFrame` is
-    where the copy landed, which is also the number the frames after it shifted from.
+    Returns `newFrame`, the number of the frame this call added (with `copy_from`, always
+    `copy_from + 1`), and the new `frameCount`. `inserted` says whether existing frames
+    were renumbered; when they were, `renumbered_from` is the first number affected: every
+    frame that had that number or a higher one before the call is one higher after it, so
+    a caller holding frame numbers from before the call adds one to each of those.
     """
     args = {
         "src": lua_path(resolve_path(filename)),
@@ -60,32 +66,46 @@ def add_frame(
     }
     body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
-    local fr
+    local fr, renumbered_from
     if ARG.copy_from ~= nil then
-      fr = spr:newFrame(require_frame(spr, ARG.copy_from, "copy_from"))
+      local src = require_frame(spr, ARG.copy_from, "copy_from")
+      -- The copy goes in right after `src`, so every frame after it moves up by one, and
+      -- the result says so rather than leaving a caller holding stale numbers (#222).
+      -- Copying the last frame has nothing after it to move.
+      if src < #spr.frames then renumbered_from = src + 1 end
+      fr = copy_frame_after(spr, src)
     else
       fr = spr:newEmptyFrame(#spr.frames + 1)
     end
     fr.duration = ARG.duration_ms / 1000.0
     save_sprite(spr)
-    RESULT = { ok = true, newFrame = fr.frameNumber, frameCount = #spr.frames }
+    RESULT = { ok = true, newFrame = fr.frameNumber, frameCount = #spr.frames,
+               inserted = (renumbered_from ~= nil), renumbered_from = renumbered_from }
     """
     return run_lua(body, args)
 
 
 @mcp.tool()
 def duplicate_frame(filename: str, frame: int) -> dict:
-    """Duplicate an existing frame (1-based); the copy is inserted after it.
+    """Duplicate an existing frame (1-based); the copy is inserted directly after it.
 
     `frame` must already exist: an out-of-range number is rejected with the sprite's
     valid range rather than clamped to it.
+
+    Returns `newFrame`, the copy's number (always `frame + 1`), and the new `frameCount`,
+    plus `inserted` and `renumbered_from` exactly as `add_frame` reports them: every frame
+    after the one duplicated moves up by one, and a tag that covered it grows to take in
+    the copy.
     """
     args = {"src": lua_path(resolve_path(filename)), "frame": FrameRef.arg("frame", frame)}
     body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
-    local fr = spr:newFrame(require_frame(spr, ARG.frame, "frame"))
+    local src = require_frame(spr, ARG.frame, "frame")
+    local renumbered_from = (src < #spr.frames) and (src + 1) or nil
+    local fr = copy_frame_after(spr, src)
     save_sprite(spr)
-    RESULT = { ok = true, newFrame = fr.frameNumber, frameCount = #spr.frames }
+    RESULT = { ok = true, newFrame = fr.frameNumber, frameCount = #spr.frames,
+               inserted = (renumbered_from ~= nil), renumbered_from = renumbered_from }
     """
     return run_lua(body, args)
 

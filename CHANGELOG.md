@@ -6,6 +6,55 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **`add_frame(copy_from=N)` and `duplicate_frame(N)` named the original as the new
+  frame, and `add_frame` gave it the duration meant for the copy** (#222). Both returned
+  `newFrame: N`. Aseprite's `spr:newFrame(n)` inserts the copy at n + 1 and returns frame
+  n, and the two frames are pixel-identical, so every check that read colours back
+  passed, including the issue's own measurement. A linked cel tells them apart: with
+  frame 2 linked to frame 4, copying frame 2 leaves frame 2 still linked and frame 3 not,
+  and drawing on the reported `newFrame` changed the linked frame too. Four
+  `add_frame(500, copy_from=1)` calls on a 100ms frame left durations 500, 500, 500, 500,
+  100.
+
+  `newFrame` is now the copy (`copy_from + 1`), the duration goes on it, and the result
+  says when frames moved: `inserted`, and `renumbered_from`, the first old number now one
+  higher. Copying the last frame moves nothing and says so. The batch ops report the same
+  facts, through one shared Lua helper. Tags follow their frames, and one that covered the
+  copied frame grows to take in the copy. Where a copy lands did not change, so no
+  template's output moves; making a copy append, the issue's other option, is a behaviour
+  change of its own and was not taken. `scaffold_cycle`'s warning, which said its copies
+  go in "at frame 1", now names where the drawn frames ended up.
+
+- **The batch `add_tag` op could not set `repeats`**, so a one-shot tag could not be made
+  inside a batch at all while a direct call made one fine (#223). The tool's validator
+  moved into `core/limits.py` as `tag_repeat_count`, so the op refuses exactly what the
+  tool refuses, with the same sentence; that matters because Aseprite stores a negative
+  count as 0, "play forever", the opposite of the one-shot asked for. `scaffold_cycle`
+  now writes its frames and every tag in one batch: five Aseprite launches for any frame
+  count, down from fourteen (about 3.4s) for an 8-frame walk.
+
+- **`smear_frame`'s trail reading blamed the palette for a ramp clamp** (#226). On a
+  shaded sphere with the whole eleven-step ramp on its palette, a stretch smear collided
+  at shifts 5 through 10, and the reading said the palette held 10 of the 10 colours and,
+  in the same breath, that it did not; every remedy it offered was unusable. The cause:
+  `ramp_headroom` measures only the subject's lightest colour, while its darker pixels
+  sit nearer the bottom of the ramp and clamp there first. Each collision group is now
+  classified on its own, one wanted colour being a clamp and several a short palette, and
+  each gets its own sentence and remedy. The palette sentence is byte-identical to before.
+  The smear showcase's "crushed palette" case turned out never to have exercised the
+  palette path at all: measured, its collisions are all clamps.
+
+- **`add_outline` on a layer with nothing drawn on it reported success.** It found no
+  seed, wrote nothing, and returned ok with no `pixels_written` at all, so neither
+  checking `ok` nor comparing the count caught it. That is how a figure built in this
+  repository shipped with no keyline: the outline was aimed at a freshly created, empty
+  layer, and the tool outlines the art already on the layer it is given, onto that same
+  layer. It now refuses, naming the layer and frame and saying what to point it at, as
+  `link_cels` already refuses a frame with no cel. Nothing with art changes: the six
+  showcase generators that call it reproduce all nine of their images byte for byte.
+
 ### Added
 
 - **`validate_asset_against_spec`: whether the sprite that got built matches the spec it

@@ -183,18 +183,22 @@ def main():
     stretch_warning = " ".join(str(w) for w in stretched.get("warnings", []))
     assert "same colour" in stretch_warning, (
         f"the stretch trail no longer reports its clamp: {stretch_warning}")
-    # Asserted on the numbers rather than on the sentence, because the sentence is wrong
-    # here and is filed as #226: it blames the palette and suggests adding colours, while
-    # `declared == resolved == exact` says the palette holds every target exactly. The
-    # colliding targets are all the ramp's darkest entry, identical before the palette is
-    # ever consulted. When that issue is fixed the prose will change and these numbers
-    # will not, which is the point of asserting them.
+    # The diagnosis has to be the clamp, not the palette. Until #226 the sentence blamed
+    # the palette and suggested adding colours, while `declared == resolved == exact` said
+    # the palette held every target exactly: the colliding targets are all the ramp's
+    # darkest entry, identical before the palette is ever consulted. Both are asserted, the
+    # numbers because they are the evidence and the prose because it is what a caller acts
+    # on, and the prose was the part that was wrong.
+    assert "add_palette_color" not in stretch_warning, (
+        f"the clamp is being blamed on the palette again (#226): {stretch_warning}")
+    assert "mode='echo'" in stretch_warning, (
+        "a stretch cannot be shortened, so the only usable remedy is echo with steps")
     reading = stretched["trail_on_palette"]
     assert reading["exact"] == reading["declared"] == reading["resolved"], reading
     # `steps` describes the *ramp* against the palette, every entry distinct and exact,
     # which is the proof that the palette is not the problem. The collision the warning
     # reports is computed per subject colour through the shift table and is not in here,
-    # which is itself part of why the message can disagree with the numbers.
+    # which is why the message once could disagree with the numbers.
     assert all(s["exact"] for s in reading["steps"]), reading["steps"]
     stretch_path = panel(f"{out}_stretch.png", 2)
 
@@ -278,16 +282,27 @@ def verify(ramp_colors, palette_colors, stretched, echoed):
     assert warnings, (
         "a four-entry palette cannot hold an eleven-step trail, and the tool said nothing: "
         "that is exactly the gap #173 was about")
-    # The discriminator, and the whole reason this piece asserts numbers rather than
-    # sentences: when the *palette* is short, fewer targets resolve exactly than were
-    # declared. When only the ramp clamped, every one is exact. The prose is the same
-    # either way today, which is #226.
+    # The palette is genuinely short here, and the numbers say so: fewer targets resolve
+    # exactly than were declared. But measured, that shortness merges no copy of any one
+    # subject colour. #62758f and #4f617d both land on palette entry 3, and they are wanted
+    # by *different* subject colours, so neither trail bands because of it. The copies
+    # that do merge are clamps: every collision group in this scene wants the ramp's
+    # darkest entry, #1b2b4a, under the sphere's darker pixels.
+    #
+    # So the reading here is the clamp sentence, which is correct, and the palette sentence
+    # never fires in this piece. Before #226 it fired anyway, blaming the palette for those
+    # clamps. A palette that genuinely merges one subject colour's copies needs a flat
+    # subject (the #173 measurement used a disc drawn in a single ramp step), which is
+    # covered in tests/test_indexed_smear.py rather than here.
     short = collided["trail_on_palette"]
     assert short["exact"] < short["declared"], (
         f"a crushed palette is supposed to hold fewer of the trail's colours than the "
         f"ramp declares: {short}")
+    assert "same colour" in warnings and "add_palette_color" not in warnings, (
+        f"this scene's trail collisions are all clamps, so the clamp sentence is the "
+        f"right diagnosis and the palette one is not: {warnings}")
     print("verified: trail between the positions, on the ramp, behind the subject, "
-          "and the indexed reading fires when the palette cannot hold it")
+          "and the indexed reading names the clamp rather than blaming the palette")
 
 
 if __name__ == "__main__":

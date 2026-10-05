@@ -207,3 +207,97 @@ def test_the_reading_does_not_replace_the_headroom_warning(request):
     joined = " ".join(result["warnings"])
     assert "only 2 step(s) exist below it" in joined, "the headroom finding, about the art"
     assert "come out the same colour" in joined, "the palette finding, about the palette"
+
+
+# --- issue #226: a clamp is not a short palette, and must not be blamed on one ----------
+
+# The #226 measurement: a shaded sphere with the whole eleven-step ramp on its palette, a
+# stretch smear, and every palette entry exact. Shifts 5 through 10 collided anyway, all
+# wanting the ramp's darkest entry, because the subject's darker pixels clamp at the
+# bottom of the ramp before the palette is ever consulted.
+_CLAMP_STATE = {"declared": 10, "resolved": 10, "exact": 10, "steps": []}
+_CLAMP = [{"px": 7, "index": 2, "shifts": [5, 6, 7, 8, 9, 10], "wants": ["#1b2b4a"] * 6}]
+# The #173 measurement: a palette genuinely short, so different colours share an entry.
+_SHORT_STATE = {"declared": 3, "resolved": 2, "exact": 1, "steps": []}
+_SHORT = [{"px": 3, "index": 1, "shifts": [3, 4], "wants": ["#6b2d4a", "#2c1b2e"]}]
+
+
+@pytest.mark.pure
+def test_the_two_fixtures_are_told_apart_by_the_structured_field_not_the_prose():
+    """The criterion the issue sets for these tests: which case a fixture is, read off
+    `trail_on_palette` rather than off the sentence, so the test cannot pass by agreeing
+    with whatever the code happens to write."""
+    assert _CLAMP_STATE["exact"] == _CLAMP_STATE["declared"], "clamp: palette is complete"
+    assert _SHORT_STATE["exact"] < _SHORT_STATE["declared"], "short: palette is not"
+
+
+@pytest.mark.pure
+def test_a_clamp_does_not_blame_the_palette_and_names_the_mode_that_avoids_it():
+    notes = indexed.shift_table_readings(_CLAMP_STATE, _CLAMP, mode="stretch")
+
+    assert len(notes) == 1
+    assert "add_palette_color" not in notes[0], "no palette edit can help a clamp"
+    assert "set_palette" not in notes[0]
+    assert "palette does not hold" not in notes[0], (
+        "that is the claim the old sentence made while saying the palette held 10 of 10")
+    assert "mode='echo'" in notes[0] and "steps" in notes[0]
+    assert "#1b2b4a" in notes[0], "the colour the copies collapse onto is the evidence"
+
+
+@pytest.mark.pure
+def test_the_clamp_remedy_matches_the_mode():
+    """"Fewer steps" does not exist on stretch, whose step count is the ramp's length, so
+    offering it there was advice nobody could take. On echo it is exactly right."""
+    stretch = indexed.shift_table_readings(_CLAMP_STATE, _CLAMP, mode="stretch")[0]
+    echo = indexed.shift_table_readings(_CLAMP_STATE, _CLAMP, mode="echo")[0]
+    assert "fewer steps" not in stretch.lower()
+    assert "fewer steps" in echo.lower()
+
+
+@pytest.mark.pure
+def test_a_short_palette_keeps_its_existing_message():
+    """Unchanged, because it is correct for this case and the showcase depends on it."""
+    notes = indexed.shift_table_readings(_SHORT_STATE, _SHORT, mode="stretch")
+    assert len(notes) == 1
+    assert "2 of the 3 colours this trail asks for" in notes[0]
+    assert "add_palette_color" in notes[0], "here the palette really is the cause"
+
+
+@pytest.mark.pure
+def test_one_smear_can_have_both_causes_and_gets_both_sentences():
+    """Why the cause is decided per collision group rather than from `exact == declared`
+    over the whole trail: a short palette under one subject colour and a clamp under
+    another is one smear, and a single global verdict would misdescribe half of it."""
+    state = {"declared": 4, "resolved": 3, "exact": 2, "steps": []}
+    notes = indexed.shift_table_readings(state, _SHORT + _CLAMP, mode="echo")
+    assert len(notes) == 2
+    assert any("add_palette_color" in n for n in notes)
+    assert any("clamp at the bottom of the ramp" in n for n in notes)
+
+
+@pytest.mark.pure
+def test_the_clamp_is_not_reported_twice_when_headroom_already_said_so():
+    notes = indexed.shift_table_readings(
+        _CLAMP_STATE, _CLAMP, mode="stretch", headroom_warned=True)
+    assert notes == []
+
+
+@pytest.mark.pure
+def test_a_clamp_across_several_subject_colours_names_the_colour_once():
+    """The shape a real shaded subject produces, which the first version of this sentence
+    got wrong. One collision group per subject colour, and every one of them collapses
+    onto the ramp's darkest entry, so listing them group by group read as the same clause
+    over and over ("shifts 5-10 as #1b2b4a; shifts 6-10 as #1b2b4a; ...") and called one
+    colour "those colours". Measured off the smear showcase's sphere; a fixture with a
+    different clamp colour per group, which a real ramp never produces, hid it.
+    """
+    groups = [{"px": px, "index": 2, "shifts": list(range(first, 11)),
+               "wants": ["#1b2b4a"] * (11 - first)}
+              for px, first in ((3, 5), (4, 6), (5, 7), (6, 8), (7, 9))]
+    notes = indexed.shift_table_readings(_CLAMP_STATE, groups, mode="stretch")
+
+    assert len(notes) == 1
+    assert notes[0].count("#1b2b4a") == 1, notes[0]
+    assert "shifts 5, 6, 7, 8, 9 and 10" in notes[0]
+    assert "same colour" in notes[0], "the showcase asserts the clamp is reported"
+    assert "those colours" not in notes[0]

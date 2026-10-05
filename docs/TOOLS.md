@@ -551,19 +551,25 @@ Update one or more layer properties. Only the arguments you pass are changed.
 
 ### `add_frame`
 
-Add a frame: appended when it is empty, inserted when it copies another.
+Add a frame: an empty one goes at the end, a copy goes right after the frame it copies.
 
 Args:
-    duration_ms: Frame duration in milliseconds (default 100).
-    copy_from: If given (1-based), duplicate the content of that frame; otherwise the
-        new frame is empty and goes at the end. Must name an existing frame: an
-        out-of-range number is rejected, not clamped. **A copy is inserted, not
-        appended**, so every frame from that point on is renumbered: on a two-frame
-        sprite, `copy_from=1` gives three frames whose second is the original first.
-        Pass no `copy_from` and the sprite's existing frames keep their numbers.
+    duration_ms: The new frame's duration in milliseconds (default 100). With
+        `copy_from` it is set on the copy; the frame copied keeps its own.
+    copy_from: If given (1-based), the new frame duplicates that frame and is
+        **inserted directly after it**, so every later frame is renumbered: on a red,
+        blue sprite, `copy_from=1` gives red, red, blue, the copy being frame 2 and
+        blue moving from 2 to 3. Copying the last frame moves nothing. Tags follow
+        their frames: one that covered the copied frame grows by one to take in the
+        copy, and one after it moves up by one. Must name an existing frame: an
+        out-of-range number is rejected, not clamped. Without `copy_from` the new
+        frame is empty, goes at the end, and nothing moves.
 
-Returns the new frame number and updated frame count. With `copy_from`, `newFrame` is
-where the copy landed, which is also the number the frames after it shifted from.
+Returns `newFrame`, the number of the frame this call added (with `copy_from`, always
+`copy_from + 1`), and the new `frameCount`. `inserted` says whether existing frames
+were renumbered; when they were, `renumbered_from` is the first number affected: every
+frame that had that number or a higher one before the call is one higher after it, so
+a caller holding frame numbers from before the call adds one to each of those.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -574,10 +580,15 @@ where the copy landed, which is also the number the frames after it shifted from
 
 ### `duplicate_frame`
 
-Duplicate an existing frame (1-based); the copy is inserted after it.
+Duplicate an existing frame (1-based); the copy is inserted directly after it.
 
 `frame` must already exist: an out-of-range number is rejected with the sprite's
 valid range rather than clamped to it.
+
+Returns `newFrame`, the copy's number (always `frame + 1`), and the new `frameCount`,
+plus `inserted` and `renumbered_from` exactly as `add_frame` reports them: every frame
+after the one duplicated moves up by one, and a tag that covered it grows to take in
+the copy.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2509,6 +2520,11 @@ Args:
 ### `add_outline`
 
 Add a pixel outline around the artwork on a layer, optionally weighted by light.
+
+The outline is drawn around the art **already on the layer given, onto that same
+layer**. It does not outline other layers, so it cannot draw a keyline onto a fresh
+empty layer of its own; a layer with no drawn pixels on the frame is refused rather
+than reported as an outline that drew nothing.
 
 Args:
     color: Outline colour.
@@ -4484,7 +4500,7 @@ Operations and their arguments ('?' marks an optional argument):
   add_frame(duration_ms=int?, copy_from=frame?)
   add_layer(name=str, group=str?, opacity=int?, blend_mode=str?, visible=bool?)
   add_slice(name=str, x=int, y=int, width=int, height=int, color=color?)
-  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?)  [also accepts from_frame for from, to_frame for to]
+  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?, repeats=int?)  [also accepts from_frame for from, to_frame for to]
   clear_layer(layer=str?, frame=frame?)
   copy_cel(layer=str, from=frame, to=frame, to_layer=str?)  [also accepts from_frame for from, to_frame for to]
   delete_cel(layer=str, frame=frame)

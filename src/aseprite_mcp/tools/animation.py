@@ -1482,6 +1482,7 @@ def smear_frame(
         "targets": None,
         "centre_x": None, "centre_y": None, "perp_x": None, "perp_y": None,
     }
+    headroom_warned = False
     if ramp_rgb is None:
         warnings.append(
             "no ramp was given, so the trail is the subject's own colours at reduced "
@@ -1493,6 +1494,7 @@ def smear_frame(
         deepest = max(p["shift"] for p in plots)
         headroom = inbetween.ramp_headroom(measured["colors"], ramp_rgb)
         if deepest > headroom:
+            headroom_warned = True
             warnings.append(
                 f"the subject's lightest colour is step {headroom + 1} of "
                 f"{len(ramp_rgb)} on this ramp, so only {headroom} step(s) exist below it "
@@ -1527,6 +1529,10 @@ def smear_frame(
                 args["lut"] or {},
                 [step.get("index") for step in trail_state.get("steps") or []],
             ),
+            # The mode decides which remedy is usable for a clamp (#226), and the headroom
+            # flag stops the same collapse being reported twice.
+            mode=mode,
+            headroom_warned=headroom_warned,
         ))
 
     return carry_harness_keys({
