@@ -12,6 +12,7 @@ from ..core.errors import ValidationFailed
 from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
+from .image import check_image_dimensions
 
 
 @mcp.tool()
@@ -38,9 +39,13 @@ def add_reference_layer(
 
     Exclude this layer from exports with ignore_layer="<layer_name>".
     """
+    image_path = resolve_path(image_file)
+    # A reference is opened in full like any stamped image, so it gets the same
+    # decompression-bomb guard before Aseprite is launched.
+    check_image_dimensions(str(image_path))
     args = {
         "src": lua_path(resolve_path(filename)),
-        "image": lua_path(resolve_path(image_file)),
+        "image": lua_path(image_path),
         "layer_name": layer_name,
         "opacity": max(0, min(255, int(opacity))),
         "scale_to_fit": bool(scale_to_fit),
@@ -87,7 +92,12 @@ def import_reference_sequence(
     """
     if not images:
         raise ValidationFailed("images must be a non-empty list.")
-    paths = [lua_path(resolve_path(p)) for p in images]
+    resolved = [resolve_path(p) for p in images]
+    # Every image in the sequence is opened in full, so each gets the guard, and all of
+    # them before the launch: a bomb at position 40 must not cost 39 opens first.
+    for path in resolved:
+        check_image_dimensions(str(path))
+    paths = [lua_path(p) for p in resolved]
     args = {
         "src": lua_path(resolve_path(filename)),
         "images": paths,

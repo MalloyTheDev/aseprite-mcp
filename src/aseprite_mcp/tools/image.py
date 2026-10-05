@@ -1,4 +1,5 @@
-"""Stamp external images onto a sprite, from a file path or inline base64 PNG."""
+"""Bring outside images in: stamp one onto a sprite, from a file path or inline base64 PNG,
+or slice a sprite sheet into frames."""
 
 from __future__ import annotations
 
@@ -14,9 +15,12 @@ from ..core.limits import (
     MAX_CANVAS_DIMENSION,
     MAX_CANVAS_PIXELS,
     MAX_IMAGE_BYTES,
+    MAX_SHEET_FRAMES,
+    check_count,
     check_size_bytes,
 )
 from ..core.models import FRAME_GUARD_LUA
+from ..core.paths import discard_selection_sidecar, ensure_output_path
 from ..core.runner import run_lua
 from .common import lua_path, resolve_path
 
@@ -82,12 +86,12 @@ def check_image_dimensions(path: str) -> tuple[int, int] | None:
     if width > MAX_CANVAS_DIMENSION or height > MAX_CANVAS_DIMENSION:
         raise ValidationFailed(
             f"Source image is {width}x{height}; maximum is {MAX_CANVAS_DIMENSION}px "
-            "per axis. Resize it before stamping."
+            "per axis. Resize it before bringing it in."
         )
     if width * height > MAX_CANVAS_PIXELS:
         raise ValidationFailed(
             f"Source image is {width}x{height} ({width * height} pixels); maximum is "
-            f"{MAX_CANVAS_PIXELS}. Resize it before stamping."
+            f"{MAX_CANVAS_PIXELS}. Resize it before bringing it in."
         )
     return width, height
 
@@ -191,3 +195,174 @@ def draw_image_base64(
     finally:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
+
+
+# ---------------------------------------------------------------- sprite sheets (#93)
+SHEET_LAYOUTS = ("horizontal", "vertical", "grid")
+
+
+def _divisors(n: int) -> str:
+    """The sizes that divide `n` exactly, for a refusal to offer. The first twelve are
+    plenty to choose from."""
+    found = [d for d in range(1, n + 1) if n % d == 0]
+    return ", ".join(str(d) for d in found[:12]) + (", ..." if len(found) > 12 else "")
+
+
+def sheet_cells(width: int, height: int, frame_width: int, frame_height: int,
+                layout: str) -> tuple[int, int]:
+    """The (columns, rows) a `width` x `height` sheet gives in cells of this size.
+
+    Raises ValidationFailed saying what to change when the cells do not fit the layout
+    exactly. Pure, so the refusal costs no launch and is tested without one.
+    """
+    if layout == "horizontal" and height != frame_height:
+        raise ValidationFailed(
+            f"layout 'horizontal' reads one row, so frame_height must be the sheet's "
+            f"height, {height}; got {frame_height}. For a sheet of several rows use "
+            f"layout='grid'."
+        )
+    if layout == "vertical" and width != frame_width:
+        raise ValidationFailed(
+            f"layout 'vertical' reads one column, so frame_width must be the sheet's "
+            f"width, {width}; got {frame_width}. For a sheet of several columns use "
+            f"layout='grid'."
+        )
+    for axis, size, cell in (("width", width, frame_width), ("height", height, frame_height)):
+        if size % cell:
+            raise ValidationFailed(
+                f"frame_{axis} {cell} does not divide the sheet's {axis} of {size} "
+                f"({size} / {cell} leaves {size % cell} pixels over), so the last cell "
+                f"would be partial, and a partial cell is refused rather than cropped or "
+                f"padded. Sizes that divide {size}: {_divisors(size)}."
+            )
+    columns, rows = width // frame_width, height // frame_height
+    if columns * rows > MAX_SHEET_FRAMES:
+        raise ValidationFailed(
+            f"a {width}x{height} sheet in {frame_width}x{frame_height} cells is "
+            f"{columns * rows} frames; maximum is {MAX_SHEET_FRAMES}. Check the cell size: "
+            f"a sheet with more cells than that is not an animation."
+        )
+    return columns, rows
+
+
+_SHEET_LUA = """
+local spr = app.open(ARG.source)
+if spr == nil then error("Could not open the sheet: " .. ARG.source, 0) end
+if #spr.frames > 1 then
+  error("the sheet has " .. #spr.frames .. " frames; import_spritesheet slices one flat " ..
+        "image into frames. Export one frame of it as a PNG first.", 0)
+end
+local fw, fh, W, H = ARG.frame_width, ARG.frame_height, spr.width, spr.height
+-- The backstop for sheets Pillow cannot read the header of (.aseprite, .ase), so that no
+-- route reaches a partial cell or an unbounded frame count. Python refuses the rest
+-- before launching, with the longer message.
+if (ARG.layout == "horizontal" and H ~= fh) or (ARG.layout == "vertical" and W ~= fw)
+   or W % fw ~= 0 or H % fh ~= 0 then
+  error(string.format("%dx%d cells do not divide this %dx%d sheet as layout '%s' reads " ..
+        "it, so a cell would be partial.", fw, fh, W, H, ARG.layout), 0)
+end
+if (W // fw) * (H // fh) > ARG.max_frames then
+  error(string.format("%dx%d cells make %d frames of this %dx%d sheet; maximum is %d.",
+        fw, fh, (W // fw) * (H // fh), W, H, ARG.max_frames), 0)
+end
+
+local opaque = false
+for _, lyr in ipairs(spr.layers) do
+  if lyr.isBackground then opaque = true end
+end
+local types = { horizontal = SpriteSheetType.HORIZONTAL, vertical = SpriteSheetType.VERTICAL,
+                grid = SpriteSheetType.ROWS }
+app.command.ImportSpriteSheet{ ui = false, type = types[ARG.layout],
+  frameBounds = Rectangle(0, 0, fw, fh), padding = Size(0, 0), partialTiles = false }
+
+if opaque then
+  -- The importer renders the cells onto a new, transparent layer, where the transparent
+  -- palette index means "no pixel". On an opaque indexed sheet that index is a real
+  -- colour, so whatever was drawn in it vanished: a whole frame of the test sheet.
+  -- Making the layer a Background again, with the fill set to that same index, rewrites
+  -- those pixels with the value they already hold, and a Background draws it opaque, as
+  -- the sheet did. Aseprite's default fill painted them with an entry the palette did
+  -- not have. An opaque RGB sheet has no such index and no transparent pixel to fill.
+  if spr.colorMode == ColorMode.INDEXED then
+    app.bgColor = Color{ index = spr.transparentColor }
+  end
+  app.activeLayer = spr.layers[1]
+  app.command.BackgroundFromLayer()
+end
+
+local layer = spr.layers[1]
+local empty = {}
+if not opaque then
+  for i = 1, #spr.frames do
+    local cel = layer:cel(i)
+    if cel == nil or cel.image:isEmpty() then empty[#empty + 1] = i end
+  end
+end
+spr:saveAs(ARG.dst)
+RESULT = sprite_info(spr)
+RESULT.layer = layer.name
+RESULT.empty_frames = empty
+"""
+
+
+@mcp.tool()
+def import_spritesheet(
+    filename: str,
+    source: str,
+    frame_width: int,
+    frame_height: int,
+    layout: str = "horizontal",
+    overwrite: bool = False,
+) -> dict:
+    """Turn a sprite sheet image into an animated sprite, one frame per cell.
+
+    The inbound seam for art made elsewhere, such as a PixelPrep strip, and the reverse of
+    `export_spritesheet`. Aseprite's own Import Sprite Sheet does the slicing.
+
+    Args:
+        filename: The .aseprite file to create.
+        source: The sheet: a PNG, or anything else Aseprite opens, in the workspace.
+        frame_width: One cell's width in pixels.
+        frame_height: One cell's height in pixels. Both must divide the sheet exactly in
+            the direction the layout reads it: a partial cell is refused, never cropped
+            or padded, and the refusal names the sizes that would divide.
+        layout: "horizontal" reads one row left to right, so frame_height must be the
+            sheet's height. "vertical" reads one column top to bottom, so frame_width
+            must be its width. "grid" reads rows left to right, top to bottom.
+        overwrite: Replace `filename` if it already exists (default False = no-clobber).
+
+    The sprite is one cell in size, with one layer holding every frame, in the sheet's
+    colour mode and palette. An opaque sheet keeps its Background layer, which on an
+    indexed sheet is what keeps the colour at the transparent palette index visible.
+    Frames are 100ms: time them with `set_all_frame_durations` or `apply_timing_curve`.
+    A cell with nothing in it still becomes a frame, and `empty_frames` lists them, so a
+    grid's spare cells are visible as such. A sheet with frames of its own, such as a
+    GIF, is refused rather than sliced from its first frame. At most 4,096 frames.
+
+    Returns the sprite's info, plus `layer` and `empty_frames`.
+    """
+    if layout not in SHEET_LAYOUTS:
+        raise ValidationFailed(
+            f"layout must be one of {', '.join(SHEET_LAYOUTS)}; got {layout!r}."
+        )
+    fw = check_count("frame_width", frame_width, MAX_CANVAS_DIMENSION, minimum=1)
+    fh = check_count("frame_height", frame_height, MAX_CANVAS_DIMENSION, minimum=1)
+    src = resolve_path(source)
+    if not src.is_file():
+        raise ValidationFailed(f"source '{source}' does not exist in the workspace.")
+    # The header check doubles as the decompression-bomb guard that the stamping tools
+    # run. None means Pillow cannot read this format (.aseprite), and the Lua backstop
+    # then makes the same refusals once the sheet is open.
+    size = check_image_dimensions(str(src))
+    if size is not None:
+        sheet_cells(size[0], size[1], fw, fh, layout)
+    dst = ensure_output_path(filename, overwrite=overwrite)
+    # It writes a sprite, so a selection left beside that path belongs to the file being
+    # replaced and must not outlive it (see `import_image`).
+    discard_selection_sidecar(dst)
+    info = run_lua(_SHEET_LUA, {
+        "source": lua_path(src), "dst": lua_path(dst), "layout": layout,
+        "frame_width": fw, "frame_height": fh, "max_frames": MAX_SHEET_FRAMES,
+    })
+    info["path"] = str(dst)
+    return info

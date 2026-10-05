@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **161 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **162 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -123,7 +123,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 161 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 162 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -738,7 +738,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 `selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
 section of their own, because the sections above each describe the *product* while these
 are a verdict on the *call*, and because every other result in this server reports them
-there: one rule reads them across all 161 tools. They are **absent rather than zero**, so a
+there: one rule reads them across all 162 tools. They are **absent rather than zero**, so a
 key that is present at all means there is something to read, and a tool that writes no
 pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
 them, which let a batch report `status: applied` for an op whose every pixel an active
@@ -1001,6 +1001,7 @@ entry.
 | `export_tags` | Export each animation tag's frames to separate files. |
 | `export_onion_skin` | Render a frame with neighbouring frames ghosted behind it. |
 | `import_image` | Build an editable `.aseprite` from a flat image. |
+| `import_spritesheet` | Slice a sprite sheet image into frames, one per cell: a strip, a column or a grid. |
 
 ### Minecraft resource packs
 | Tool | Description |
@@ -1127,7 +1128,7 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
   symlink that points outside it) are **rejected** unless you set
   `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
 - **No-clobber by default.** Every output-writing tool (`create_sprite`, `save_sprite_as`,
-  `import_image`, all `export_*`, `export_game_asset_bundle`) refuses to overwrite an
+  `import_image`, `import_spritesheet`, all `export_*`, `export_game_asset_bundle`) refuses to overwrite an
   existing file; pass `overwrite=True` to replace it on purpose. Multi-file exports
   validate every target up front, so they fail before writing anything if any target
   already exists. Pattern exports (`frames/walk_{frame}.png`) are expanded by Aseprite
