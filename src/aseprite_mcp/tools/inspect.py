@@ -163,20 +163,21 @@ def get_pixels(
     -- check that px_to_rgba does first: on an indexed sprite whose transparent index
     -- points at an opaque palette entry, every transparent pixel read back as that
     -- colour and the whole canvas counted as drawn.
-    local function px_hex(px)
-      local r, g, b, a = px_to_rgba(spr, px)
-      return string.format("#%02x%02x%02x%02x", r, g, b, a)
-    end
-    local img = Image(spr.spec)
-    img:clear()
+    local img
     if ARG.layer ~= nil then
-      -- One layer, not the composite. get_draw_image gives exactly the surface the
-      -- drawing tools write to, so what the caller reads back is what its next edit
-      -- will modify.
-      local lyr = find_layer(spr, ARG.layer)
-      img = get_draw_image(spr, lyr, framenum)
+      -- One layer, not the composite: the surface the drawing tools write to, so what the
+      -- caller reads back is what its next edit will modify.
+      img = readable_layer(spr, find_layer(spr, ARG.layer), framenum)
     else
-      img:drawSprite(spr, framenum)
+      img = readable_composite(spr, framenum)
+    end
+    -- Decoded in the image's own mode, which for an indexed sprite with a Background is
+    -- Aseprite's RGB render: its transparent index is a colour there, and reading it as
+    -- "no pixel" returned a whole background as #00000000.
+    local mode = img.colorMode
+    local function px_hex(px)
+      local r, g, b, a = px_to_rgba(spr, px, mode)
+      return string.format("#%02x%02x%02x%02x", r, g, b, a)
     end
     local rows = {}
     for yy = 0, h - 1 do
@@ -292,16 +293,18 @@ if spr.width * spr.height > ARG.max_pixels then
         ARG.max_pixels .. ". Assess a smaller sprite, or crop a copy of this one.", 0)
 end
 
-local function px_hex(px)
-  local r, g, b, a = px_to_rgba(spr, px)
-  return string.format("#%02x%02x%02x%02x", r, g, b, a)
-end
-
 local img
 if ARG.layer ~= nil then
-  img = get_draw_image(spr, find_layer(spr, ARG.layer), framenum)
+  img = readable_layer(spr, find_layer(spr, ARG.layer), framenum)
 else
-  img = Image(spr.spec); img:clear(); img:drawSprite(spr, framenum)
+  img = readable_composite(spr, framenum)
+end
+-- In the image's own mode: Aseprite's RGB render for an indexed sprite with a Background,
+-- whose transparent index would otherwise measure as empty canvas.
+local mode = img.colorMode
+local function px_hex(px)
+  local r, g, b, a = px_to_rgba(spr, px, mode)
+  return string.format("#%02x%02x%02x%02x", r, g, b, a)
 end
 
 local palette, seen, rows = {}, {}, {}
@@ -583,12 +586,9 @@ local function frame_image(spr, framenum, layer_ref)
     -- One layer, the same surface the drawing tools write to. The composite is not it:
     -- an edit that landed on the wrong layer is invisible in the composite of a sprite
     -- whose other layer happens to cover it.
-    return get_draw_image(spr, find_layer(spr, layer_ref), framenum)
+    return readable_layer(spr, find_layer(spr, layer_ref), framenum)
   end
-  local img = Image(spr.spec)
-  img:clear()
-  img:drawSprite(spr, framenum)
-  return img
+  return readable_composite(spr, framenum)
 end
 
 local a = load_sprite(ARG.a, "sprite")
@@ -621,11 +621,13 @@ end
 
 -- Which rows are worth looking at.
 local rows = {}
-if not (a.colorMode == b.colorMode and ia:isEqual(ib)) then
+-- The images' modes rather than the sprites': an indexed sprite with a Background is read
+-- as Aseprite's RGB render, so two indexed sprites can arrive in different modes.
+if not (ia.colorMode == ib.colorMode and ia:isEqual(ib)) then
   local sa, sb = ia.bytes, ib.bytes
   local per = a.width * a.height
   local narrowed = false
-  if a.colorMode == b.colorMode and #sa == #sb and per > 0 and #sa % per == 0 then
+  if ia.colorMode == ib.colorMode and #sa == #sb and per > 0 and #sa % per == 0 then
     local stride = math.floor(#sa / per) * a.width
     for y = 0, a.height - 1 do
       local off = y * stride
@@ -648,8 +650,8 @@ local was, now = {}, {}
 
 for _, y in ipairs(rows) do
   for x = 0, a.width - 1 do
-    local r1, g1, b1, a1 = px_to_rgba(a, ia:getPixel(x, y))
-    local r2, g2, b2, a2 = px_to_rgba(b, ib:getPixel(x, y))
+    local r1, g1, b1, a1 = px_to_rgba(a, ia:getPixel(x, y), ia.colorMode)
+    local r2, g2, b2, a2 = px_to_rgba(b, ib:getPixel(x, y), ib.colorMode)
     local same
     if a1 == 0 and a2 == 0 then
       -- Both absent. Whatever colour an invisible pixel carries underneath is not art,

@@ -429,7 +429,10 @@ def trim_sprite(filename: str) -> dict:
     local spr = open_sprite(ARG.src)
     local minx, miny, maxx, maxy
     for f = 1, #spr.frames do
-      local flat = Image(spr.spec); flat:clear(); flat:drawSprite(spr, f)
+      -- As Aseprite draws it, so an indexed Background is the opaque surface it is on
+      -- screen, the same as an RGB one, rather than a margin to crop wherever it happens
+      -- to be the transparent index's colour.
+      local flat = readable_composite(spr, f)
       -- Per frame and unioned, not over a single composite: a sprite whose frames hold
       -- art in different places has to keep all of it, so the crop is the box that
       -- covers every frame.

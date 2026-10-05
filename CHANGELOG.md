@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **An indexed sprite's Background was read as transparent wherever it held the
+  transparent palette index**, which Aseprite draws as a colour there. On an ordinary layer
+  that index means "no pixel", and every reader decoded it that way on a Background too.
+  `get_pixels` returned a whole dark background as `#00000000`; `assess_sprite` measured an
+  opaque scene as mostly empty canvas; `diff_sprites` saw a changed background pixel as an
+  added one; `extract_palette` left the background colour out; `trim_sprite` cropped margins
+  that happened to be that colour; and `list_palette_usage` reported the background's pixels
+  as transparent.
+
+  The visible failure was a refusal. An opaque PNG imports as a Background, and
+  palette-limiting it with `set_color_mode("indexed")` put its dark background on index 0:
+  the conversion guard counted those pixels as lost and refused with "would lose 60 of 64
+  drawn pixels", when nothing was lost, and the remedy it offered was already the default.
+  Bringing outside art in and limiting its palette, the PixelPrep route, could not be done.
+
+  Measured, and stranger than "index 0 is opaque": Aseprite draws an indexed Background
+  over its transparent index's colour, so a palette entry that is itself transparent shows
+  that colour there, and a half-transparent one blends with it (`#0000c8` at 50% over
+  `#0a141e` is `#050a73`). Rather than re-implement that, the readers now take Aseprite's own
+  RGB render in exactly that case, an indexed sprite with a visible Background, through two
+  prelude helpers, `readable_composite` and `readable_layer`; every other sprite is read
+  exactly as before. A Background read alone is rendered with the other layers hidden, in
+  memory, and they are put back. Every test is held to that render rather than to a colour
+  the test computes.
+
+  Writing has the same blind spot and is not fixed here: on a Background, a colour that is
+  the transparent index's still resolves to the nearest other entry, so
+  `fill_layer("#000000")` painted a black-at-index-0 Background red and reported `ok`.
+
 ### Added
 
 - **`import_spritesheet`: a sheet image becomes a sprite with one frame per cell** (#93).
