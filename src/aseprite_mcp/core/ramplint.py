@@ -445,11 +445,46 @@ def hue_shift_direction(ramp: list[str]) -> dict:
     }
 
 
+def black_floor(ramp: list[str]) -> dict:
+    """How close the ramp's darkest step comes to pure black, and whether it arrives.
+
+    Written because the same fault appeared three times in one piece, from three
+    different ramps, and nothing in this module or `quality` could see it. A ramp built
+    with a wide `light_range` around a dark base clips its first step to #000000 or close
+    to it. That step is then darker than any sensible keyline, so the drawing's darkest
+    colour becomes a few pixels of interior shadow, `separator_share` reports the outline
+    at under one percent, and the keyline stops being measurable at all.
+
+    `ramp_chroma` cannot catch it: a step at pure black has no hue, so it is not a grey
+    step, and the ramp passes. That is the specific hole this fills.
+
+    Reported as a luminance rather than a verdict, because how dark is too dark depends
+    on the keyline the art will use. `craft.ramp_floor_clears` answers that question when
+    the keyline is known.
+    """
+    if not ramp:
+        return {"floor": 0.0, "floor_color": None, "is_black": False, "near_black": False}
+    floors = sorted(ramp, key=lambda c: quality.luminance(_rgba(c)))
+    darkest = floors[0]
+    lum = quality.luminance(_rgba(darkest))
+    return {
+        "floor": round(lum, 5),
+        "floor_color": darkest,
+        # Exactly #000000: no keyline can be darker, so the ramp is guaranteed to win.
+        "is_black": darkest.lstrip("#")[:6].lower() == "000000",
+        # SOURCED: 0.0015 is the luminance of #060509, below the #07080f and #05060c
+        # keylines this project has used, so a step under it will beat a plausible
+        # outline even when it is not literally black.
+        "near_black": lum < 0.0015,
+    }
+
+
 def ramp_lints(ramp: list[str]) -> dict:
     """Every ramp measurement at once, as a plain dict."""
     return {
         "steps": len(ramp),
         "distinct": len(set(ramp)),
+        "black_floor": black_floor(ramp),
         "monotone_lightness": monotone_lightness(ramp),
         "step_evenness": step_evenness(ramp),
         "step_contrast": step_contrast(ramp),
@@ -460,7 +495,15 @@ def ramp_lints(ramp: list[str]) -> dict:
 def ramp_readings(lints: dict) -> list[str]:
     """One sentence per ramp measurement worth acting on, and nothing for the rest.
 
-    Two of the four ramp measures produce a sentence: `monotone_lightness`, which is
+    `black_floor` deliberately produces none, although it was written to. A step at pure
+    black is only a fault *relative to a keyline that ought to be darker than it*, and a
+    ramp does not know what keyline the art will use. Asked to judge on its own it fired
+    on two of this project's eleven known-good showcase ramps, WOOD at #060402 and RIBBON
+    at #000000, both of which are correct: that art uses black as its own darkest value
+    and has no separate outline to lose. The judgement belongs where the keyline is known,
+    which is `craft.ramp_floor_clears(ramp, keyline)`.
+
+    Two of the four original ramp measures produce a sentence: `monotone_lightness`, which is
     threshold-free, and the dE 1.0 pair of `step_evenness`, whose threshold is sourced.
     `step_contrast` and `hue_shift_direction` produce none, the first because both of its
     candidate thresholds failed the construct gate and the second by design.
