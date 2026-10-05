@@ -252,6 +252,11 @@ MAX_SHEET_FRAMES = 4_096
 # decompression-bomb check warned about on the way back. A sprite already longer than
 # this is shown at 1x, never shrunk.
 MAX_PREVIEW_EDGE = 2_048
+# Pixels of padding a sprite sheet export may put around and between frames. Padding keeps
+# a texture filter from bleeding one frame into the next, which takes 1 to 4 px, and
+# extrude covers a frame's own edge. The sheet grows by the padding around every cell, so
+# with no ceiling it was a size request with none either; 64 is far past any use.
+MAX_SHEET_PADDING = 64
 
 # --- Declarative asset specs ----------------------------------------------- #
 # The spec layer amplifies harder than any tool: one integer becomes two batch operations

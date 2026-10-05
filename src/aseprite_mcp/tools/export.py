@@ -15,6 +15,7 @@ from ..core.limits import (
     MAX_CANVAS_DIMENSION,
     MAX_CANVAS_PIXELS,
     MAX_MOTION_FRAMES,
+    MAX_SHEET_PADDING,
     MAX_SPRITE_TOTAL_PIXELS,
     check_count,
     check_list_length,
@@ -147,6 +148,15 @@ def _require_scale(scale: int, src=None, *, every_frame: bool = False) -> int:
             f"{MAX_SPRITE_TOTAL_PIXELS} px in all). {remedy}"
         )
     return value
+
+
+def _require_padding(padding: int) -> int:
+    """Sheet padding from 0 to MAX_SHEET_PADDING. `export_spritesheet` passed it to Aseprite
+    unchecked in both directions; the packed export refused a negative one only."""
+    return check_count(
+        "padding", padding, MAX_SHEET_PADDING, minimum=0,
+        remedy="Engines need 1 to 4 px to stop frames bleeding; extrude covers the frame's edge.",
+    )
 
 
 def _require_tag(src, tag: str) -> str:
@@ -345,8 +355,9 @@ def export_spritesheet(
         "--sheet-type", sheet_type,
         "--scale", str(_require_scale(scale, src, every_frame=True)),
     ]
+    padding = _require_padding(padding)
     if padding:
-        cli += ["--shape-padding", str(int(padding)), "--border-padding", str(int(padding))]
+        cli += ["--shape-padding", str(padding), "--border-padding", str(padding)]
     if layer:
         cli += ["--layer", _require_layer(src, layer)]
     if ignore_layer:
@@ -425,8 +436,7 @@ def export_spritesheet_packed(
             "data_format only applies to data_output, and no data_output was given, so "
             "nothing would be written in that format."
         )
-    if padding < 0:
-        raise ValidationFailed(f"padding cannot be negative (got {padding}).")
+    padding = _require_padding(padding)
 
     src = resolve_path(filename)
     # Every target is validated before anything runs, so a two-file export cannot fail

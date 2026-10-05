@@ -33,6 +33,12 @@ All notable changes to this project are documented here. The format is based on
   the `.aseprite` header (`core/asefile.py`), which also saves each `export_png` and
   `export_layer` the launch it spent counting frames.
 
+- **Sprite sheet padding was unbounded.** `export_spritesheet` passed `padding` to
+  Aseprite unchecked in both directions, and the sheet grows by it around every cell;
+  `export_spritesheet_packed` refused a negative value only. Both now take 0 to 64
+  (`MAX_SHEET_PADDING`): an engine needs 1 to 4 px to stop frames bleeding, and extrude
+  covers a frame's own edge.
+
 ### Fixed
 
 - **On an indexed sprite's Background, the transparent index's own colour could not be

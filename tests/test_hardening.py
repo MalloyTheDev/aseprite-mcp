@@ -1285,3 +1285,19 @@ def test_the_largest_fitting_scale_fits_and_one_more_does_not(width, height, cou
     fit = export.largest_fitting_scale(width, height, count)
     assert fit == 0 or fits(fit)
     assert not fits(fit + 1)
+
+
+@pytest.mark.parametrize("padding", [-1, limits.MAX_SHEET_PADDING + 1])
+@pytest.mark.parametrize("packed", [False, True], ids=["export_spritesheet", "packed"])
+def test_sheet_padding_is_bounded_both_ways_before_launch(tmp_path, nothing_launches,
+                                                          padding, packed):
+    """`export_spritesheet` passed padding to Aseprite unchecked in both directions, and
+    the sheet grows by it around every cell; the packed export refused a negative one
+    only."""
+    src = str(_ase(tmp_path / "s.aseprite", 16, 16))
+    out = str(tmp_path / "sheet.png")
+    with pytest.raises(ValidationFailed, match="padding is"):
+        if packed:
+            export.export_spritesheet_packed(src, out, padding=padding)
+        else:
+            export.export_spritesheet(src, out, padding=padding)
