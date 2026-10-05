@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **162 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **163 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -24,7 +24,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Palette](#palette) (15)
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
-- [Export & import](#export--import) (11)
+- [Export & import](#export--import) (12)
 - [Engine export presets](#engine-export-presets) (2)
 - [Minecraft resource packs](#minecraft-resource-packs) (4)
 - [Reference / rotoscope](#reference--rotoscope) (2)
@@ -3794,6 +3794,41 @@ file matching the pattern already exists.
 | `output_pattern` | string | yes |  |
 | `scale` | integer | no | 1 |
 | `include_hidden` | boolean | no | False |
+| `overwrite` | boolean | no | False |
+
+
+### `export_motion_trail`
+
+Export every frame of a motion composited into one image, the oldest faintest.
+
+The way to judge whether a whole motion reads: arc shape, spacing and squash are all
+visible at once in a still image that can be studied, where a GIF moves on before a
+defect can be seen, and `export_onion_skin` shows only a few frames either side of one.
+
+Args:
+    filename: The sprite.
+    output: The image to write. Use .png: the fades are alpha, which a GIF cannot keep.
+    tag: Composite this tag's frames.
+    frames: Or these frames (1-based), in the order given. Pass neither for every
+        frame of the sprite, and not both.
+    scale: Integer upscaling of the output (default 6). The scaled image is held to
+        the same caps as any canvas.
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+
+Frame i of n is drawn at opacity 255 * i / n, so the last is fully opaque and on top.
+An opaque Background layer would bury every frame under the next, so when there is one
+it is drawn once, as of the last frame, and the frames contribute their other layers.
+
+Returns the frames used, the opacity each was drawn at, and whether a Background was
+laid underneath.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `output` | string | yes |  |
+| `tag` | string | no | _none_ |
+| `frames` | array<integer> | no | _none_ |
+| `scale` | integer | no | 6 |
 | `overwrite` | boolean | no | False |
 
 

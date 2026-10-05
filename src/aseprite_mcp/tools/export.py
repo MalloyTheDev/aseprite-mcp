@@ -9,7 +9,14 @@ from __future__ import annotations
 from ..app import mcp
 from ..core import gifmeta
 from ..core.errors import ExportError, ValidationFailed
-from ..core.models import FRAME_GUARD_LUA
+from ..core.limits import (
+    MAX_CANVAS_DIMENSION,
+    MAX_CANVAS_PIXELS,
+    MAX_MOTION_FRAMES,
+    check_count,
+    check_list_length,
+)
+from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.paths import (
     discard_selection_sidecar,
     ensure_output_path,
@@ -605,6 +612,137 @@ def export_onion_skin(
     end
     osp:saveAs(ARG.output)
     RESULT = { ok = true, output = ARG.output, frame = cur }
+    """
+    return run_lua(body, args)
+
+
+@mcp.tool()
+def export_motion_trail(
+    filename: str,
+    output: str,
+    tag: str | None = None,
+    frames: list[int] | None = None,
+    scale: int = 6,
+    overwrite: bool = False,
+) -> dict:
+    """Export every frame of a motion composited into one image, the oldest faintest.
+
+    The way to judge whether a whole motion reads: arc shape, spacing and squash are all
+    visible at once in a still image that can be studied, where a GIF moves on before a
+    defect can be seen, and `export_onion_skin` shows only a few frames either side of one.
+
+    Args:
+        filename: The sprite.
+        output: The image to write. Use .png: the fades are alpha, which a GIF cannot keep.
+        tag: Composite this tag's frames.
+        frames: Or these frames (1-based), in the order given. Pass neither for every
+            frame of the sprite, and not both.
+        scale: Integer upscaling of the output (default 6). The scaled image is held to
+            the same caps as any canvas.
+        overwrite: Replace `output` if it already exists (default False = no-clobber).
+
+    Frame i of n is drawn at opacity 255 * i / n, so the last is fully opaque and on top.
+    An opaque Background layer would bury every frame under the next, so when there is one
+    it is drawn once, as of the last frame, and the frames contribute their other layers.
+
+    Returns the frames used, the opacity each was drawn at, and whether a Background was
+    laid underneath.
+    """
+    if tag is not None and frames is not None:
+        raise ValidationFailed("pass tag or frames, not both: they name the same thing twice.")
+    frame_list = None
+    if frames is not None:
+        if not frames:
+            raise ValidationFailed("frames is empty; pass at least one frame, or omit it "
+                                   "for every frame of the sprite.")
+        check_list_length("frames", frames, MAX_MOTION_FRAMES,
+                          remedy="Composite a shorter stretch, or a tag.")
+        frame_list = [FrameRef.arg(f"frames[{i}]", f) for i, f in enumerate(frames, 1)]
+    scale = check_count("scale", scale, MAX_CANVAS_DIMENSION, minimum=1)
+    out_path = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "output": lua_path(out_path),
+        "tag": tag,
+        "frames": frame_list,
+        "scale": scale,
+        "max_dimension": MAX_CANVAS_DIMENSION,
+        "max_pixels": MAX_CANVAS_PIXELS,
+    }
+    body = FRAME_GUARD_LUA + """
+    local spr = open_sprite(ARG.src)
+    local list = {}
+    if ARG.tag ~= nil then
+      local found, names = nil, {}
+      for _, t in ipairs(spr.tags) do
+        names[#names + 1] = t.name
+        if t.name == ARG.tag then found = t end
+      end
+      if found == nil then
+        error("the sprite has no tag named '" .. ARG.tag .. "'; its tags are: " ..
+              (#names > 0 and table.concat(names, ", ") or "none") .. ".", 0)
+      end
+      for f = found.fromFrame.frameNumber, found.toFrame.frameNumber do list[#list + 1] = f end
+    elseif ARG.frames ~= nil then
+      for i, f in ipairs(ARG.frames) do list[i] = require_frame(spr, f, "frames[" .. i .. "]") end
+    else
+      for f = 1, #spr.frames do list[f] = f end
+    end
+
+    local W, H = spr.width, spr.height
+    local OW, OH = W * ARG.scale, H * ARG.scale
+    if OW > ARG.max_dimension or OH > ARG.max_dimension or OW * OH > ARG.max_pixels then
+      error(string.format("a %dx%d sprite at scale %d is a %dx%d image, past the canvas " ..
+            "caps (%d px per axis, %d px in all). Use a smaller scale.",
+            W, H, ARG.scale, OW, OH, ARG.max_dimension, ARG.max_pixels), 0)
+    end
+
+    -- The Background, if a visible one exists, is laid once underneath and kept out of the
+    -- frames: every frame of an opaque sprite is opaque, so the last one, drawn at full
+    -- opacity, would otherwise cover the whole trail. Its visibility is changed in memory
+    -- only; this sprite is never saved.
+    local bg = nil
+    for _, lyr in ipairs(spr.layers) do
+      if lyr.isBackground and lyr.isVisible then bg = lyr end
+    end
+    local out = Image(W, H, ColorMode.RGB)
+    out:clear()
+    if bg ~= nil then
+      local shown = {}
+      for _, lyr in ipairs(spr.layers) do
+        if not lyr.isBackground and lyr.isVisible then
+          lyr.isVisible = false
+          shown[#shown + 1] = lyr
+        end
+      end
+      local base = Image(W, H, ColorMode.RGB)
+      base:clear()
+      base:drawSprite(spr, list[#list])
+      out:drawImage(base, Point(0, 0), 255, BlendMode.NORMAL)
+      for _, lyr in ipairs(shown) do lyr.isVisible = true end
+      bg.isVisible = false
+    end
+
+    local opacities = {}
+    for i, f in ipairs(list) do
+      local op = math.floor(255 * i / #list + 0.5)
+      local img = Image(W, H, ColorMode.RGB)
+      img:clear()
+      img:drawSprite(spr, f)
+      out:drawImage(img, Point(0, 0), op, BlendMode.NORMAL)
+      opacities[i] = op
+    end
+    if bg ~= nil then bg.isVisible = true end
+
+    local osp = Sprite(W, H, ColorMode.RGB)
+    osp.cels[1].image = out
+    app.sprite = osp
+    if ARG.scale > 1 then
+      app.command.SpriteSize{ ui = false, width = OW, height = OH, method = "nearest" }
+    end
+    osp:saveAs(ARG.output)
+    RESULT = { ok = true, output = ARG.output, frames = list, opacities = opacities,
+               background = (bg ~= nil), width = OW, height = OH }
     """
     return run_lua(body, args)
 
