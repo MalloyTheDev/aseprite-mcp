@@ -2510,6 +2510,11 @@ Args:
 
 Add a pixel outline around the artwork on a layer, optionally weighted by light.
 
+The outline is drawn around the art **already on the layer given, onto that same
+layer**. It does not outline other layers, so it cannot draw a keyline onto a fresh
+empty layer of its own; a layer with no drawn pixels on the frame is refused rather
+than reported as an outline that drew nothing.
+
 Args:
     color: Outline colour.
     thickness: Outline width in pixels (default 1). With `light_angle`, this is the
