@@ -28,7 +28,7 @@ from aseprite_mcp.core import config, limits, luagen, metadata
 from aseprite_mcp.core.errors import ExportError, ValidationFailed, WorkspaceError
 from aseprite_mcp.core.paths import ensure_output_pattern, expansion_matches
 from aseprite_mcp.core.runner import _run_bounded, _truncate
-from aseprite_mcp.tools import cels, export, image, slices, sprite, text
+from aseprite_mcp.tools import brushes, cels, export, image, reference, slices, sprite, text
 
 # `_tool_manager` is the only place a tool's underlying function is reachable, and
 # the registry-wide groups below call it directly. `list_tools()` is the wire view.
@@ -412,6 +412,38 @@ def test_unrecognized_format_is_skipped_not_rejected(tmp_path):
     f = tmp_path / "sprite.aseprite"
     f.write_bytes(b"\x00" * 64)
     assert image.check_image_dimensions(str(f)) is None
+
+
+# Every tool that opens an outside image, not only the two stamping tools the guard was
+# written for. `import_image`, `stamp_pattern` and both reference tools opened theirs with
+# no header check at all, so a few-kilobyte PNG declaring 6000x6000 reached Aseprite
+# through any of them. Asserted before launch: the guard is only worth having if the
+# refusal comes before the allocation it exists to prevent.
+_OPENS_AN_OUTSIDE_IMAGE = [
+    ("import_image", lambda bomb: export.import_image(bomb, "never.aseprite")),
+    ("stamp_pattern", lambda bomb: brushes.stamp_pattern("never.aseprite", bomb)),
+    ("add_reference_layer", lambda bomb: reference.add_reference_layer("never.aseprite", bomb)),
+    ("import_reference_sequence",
+     lambda bomb: reference.import_reference_sequence("never.aseprite", [bomb])),
+    ("import_spritesheet",
+     lambda bomb: image.import_spritesheet("never.aseprite", bomb, 8, 8, layout="grid")),
+]
+
+
+@pytest.mark.parametrize("name, call", _OPENS_AN_OUTSIDE_IMAGE,
+                         ids=[n for n, _ in _OPENS_AN_OUTSIDE_IMAGE])
+def test_every_tool_that_opens_an_outside_image_refuses_a_bomb_before_launch(
+        tmp_path, monkeypatch, name, call):
+    def launched(*_args, **_kwargs):
+        raise AssertionError(f"{name} launched Aseprite on an image the guard refuses")
+
+    for module in (export, brushes, reference, image):
+        monkeypatch.setattr(module, "run_lua", launched)
+    bomb = tmp_path / "bomb.png"
+    bomb.write_bytes(_png(6000, 6000))
+
+    with pytest.raises(ValidationFailed, match=r"pixels|per axis"):
+        call(str(bomb))
 
 
 # ====================== text bitmap bound vs plot budget (codex P2) =========

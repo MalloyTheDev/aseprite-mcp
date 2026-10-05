@@ -17,6 +17,7 @@ from ..core.paths import (
 )
 from ..core.runner import run_cli, run_lua
 from .common import lua_path, resolve_path
+from .image import check_image_dimensions
 
 _SHEET_TYPES = {"horizontal", "vertical", "rows", "columns", "packed"}
 
@@ -636,6 +637,11 @@ def import_image(input_image: str, output: str, overwrite: bool = False) -> dict
         output: Destination .aseprite path.
         overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
+    src = resolve_path(input_image)
+    # The decompression-bomb guard the stamping tools run, before anything is launched or
+    # created: a solid-colour PNG a few kilobytes on disk can declare 16384x16384, which
+    # Aseprite allocates the moment it opens the file.
+    check_image_dimensions(str(src))
     dst = ensure_output_path(output, overwrite=overwrite)
     # This writes a sprite, so unlike every other tool in this module it has to forget any
     # selection sitting beside that path. None of the exports may: `with_suffix` maps
@@ -643,7 +649,7 @@ def import_image(input_image: str, output: str, overwrite: bool = False) -> dict
     # would throw away the selection of the sprite it was exporting.
     discard_selection_sidecar(dst)
     args = {
-        "src": lua_path(resolve_path(input_image)),
+        "src": lua_path(src),
         "dst": lua_path(dst),
     }
     body = """

@@ -86,12 +86,12 @@ def check_image_dimensions(path: str) -> tuple[int, int] | None:
     if width > MAX_CANVAS_DIMENSION or height > MAX_CANVAS_DIMENSION:
         raise ValidationFailed(
             f"Source image is {width}x{height}; maximum is {MAX_CANVAS_DIMENSION}px "
-            "per axis. Resize it before stamping."
+            "per axis. Resize it before bringing it in."
         )
     if width * height > MAX_CANVAS_PIXELS:
         raise ValidationFailed(
             f"Source image is {width}x{height} ({width * height} pixels); maximum is "
-            f"{MAX_CANVAS_PIXELS}. Resize it before stamping."
+            f"{MAX_CANVAS_PIXELS}. Resize it before bringing it in."
         )
     return width, height
 
