@@ -8,6 +8,54 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`validate_asset_against_spec`: whether the sprite that got built matches the spec it
+  was built from.** `validate_asset_spec` asks whether a document is well formed and
+  `plan_asset_spec` what it would do; neither asked whether the artifact and the
+  declaration agree, and that gap is where this project's worst bugs have lived. A figure
+  shipped with no keyline because `add_outline` was pointed at a layer that had just been
+  created and was empty, and every count in the result reported success.
+
+  Structure only, like `build_asset_from_spec`: canvas, layer names including those nested
+  in groups, frame count, tag names, slice names and palette capacity. The spec layer
+  declares no pixels, so this verifies none; `assess_sprite` is where the drawing is
+  judged. `verifiable` is returned separately from `ok`, so a spec that declares nothing
+  checkable comes back ok and unverifiable rather than simply ok: "nothing was wrong" and
+  "nothing was checked" must not read the same. The comparison itself is the pure
+  `core.asset_spec.compare_to_built`, testable without launching Aseprite. 161 tools.
+
+- **`assess_sprite` reports how a drawing was made**, as `metrics.craft` from the new
+  `core.craft`: the size distribution of single-colour regions, which says whether colour
+  was placed or painted; the run lengths down the silhouette's edges, which say whether it
+  was drawn or ruled; how luminance distributes; and whether the darkest colour is the one
+  bounding the drawing. None of the existing measures could say that three of the four
+  reference pieces this project was being compared against are not pixel art: 85 to 96
+  percent of their colour clusters are single pixels, and they carry 3,000 to 145,000
+  colours.
+
+  **It produces no readings, on purpose.** Three thresholds were written for these
+  measures and the ranking gate over `tests/corpus` discarded all three the same day:
+  singleton share AUC 0.619 with 132 discordant pairs, share in clusters of eight AUC
+  0.674 with 116, edge variety AUC 0.168 with 277. Good art here runs 0 to 68 percent
+  singleton regions and bad art 36 to 47, so the ranges overlap and the good side is the
+  wider one; edge variety inverts outright, because a sprite sheet's panels have perfectly
+  straight edges and are perfectly good art. The numbers describe a drawing and do not
+  judge one, and a test pins that verdict so the idea is not tried again blind.
+
+- **`black_floor` in `assess_sprite`'s ramp lints: how close a ramp's darkest step comes
+  to pure black.** A ramp built with a wide `light_range` around a dark base can clip its
+  first step to `#000000`, darker than any usable keyline, at which point the keyline
+  stops being measurable; `ramp_chroma` cannot see it, because a step at pure black has no
+  hue and so is not a grey step. It catches the three ramps that actually failed this way,
+  which a test rebuilds.
+
+  Reported, not judged. Asked to judge alone it fired on two of the eleven known-good
+  showcase ramps, WOOD at `#060402` and RIBBON at `#000000`, and both are right: that art
+  uses black as its own darkest value and has no outline to lose. A step at pure black is
+  only a fault relative to a keyline, which a ramp does not know; where the keyline is
+  known, `craft.ramp_floor_clears` makes the comparison.
+
+### Added
+
 - **`scaffold_cycle`: one named cycle, at the frame count the craft actually uses**
   (#91 item 2). `walk|run|idle|attack|hurt|death` at 8, 6, 4, 5, 2 and 6 frames, one tag
   per phase (`walk_contactL`, `walk_downL`, ...) rather than numbered poses, and
