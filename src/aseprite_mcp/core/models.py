@@ -251,6 +251,19 @@ local function require_frame(spr, n, what)
   end
   return num
 end
+
+-- Aseprite's `spr:newFrame(n)` puts the copy at n + 1, directly after the frame it copies,
+-- and then returns frame n: the original, not the copy. Its source pushes the requested
+-- frame number rather than the inserted one, and the two are pixel-identical, so nothing
+-- looked wrong; a linked cel tells them apart, because the frame still sharing the
+-- original's image is n. Anything the caller then did to "the new frame" (a duration, a
+-- drawing, the number it was told) landed on the original (#222). So the copy is looked up
+-- by number and the return value is never used, which also stays right if a later Aseprite
+-- starts returning the copy.
+local function copy_frame_after(spr, n)
+  spr:newFrame(n)
+  return spr.frames[n + 1]
+end
 """
 
 

@@ -810,18 +810,21 @@ def scaffold_cycle(
             f"frames {count + 1}-{info['frameCount']} are left untagged and untimed."
         )
     # Measured, and surprising enough to be worth saying out loud: `add_frame(copy_from=1)`
-    # does not append. Aseprite's `newFrame(n)` inserts at n, so the call reports
-    # `newFrame: 1` and every frame that was already there shifts right. On a sprite
-    # holding a red frame 1 and a blue frame 2, one `add_frame(copy_from=1)` produced
-    # red, red, blue. `make_8_direction_walk_template` has always behaved this way for the
-    # same reason, and the fix belongs in `tools/frames.py` and `core/oplib.py` rather
-    # than in a scaffold working around it, so this reports the consequence instead.
+    # does not append. The copy goes in directly after frame 1 (#222), so on a sprite
+    # holding a red frame 1 and a blue frame 2, one `add_frame(copy_from=1)` produced red,
+    # red, blue: frame 1 stays first and everything drawn after it is pushed to the end.
+    # `make_8_direction_walk_template` has always behaved this way for the same reason, and
+    # whether a copy should append is `tools/frames.py`'s decision rather than something a
+    # scaffold should work around, so this reports the consequence instead.
     if info["frameCount"] > 1 and info["frameCount"] < count:
+        drawn = info["frameCount"]
+        moved = (f"frame 2 is now frame {count}" if drawn == 2 else
+                 f"frames 2-{drawn} are now frames {count - drawn + 2}-{count}")
         warnings.append(
-            f"the sprite already had {info['frameCount']} frames and the new ones are "
-            f"inserted at frame 1 (Aseprite's newFrame inserts rather than appends), so "
-            f"what was drawn is now at the end of the cycle. Reorder with move_frame, or "
-            f"scaffold onto a single-frame sprite."
+            f"the sprite already had {drawn} frames and the new ones are copies of frame 1 "
+            f"inserted right after it, so what was drawn after frame 1 moved to the end of "
+            f"the cycle: {moved}. Reorder with move_frame, or scaffold onto a single-frame "
+            f"sprite."
         )
 
     # Launch count: one read, one batch for the frames and every tag, two for the timing

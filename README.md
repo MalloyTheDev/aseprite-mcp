@@ -832,7 +832,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 ### Frames (animation)
 | Tool | Description |
 | --- | --- |
-| `add_frame` | Append a frame (empty, or a copy of another). |
+| `add_frame` | Add a frame: empty at the end, or a copy right after the frame it copies. |
 | `duplicate_frame` · `remove_frame` | Duplicate / delete a frame. |
 | `set_frame_duration` · `set_all_frame_durations` | Set per-frame / uniform durations (ms). |
 | `reverse_frames` · `move_frame` | Turn a run of frames round, or move one frame to another position. Cels on every layer, durations and cel links all travel with the frame. |

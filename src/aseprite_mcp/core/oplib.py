@@ -269,6 +269,13 @@ BATCH_LUA_BODY = FRAME_GUARD_LUA + r"""
 local spr = open_sprite(ARG.src)
 local applied = {}
 
+-- How a frame-adding op's summary ends: empty when the new frame is the last one, and
+-- otherwise the renumber it caused, which a caller holding frame numbers needs (#222).
+local function moved_after(fr)
+  if fr.frameNumber >= #spr.frames then return "" end
+  return "; the old frames " .. fr.frameNumber .. " and later moved up by one"
+end
+
 local function run_op(op)
   local a = op.args
   local name = op.op
@@ -300,14 +307,21 @@ local function run_op(op)
     return "removed layer '" .. tostring(a.layer) .. "'"
   -- frames
   elseif name == "add_frame" then
-    local fr
-    if a.copy_from ~= nil then fr = spr:newFrame(require_frame(spr, a.copy_from, "copy_from"))
+    -- The same placement, duration and report as the tool (#222): a batch and a direct
+    -- call must not disagree about where a frame landed or which frame took the duration.
+    local fr, src
+    if a.copy_from ~= nil then
+      src = require_frame(spr, a.copy_from, "copy_from")
+      fr = copy_frame_after(spr, src)
     else fr = spr:newEmptyFrame(#spr.frames + 1) end
     if a.duration_ms ~= nil then fr.duration = a.duration_ms / 1000.0 end
-    return "added frame " .. fr.frameNumber
+    local said = "added frame " .. fr.frameNumber
+    if src ~= nil then said = said .. ", a copy of frame " .. src end
+    return said .. moved_after(fr)
   elseif name == "duplicate_frame" then
-    local fr = spr:newFrame(require_frame(spr, a.frame, "frame"))
-    return "duplicated frame -> " .. fr.frameNumber
+    local src = require_frame(spr, a.frame, "frame")
+    local fr = copy_frame_after(spr, src)
+    return "duplicated frame " .. src .. " as frame " .. fr.frameNumber .. moved_after(fr)
   elseif name == "set_frame_duration" then
     local n = require_frame(spr, a.frame, "frame")
     spr.frames[n].duration = a.duration_ms / 1000.0
