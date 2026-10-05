@@ -49,6 +49,12 @@ Convert the Background layer back into a normal (transparent-capable) layer.
 
 Convert a normal layer into the sprite's opaque Background layer.
 
+Its transparent pixels are filled: with black on an RGB or grayscale sprite, and with
+the transparent palette index on an indexed one, which a Background shows as that
+entry's colour, so no index changes and converting back restores the transparency.
+The fill used to come from the editor's colour bar, so the same call gave a different
+colour on every machine.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
@@ -95,7 +101,8 @@ Returns the new sprite's structured info.
 Crop the canvas to the rectangle (x, y, width, height).
 
 The resulting canvas is subject to the same dimension/area caps as `create_sprite`
-(a "crop" to a larger rectangle grows the canvas).
+(a "crop" to a larger rectangle grows the canvas). Where it grows a Background, the new
+area is black, or the transparent palette index on an indexed sprite.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -121,7 +128,8 @@ Resize the canvas WITHOUT scaling the artwork (adds or trims space).
 
 anchor controls where existing content sits in the new canvas:
 "top_left" (default) or "center". The new canvas is subject to the same
-dimension/area caps as `create_sprite`.
+dimension/area caps as `create_sprite`. New area is transparent, except on a
+Background, where it is black, or the transparent palette index on an indexed sprite.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

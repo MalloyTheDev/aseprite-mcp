@@ -30,6 +30,7 @@ local layer = find_layer(spr, ARG.layer)
 if layer.isGroup then error("Cannot draw on a group layer: " .. layer.name) end
 local framenum = require_frame(spr, ARG.frame, "frame")
 local img = get_draw_image(spr, layer, framenum)
+draw_target(spr, layer)
 """
 
 _CLOSE = """

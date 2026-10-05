@@ -125,6 +125,7 @@ def shift_along_ramp(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
 
     local rx, ry = ARG.x, ARG.y
     local rw = ARG.width or (spr.width - rx)
@@ -516,6 +517,7 @@ def shade_region_by_light(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
 
@@ -726,6 +728,7 @@ def specular_highlight(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name, 0) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
     local W, H = img.width, img.height
 
     local mask, count = build_region(spr, img, W, H, ARG.base, ARG.tolerance)
@@ -998,6 +1001,7 @@ def contact_shadow(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
     local W, H = img.width, img.height
     local ramp, occ = ARG.ramp, ARG.occluder
     local R = ARG.radius
@@ -1238,6 +1242,7 @@ def seam_occlusion(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
 
@@ -1442,6 +1447,7 @@ def surface_emission(
     end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
     local W, H = img.width, img.height
     local ramp, source = ARG.ramp, ARG.source
 
@@ -1641,6 +1647,7 @@ def outline_smart(
     if layer.isGroup then error("Cannot outline a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
 
@@ -1796,6 +1803,7 @@ def dither_band(
     if layer.isGroup then error("Cannot dither a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
     local a_col, b_col = ramp[ARG.from_step], ramp[ARG.to_step]
@@ -1962,6 +1970,7 @@ def gradient_map(
     if layer.isGroup then error("Cannot map a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
+    draw_target(spr, layer)
 
     local rx, ry = ARG.x, ARG.y
     local rw = ARG.width or (spr.width - rx)

@@ -125,6 +125,16 @@ local MAX_READ_REGION = {MAX_READ_REGION_PIXELS}
 """
 
 PRELUDE = _LIMITS_LUA + r"""
+-- The colour bar is the editor's own state and persists between sessions, and a headless
+-- run inherits it. Aseprite fills from it whenever a Background needs a pixel it does not
+-- have (growing the canvas, converting a layer to a Background), so the same call filled
+-- with this machine's #a25ef6 at alpha 186, and on an indexed sprite with palette entry 4
+-- of 3, where a fresh install fills with black. Every script starts from Aseprite's
+-- factory colours instead (data/pref.xml, color_bar). Measured: a headless run does not
+-- save these back, so the editor's own colours are untouched.
+app.fgColor = Color{ r = 255, g = 255, b = 255, a = 255 }
+app.bgColor = Color{ r = 0, g = 0, b = 0, a = 255 }
+
 -- A shape's cost is the extent it was given, not the canvas it lands on: img_set throws
 -- away the off-canvas writes, but only after the loop has run. So a rectangle, ellipse
 -- or line whose extent is larger than any canvas could show is not a harmless no-op,
@@ -284,6 +294,13 @@ local function mkcolor(c)
   return Color{ r = clamp255(r), g = clamp255(g), b = clamp255(b), a = clamp255(a) }
 end
 
+-- Whether the image about to be written is an indexed Background, set by `draw_target`.
+-- False unless a tool says otherwise, which is today's behaviour everywhere: a tool that
+-- never calls it cannot regress, and the dangerous direction (letting the transparent
+-- index through onto an ordinary layer, where it is invisible, #138) needs a tool to
+-- name a Background as its target and then write somewhere else.
+local _draw_opaque = false
+
 -- Which palette entry best matches an opaque colour. Entries that cannot draw a
 -- visible pixel are not candidates, however near they are.
 --
@@ -310,6 +327,10 @@ local function nearest_index(spr, r, g, b)
   -- Hoisted: a fill resolves a colour per pixel, so a property read inside this loop is
   -- paid palette-size times per pixel. It cannot change while the loop runs.
   local clear_at = spr.transparentColor
+  -- Except onto a Background (`draw_target`), where the transparent index is a colour
+  -- like any other: Aseprite draws it, so excluding it there painted a request for that
+  -- exact colour in the nearest *other* entry, and reported ok.
+  if _draw_opaque then clear_at = nil end
   local best, bestd = nil, nil
   for i = 0, #pal - 1 do
     if i ~= clear_at then
@@ -336,6 +357,24 @@ local function nearest_index(spr, r, g, b)
       what, clear_at, math.floor(r), math.floor(g), math.floor(b)), 0)
   end
   return best
+end
+
+-- Name the layer a tool is about to write. On an indexed sprite's Background the
+-- transparent index becomes a colour `nearest_index` may answer with, because Aseprite
+-- draws it there; anywhere else, and with no call at all, nothing changes. Pass nil to
+-- clear it, as each batch operation does before it runs.
+local function draw_target(spr, layer)
+  _draw_opaque = layer ~= nil and spr.colorMode == ColorMode.INDEXED and layer.isBackground
+end
+
+-- What a Background is filled with where it gains a pixel. The prelude's black, unless
+-- the sprite is indexed: then its transparent index, which a Background shows as that
+-- entry's colour, so the fill introduces no colour and changes no index, and converting
+-- the layer back gives the transparency back. Call after opening the sprite.
+local function background_fill(spr)
+  if spr.colorMode == ColorMode.INDEXED then
+    app.bgColor = Color{ index = spr.transparentColor }
+  end
 end
 
 -- What a declared ramp actually becomes on this sprite's palette.
@@ -411,8 +450,13 @@ local function to_pixel(spr, c)
 end
 
 -- Decompose a raw pixel value into r,g,b,a (0-255), regardless of colour mode.
-local function px_to_rgba(spr, px)
-  local cm = spr.colorMode
+--
+-- `mode` is the colour mode of the image the pixel was read from, when that is not the
+-- sprite's own: `readable_composite` and `readable_layer` hand back Aseprite's RGB render
+-- of an indexed sprite where its indices cannot be decoded alone, and an RGB pixel read
+-- as an index is nonsense. Omitted, it is the sprite's mode, as it always was.
+local function px_to_rgba(spr, px, mode)
+  local cm = mode or spr.colorMode
   if cm == ColorMode.RGB then
     return app.pixelColor.rgbaR(px), app.pixelColor.rgbaG(px),
            app.pixelColor.rgbaB(px), app.pixelColor.rgbaA(px)
@@ -459,8 +503,8 @@ end
 -- both numbers side by side, so one diff said "4 drawn pixels" beside a 5x5 box whose
 -- corner nothing in the sprite could draw (#172). Sharing the definition is what makes
 -- that disagreement unrepresentable rather than merely fixed.
-local function clear_bytes(spr)
-  local cm = spr.colorMode
+local function clear_bytes(spr, mode)
+  local cm = mode or spr.colorMode
   if cm == ColorMode.GRAY then
     -- graya: value, alpha.
     return 2, 2, { [0] = true }
@@ -496,7 +540,9 @@ end
 -- bought. Not speed: it honours the transparent index only, so what is paid for here is
 -- the count and the box agreeing about one sprite.
 local function visible_extent(spr, img)
-  local stride, first, clear = clear_bytes(spr)
+  -- The image's own mode, not the sprite's: an RGB render of an indexed sprite is read
+  -- by its alpha byte (see `readable_composite`). For every other image the two agree.
+  local stride, first, clear = clear_bytes(spr, img.colorMode)
   local w, h = img.width, img.height
   local s = img.bytes
   local n = 0
@@ -508,7 +554,7 @@ local function visible_extent(spr, img)
     -- confident wrong answer is what this whole helper exists to stop producing.
     for y = 0, h - 1 do
       for x = 0, w - 1 do
-        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y))
+        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y), img.colorMode)
         if alpha > 0 then
           n = n + 1
           if minx == nil or x < minx then minx = x end
@@ -564,14 +610,14 @@ end
 -- `clear_bytes`, so they cannot drift about what empty means, which is the part that
 -- was actually wrong.
 local function visible_count(spr, img)
-  local stride, first, clear = clear_bytes(spr)
+  local stride, first, clear = clear_bytes(spr, img.colorMode)
   local s = img.bytes
   if #s ~= img.width * img.height * stride then
     -- Not the layout assumed above. Count the slow, certain way rather than a wrong way.
     local n = 0
     for y = 0, img.height - 1 do
       for x = 0, img.width - 1 do
-        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y))
+        local _, _, _, alpha = px_to_rgba(spr, img:getPixel(x, y), img.colorMode)
         if alpha > 0 then n = n + 1 end
       end
     end
@@ -591,15 +637,44 @@ local function visible_count(spr, img)
   return n
 end
 
+-- Whether a frame rendered in the sprite's own colour mode would misreport what Aseprite
+-- shows. On an indexed sprite with a visible Background layer every pixel is opaque, yet
+-- the render still holds the transparent index wherever the Background is that colour,
+-- and every reader decoded it as "no pixel": `get_pixels` read a whole background as
+-- empty, and the indexed conversion guard refused an opaque scene as losing 60 of its 64
+-- pixels when it would have lost none. Aseprite also draws such a Background over its
+-- transparent index's colour, so a palette entry that is itself transparent shows that
+-- colour there and a half-transparent one blends with it, measured: only its own render
+-- gets every case right, so that is what is read.
+local function opaque_indexed(spr)
+  if spr.colorMode ~= ColorMode.INDEXED then return false end
+  for _, lyr in ipairs(spr.layers) do
+    if lyr.isBackground then return lyr.isVisible end
+  end
+  return false
+end
+
+-- The composite of one frame, to read pixels from. In the sprite's own colour mode, as it
+-- always was, unless that would misreport it (`opaque_indexed`); then Aseprite's RGB
+-- render. Decode a pixel of it with `px_to_rgba(spr, px, img.colorMode)`.
+local function readable_composite(spr, framenum)
+  local img
+  if opaque_indexed(spr) then
+    img = Image(spr.width, spr.height, ColorMode.RGB)
+  else
+    img = Image(spr.spec)
+  end
+  img:clear()
+  img:drawSprite(spr, framenum)
+  return img
+end
+
 -- Drawn pixels across every frame of a sprite, flattened. The composite is what the
 -- caller sees, so this is the number a conversion must not change.
 local function visible_count_all_frames(spr)
   local n = 0
   for f = 1, #spr.frames do
-    local flat = Image(spr.spec)
-    flat:clear()
-    flat:drawSprite(spr, f)
-    n = n + visible_count(spr, flat)
+    n = n + visible_count(spr, readable_composite(spr, f))
   end
   return n
 end
@@ -1046,6 +1121,32 @@ local function get_draw_image(spr, layer, framenum)
     -- it sampled a window those pixels do not reach.
     img:drawImage(cel.image, cel.position, 255, BlendMode.SRC)
   end
+  return img
+end
+
+-- One layer, to read pixels from: the surface the drawing tools write to, as it always
+-- was, except the Background of an indexed sprite, whose raw indices cannot be decoded
+-- alone (see `opaque_indexed`). That one is rendered by Aseprite with every other layer
+-- hidden, in memory only and put back before returning, and comes back RGB. Decode a
+-- pixel of it with `px_to_rgba(spr, px, img.colorMode)`.
+local function readable_layer(spr, layer, framenum)
+  if spr.colorMode ~= ColorMode.INDEXED or not layer.isBackground then
+    return get_draw_image(spr, layer, framenum)
+  end
+  local hidden = {}
+  for _, other in ipairs(spr.layers) do
+    if not other.isBackground and other.isVisible then
+      other.isVisible = false
+      hidden[#hidden + 1] = other
+    end
+  end
+  local was_visible = layer.isVisible
+  layer.isVisible = true
+  local img = Image(spr.width, spr.height, ColorMode.RGB)
+  img:clear()
+  img:drawSprite(spr, framenum)
+  layer.isVisible = was_visible
+  for _, other in ipairs(hidden) do other.isVisible = true end
   return img
 end
 

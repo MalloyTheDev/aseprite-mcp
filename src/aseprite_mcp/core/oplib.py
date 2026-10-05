@@ -279,6 +279,9 @@ end
 local function run_op(op)
   local a = op.args
   local name = op.op
+  -- No write target until an operation names one, so a Background drawn on by one op
+  -- cannot let the transparent index through for the next.
+  draw_target(spr, nil)
   -- layers
   if name == "add_layer" then
     local l = spr:newLayer(); l.name = a.name
@@ -409,6 +412,7 @@ local function run_op(op)
     if layer.isGroup then error("cannot edit a group layer: " .. layer.name, 0) end
     local n = require_frame(spr, a.frame or 1, "frame")
     local img = get_draw_image(spr, layer, n)
+    draw_target(spr, layer)
     local fr, fg, fb, fa = a["from"].r, a["from"].g, a["from"].b, a["from"].a or 255
     local tol = a.tolerance or 0
     local tp = to_pixel(spr, a.to)
@@ -429,6 +433,7 @@ local function run_op(op)
     if layer.isGroup then error("cannot draw on a group layer: " .. layer.name, 0) end
     local n = require_frame(spr, a.frame or 1, "frame")
     local img = get_draw_image(spr, layer, n)
+    draw_target(spr, layer)
     if name == "set_pixel" then
       img_set(img, a.x, a.y, to_pixel(spr, a.color))
     elseif name == "draw_line" then

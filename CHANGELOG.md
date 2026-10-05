@@ -6,6 +6,65 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **On an indexed sprite's Background, the transparent index's own colour could not be
+  drawn.** A colour resolves to the nearest palette entry, and the transparent index is
+  left out of the search because on an ordinary layer it is invisible (#138). On a
+  Background Aseprite draws it, so a request for that exact colour was painted in the
+  nearest *other* entry and reported ok: a Background whose index 0 is `#0a141e` came out
+  red when filled with `#0a141e`. That is the state an opaque PNG is in after
+  `import_image` and `set_color_mode("indexed")`, whose dominant colour lands on index 0,
+  so repainting with the background's own colour failed on exactly the art that route
+  produces. A tool now names the layer it is about to write (`draw_target`), and on an
+  indexed Background the search includes the transparent index. The drawing tools, the
+  batch operations (named per operation, so one cannot leak into the next) and the
+  shading tools do; a tool that names no target behaves exactly as before. Not covered:
+  tools that read their own surface before writing it, such as `add_outline` and the
+  shading tools' masks, still read the transparent index on a Background as empty.
+
+- **A Background's fill came from the editor's colour bar, so the same call gave a
+  different file on every machine.** `convert_layer_to_background`, and `resize_canvas`
+  and `crop_sprite` where they grow a Background, filled new pixels with whatever the
+  editor last had as its background colour, user state a headless run inherits: on the
+  machine this was found on, a purple at alpha 186, and on an indexed sprite palette entry
+  4 of a 3-entry palette. Every script now starts from Aseprite's factory colours, a black
+  background and a white foreground. Measured, a headless run never saves the colour bar
+  back, so the editor's own colours are untouched. On an indexed sprite the fill is the
+  transparent index, which a Background shows as that entry's colour, so no index changes
+  and converting the layer back restores the transparency.
+
+### Fixed
+
+- **An indexed sprite's Background was read as transparent wherever it held the
+  transparent palette index**, which Aseprite draws as a colour there. On an ordinary layer
+  that index means "no pixel", and every reader decoded it that way on a Background too.
+  `get_pixels` returned a whole dark background as `#00000000`; `assess_sprite` measured an
+  opaque scene as mostly empty canvas; `diff_sprites` saw a changed background pixel as an
+  added one; `extract_palette` left the background colour out; `trim_sprite` cropped margins
+  that happened to be that colour; and `list_palette_usage` reported the background's pixels
+  as transparent.
+
+  The visible failure was a refusal. An opaque PNG imports as a Background, and
+  palette-limiting it with `set_color_mode("indexed")` put its dark background on index 0:
+  the conversion guard counted those pixels as lost and refused with "would lose 60 of 64
+  drawn pixels", when nothing was lost, and the remedy it offered was already the default.
+  Bringing outside art in and limiting its palette, the PixelPrep route, could not be done.
+
+  Measured, and stranger than "index 0 is opaque": Aseprite draws an indexed Background
+  over its transparent index's colour, so a palette entry that is itself transparent shows
+  that colour there, and a half-transparent one blends with it (`#0000c8` at 50% over
+  `#0a141e` is `#050a73`). Rather than re-implement that, the readers now take Aseprite's own
+  RGB render in exactly that case, an indexed sprite with a visible Background, through two
+  prelude helpers, `readable_composite` and `readable_layer`; every other sprite is read
+  exactly as before. A Background read alone is rendered with the other layers hidden, in
+  memory, and they are put back. Every test is held to that render rather than to a colour
+  the test computes.
+
+  Writing has the same blind spot and is not fixed here: on a Background, a colour that is
+  the transparent index's still resolves to the nearest other entry, so
+  `fill_layer("#000000")` painted a black-at-index-0 Background red and reported `ok`.
+
 ### Added
 
 - **`import_spritesheet`: a sheet image becomes a sprite with one frame per cell** (#93).

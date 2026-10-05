@@ -210,10 +210,12 @@ def extract_palette(
     local spr = open_sprite(scanpath)
     local seen, colors = {}, {}
     for f = 1, #spr.frames do
-      local flat = Image(spr.spec); flat:clear(); flat:drawSprite(spr, f)
+      -- As Aseprite draws it: an indexed Background's transparent index is a colour
+      -- the art uses, and reading it as "no pixel" left it out of the palette.
+      local flat = readable_composite(spr, f)
       for y = 0, flat.height - 1 do
         for x = 0, flat.width - 1 do
-          local r, g, b, a = px_to_rgba(spr, flat:getPixel(x, y))
+          local r, g, b, a = px_to_rgba(spr, flat:getPixel(x, y), flat.colorMode)
           if a > 0 or ARG.include_alpha then
             local key = ARG.include_alpha and string.format("%d_%d_%d_%d", r, g, b, a)
                                            or string.format("%d_%d_%d", r, g, b)
@@ -303,10 +305,10 @@ def quantize_palette(filename: str, max_colors: int = 256) -> dict:
     local seen, art, capped = {}, 0, false
     if scanned then
       for f = 1, #spr.frames do
-        local flat = Image(spr.spec); flat:clear(); flat:drawSprite(spr, f)
+        local flat = readable_composite(spr, f)
         for y = 0, flat.height - 1 do
           for x = 0, flat.width - 1 do
-            local r, g, b, a = px_to_rgba(spr, flat:getPixel(x, y))
+            local r, g, b, a = px_to_rgba(spr, flat:getPixel(x, y), flat.colorMode)
             if a > 0 then
               local key = string.format("%d_%d_%d_%d", r, g, b, a)
               if seen[key] == nil then
@@ -766,9 +768,9 @@ def ramp_from_art(
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img
     if ARG.layer ~= nil then
-      img = get_draw_image(spr, find_layer(spr, ARG.layer), framenum)
+      img = readable_layer(spr, find_layer(spr, ARG.layer), framenum)
     else
-      img = Image(spr.spec); img:clear(); img:drawSprite(spr, framenum)
+      img = readable_composite(spr, framenum)
     end
 
     -- A histogram rather than the pixels: the ordering work is arithmetic over colours,
@@ -776,7 +778,7 @@ def ramp_from_art(
     local counts, order, n = {}, {}, 0
     for yy = 0, img.height - 1 do
       for xx = 0, img.width - 1 do
-        local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
+        local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy), img.colorMode)
         if a > 0 then
           local hex = string.format("#%02x%02x%02x", r, g, b)
           if counts[hex] == nil then
@@ -894,9 +896,13 @@ local colors = {}
 for i = 0, size - 1 do colors[i + 1] = color_hex(pal:getColor(i)) end
 
 local stride, firstbyte, clear = clear_bytes(spr)
-local counts, scanned, out_of_range = {}, 0, 0
-local function tally(ix)
+local counts, drawn, scanned, out_of_range = {}, {}, 0, 0
+local function tally(ix, opaque)
   counts[ix] = (counts[ix] or 0) + 1
+  -- Per pixel rather than per index, because one index can be both: a Background draws
+  -- every pixel it holds, its transparent index included (Aseprite shows that index's
+  -- colour there), while the same index on any other layer is nothing at all.
+  if opaque or not clear[ix] then drawn[ix] = (drawn[ix] or 0) + 1 end
   scanned = scanned + 1
   if ix >= size then out_of_range = out_of_range + 1 end
 end
@@ -904,6 +910,7 @@ end
 for f = first, last do
   for _, lyr in ipairs(scope) do
     local cel = lyr:cel(f)
+    local opaque = lyr.isBackground
     if cel ~= nil and cel.image ~= nil then
       local img = cel.image
       local s = img.bytes
@@ -916,14 +923,14 @@ for f = first, last do
         while i <= len do
           local j = math.min(i + 511, len)
           local t = table.pack(string.byte(s, i, j))
-          for k = firstbyte, t.n, stride do tally(t[k]) end
+          for k = firstbyte, t.n, stride do tally(t[k], opaque) end
           i = j + 1
         end
       else
         -- Not the layout assumed above. Count the slow, certain way rather than a wrong
         -- way, exactly as `visible_count` does.
         for y = 0, img.height - 1 do
-          for x = 0, img.width - 1 do tally(img:getPixel(x, y)) end
+          for x = 0, img.width - 1 do tally(img:getPixel(x, y), opaque) end
         end
       end
     end
@@ -933,11 +940,13 @@ end
 -- A list of records rather than a table keyed by index. json_encode decides between an
 -- array and an object by looking at the keys, so a histogram that happened to be dense
 -- from 1 would arrive as an array and one with a gap as an object: the same measurement
--- in two shapes, decided by the art. `draws` is the prelude's answer, not a second one.
+-- in two shapes, decided by the art. `drawn` counts the pixels of an index that show, by
+-- the prelude's answer for every layer but a Background, where every pixel shows.
 local entries, n = {}, 0
 for ix, count in pairs(counts) do
   n = n + 1
-  entries[n] = { index = ix, pixels = count, draws = not clear[ix] }
+  local shown = drawn[ix] or 0
+  entries[n] = { index = ix, pixels = count, drawn = shown, draws = shown > 0 }
 end
 table.sort(entries, function(a, b) return a.index < b.index end)
 
@@ -981,7 +990,7 @@ def _drawn_counts(measured: dict) -> dict[int, int]:
     only reads `draws` back.
     """
     return {
-        int(entry["index"]): int(entry["pixels"])
+        int(entry["index"]): int(entry.get("drawn", entry["pixels"]))
         for entry in measured.get("entries") or []
         if entry.get("draws")
     }
@@ -1031,9 +1040,10 @@ def list_palette_usage(
     result = {
         "size": measured["size"],
         "transparent_index": transparent,
+        # Pixels that show nothing: all of an index's pixels on an ordinary layer when it is
+        # the transparent index or a transparent entry, and none of a Background's.
         "transparent_pixels": sum(
-            int(entry["pixels"]) for entry in measured["entries"]
-            if not entry.get("draws")
+            int(entry["pixels"]) - int(entry.get("drawn", 0)) for entry in measured["entries"]
         ),
         "scanned_pixels": measured["scanned"],
         "frames_scanned": measured["frames_scanned"],
