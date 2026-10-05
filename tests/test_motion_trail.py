@@ -135,7 +135,9 @@ def test_an_unknown_tag_names_the_ones_that_exist():
         export.export_motion_trail(name, "mt/notag.png", tag="run", overwrite=True)
 
 
-def test_a_scale_past_the_canvas_caps_is_refused():
+def test_a_scale_past_the_canvas_caps_is_refused_from_the_header():
+    """Before the launch, from the file's header; the Lua check is the backstop for a
+    source whose header cannot be read."""
     name = _moving_dot("mt/huge.aseprite", [1, 3])
-    with pytest.raises(AsepriteError, match="past the canvas caps"):
+    with pytest.raises(ExportError, match="past the caps"):
         export.export_motion_trail(name, "mt/huge.png", scale=4000, overwrite=True)

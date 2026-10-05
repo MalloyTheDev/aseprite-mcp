@@ -422,7 +422,10 @@ _No parameters._
 Render a single frame to a PNG and return it as an image you can view.
 
 Use this to *see* your work. frame is 1-based; scale enlarges small sprites
-(default 8x) so individual pixels are visible.
+(default 8x) so individual pixels are visible. A large sprite is shown at a lower
+scale, so the image is at most 2048 px on its longer side; one already longer than
+that is shown at 1x. A frame the sprite does not have is refused, not swapped for
+another.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

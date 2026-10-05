@@ -245,6 +245,13 @@ MAX_GRID_CELLS = 1_024
 # the 65,535 the file format can store; 4,096 is a 64x64 grid, larger than any animation
 # sheet, so a request past it is a cell-size mistake and is named as one before launch.
 MAX_SHEET_FRAMES = 4_096
+# The longer side of the image `render_preview` returns, past which it lowers the scale.
+# The image goes back to the client, and a vision model downsamples anything much past
+# this anyway, so a bigger render only costs time and transfer: a 1920x1080 scene at the
+# default scale of 8 was a 15360x8640 image, 132 Mpx and six seconds, which Pillow's own
+# decompression-bomb check warned about on the way back. A sprite already longer than
+# this is shown at 1x, never shrunk.
+MAX_PREVIEW_EDGE = 2_048
 
 # --- Declarative asset specs ----------------------------------------------- #
 # The spec layer amplifies harder than any tool: one integer becomes two batch operations

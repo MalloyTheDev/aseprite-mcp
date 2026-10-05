@@ -7,12 +7,13 @@ same workspace rules as everything else.
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import gifmeta
+from ..core import asefile, gifmeta
 from ..core.errors import ExportError, ValidationFailed
 from ..core.limits import (
     MAX_CANVAS_DIMENSION,
     MAX_CANVAS_PIXELS,
     MAX_MOTION_FRAMES,
+    MAX_SPRITE_TOTAL_PIXELS,
     check_count,
     check_list_length,
 )
@@ -66,13 +67,22 @@ def _sprite_facts(src) -> dict:
     return run_lua(body, {"src": lua_path(src)})
 
 
+def _frame_count(src) -> int:
+    """From the file's header when it is an .aseprite, which costs a read rather than the
+    launch `_sprite_facts` is; from that launch for anything else."""
+    head = asefile.read_header(src)
+    if head is not None:
+        return head.frames
+    return len(_sprite_facts(src).get("frames") or [])
+
+
 def _require_frame(src, frame: int) -> int:
     """Aseprite silently exports a DIFFERENT frame when asked for one out of range.
 
     The old code clamped with max(0, frame-1) and then reported the requested number back,
     so export_png(frame=99) on a one-frame sprite wrote frame 1 and answered {"frame": 99}.
     """
-    count = len(_sprite_facts(src).get("frames") or [])
+    count = _frame_count(src)
     if not 1 <= int(frame) <= count:
         raise ExportError(
             f"frame {frame} does not exist; the sprite has {count} frame(s), numbered 1-{count}."
@@ -80,10 +90,50 @@ def _require_frame(src, frame: int) -> int:
     return int(frame)
 
 
-def _require_scale(scale: int) -> int:
+def _canvas_of(src) -> tuple[int, int, int] | None:
+    """(width, height, frames), from the header of an .aseprite and from Pillow for an
+    image (which also runs the decompression-bomb guard), or None when neither can say."""
+    head = asefile.read_header(src)
+    if head is not None:
+        return head.width, head.height, head.frames
+    size = check_image_dimensions(str(src))
+    return (size[0], size[1], 1) if size is not None else None
+
+
+def _require_scale(scale: int, src=None, *, every_frame: bool = False) -> int:
+    """A scale of at least 1, whose scaled image the canvas caps would allow.
+
+    Nothing bounded the top: every export passed `scale` straight to Aseprite, so a 16x16
+    sprite at scale 50000 asked for an 800,000-pixel-square image. Checked from the file's
+    header before anything is launched, with the largest scale that fits named. A sheet
+    holds `every_frame` at once, so its total is bounded as one sprite's storage is.
+    """
     value = int(scale)
     if value < 1:
         raise ExportError(f"scale must be at least 1 (got {scale}).")
+    canvas = _canvas_of(src) if src is not None else None
+    if canvas is None:
+        return value
+    w, h, frames = canvas
+    ow, oh = w * value, h * value
+    count = max(1, frames) if every_frame else 1
+    if (ow > MAX_CANVAS_DIMENSION or oh > MAX_CANVAS_DIMENSION
+            or ow * oh > MAX_CANVAS_PIXELS or count * ow * oh > MAX_SPRITE_TOTAL_PIXELS):
+        fit = 0
+        for s in range(value - 1, 0, -1):
+            sw, sh = w * s, h * s
+            if (sw <= MAX_CANVAS_DIMENSION and sh <= MAX_CANVAS_DIMENSION
+                    and sw * sh <= MAX_CANVAS_PIXELS and count * sw * sh <= MAX_SPRITE_TOTAL_PIXELS):
+                fit = s
+                break
+        what = f"{count} frames of {ow}x{oh}" if count > 1 else f"a {ow}x{oh} image"
+        remedy = (f"The largest scale that fits is {fit}." if fit
+                  else "No scale fits; export a smaller sprite or fewer frames.")
+        raise ExportError(
+            f"a {w}x{h} sprite at scale {value} is {what}, past the caps "
+            f"({MAX_CANVAS_DIMENSION} px per axis, {MAX_CANVAS_PIXELS} px per image, "
+            f"{MAX_SPRITE_TOTAL_PIXELS} px in all). {remedy}"
+        )
     return value
 
 
@@ -163,8 +213,8 @@ def export_png(
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
+    scale = _require_scale(scale, src)
     frame = _require_frame(src, frame)
-    scale = _require_scale(scale)
     f0 = frame - 1
     run_cli([
         str(src),
@@ -197,7 +247,7 @@ def export_gif(filename: str, output: str, scale: int = 1, overwrite: bool = Fal
     """
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
-    scale = _require_scale(scale)
+    scale = _require_scale(scale, src)
     run_cli([str(src), "--scale", str(scale), "--save-as", str(out)])
     if not loop:
         # After the CLI has written it, because Aseprite has no flag for this and always
@@ -222,7 +272,7 @@ def export_tag_gif(
     src = resolve_path(filename)
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     tag = _require_tag(src, tag)
-    scale = _require_scale(scale)
+    scale = _require_scale(scale, src)
     run_cli([
         str(src),
         "--tag", tag,
@@ -281,7 +331,7 @@ def export_spritesheet(
         str(src),
         "--sheet", str(out),
         "--sheet-type", sheet_type,
-        "--scale", str(_require_scale(scale)),
+        "--scale", str(_require_scale(scale, src, every_frame=True)),
     ]
     if padding:
         cli += ["--shape-padding", str(int(padding)), "--border-padding", str(int(padding))]
@@ -488,8 +538,8 @@ def export_layer(
     # instead, so the returned values are the ones actually used.
     out = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     layer = _require_layer(src, layer)
+    scale = _require_scale(scale, src)
     frame = _require_frame(src, frame)
-    scale = _require_scale(scale)
     run_cli([
         str(src), "--layer", layer,
         "--frame-range", f"{frame - 1},{frame - 1}",
@@ -521,7 +571,7 @@ def export_layers(
         raise ValidationFailed('output_pattern must contain "{layer}".')
     src = resolve_path(filename)
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
-    cli = [str(src), "--split-layers", "--scale", str(max(1, int(scale)))]
+    cli = [str(src), "--split-layers", "--scale", str(_require_scale(scale, src))]
     if include_hidden:
         cli.append("--all-layers")
     cli += ["--save-as", str(out)]
@@ -546,7 +596,7 @@ def export_tags(
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
     run_cli([
         str(src), "--split-tags",
-        "--scale", str(max(1, int(scale))),
+        "--scale", str(_require_scale(scale, src)),
         "--save-as", str(out),
     ])
     return {"ok": True, "output_pattern": str(out)}
@@ -572,15 +622,17 @@ def export_onion_skin(
         scale: Integer upscaling factor for the output PNG.
         overwrite: Replace `output` if it already exists (default False = no-clobber).
     """
+    src = resolve_path(filename)
+    scale = _require_scale(scale, src)
     out_path = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     args = {
-        "src": lua_path(resolve_path(filename)),
+        "src": lua_path(src),
         "output": lua_path(out_path),
         "frame": int(frame),
         "previous": max(0, int(previous)),
         "next": max(0, int(next)),
         "ghost_opacity": max(0, min(255, int(ghost_opacity))),
-        "scale": max(1, int(scale)),
+        "scale": scale,
     }
     body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
@@ -659,9 +711,13 @@ def export_motion_trail(
                           remedy="Composite a shorter stretch, or a tag.")
         frame_list = [FrameRef.arg(f"frames[{i}]", f) for i, f in enumerate(frames, 1)]
     scale = check_count("scale", scale, MAX_CANVAS_DIMENSION, minimum=1)
+    src = resolve_path(filename)
+    # From the header, before the launch; the Lua check below is the backstop for a
+    # source whose header cannot be read.
+    scale = _require_scale(scale, src)
     out_path = ensure_output_path(output, overwrite=overwrite, error_type=ExportError)
     args = {
-        "src": lua_path(resolve_path(filename)),
+        "src": lua_path(src),
         "output": lua_path(out_path),
         "tag": tag,
         "frames": frame_list,
@@ -762,7 +818,7 @@ def export_frames(
         raise ValidationFailed('output_pattern must contain "{frame}", e.g. "out_{frame}.png".')
     src = resolve_path(filename)
     out = ensure_output_pattern(output_pattern, overwrite=overwrite, error_type=ExportError)
-    run_cli([str(src), "--scale", str(max(1, int(scale))), "--save-as", str(out)])
+    run_cli([str(src), "--scale", str(_require_scale(scale, src)), "--save-as", str(out)])
     return {"ok": True, "output_pattern": str(out), "scale": int(scale)}
 
 

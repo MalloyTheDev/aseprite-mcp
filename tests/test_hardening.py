@@ -29,6 +29,7 @@ from aseprite_mcp.core.errors import ExportError, ValidationFailed, WorkspaceErr
 from aseprite_mcp.core.paths import ensure_output_pattern, expansion_matches
 from aseprite_mcp.core.runner import _run_bounded, _truncate
 from aseprite_mcp.tools import brushes, cels, export, image, reference, slices, sprite, text
+from aseprite_mcp.tools import inspect as inspect_tools
 
 # `_tool_manager` is the only place a tool's underlying function is reachable, and
 # the registry-wide groups below call it directly. `list_tools()` is the wire view.
@@ -1157,3 +1158,101 @@ def test_an_over_cap_ramp_is_refused_before_aseprite(tool_name, ws, no_lua):
     with pytest.raises(ValidationFailed,
                        match=rf"ramp has {limits.MAX_COLOR_LIST_LENGTH + 1} items"):
         REGISTERED[tool_name].fn(filename="probe.aseprite", ramp=over, **extra)
+
+
+# ======================= what an export or a preview asks Aseprite to render =========
+# A synthetic .aseprite header: Aseprite never opens these, which is the point. Each
+# refusal below has to come from the header, before anything is launched.
+def _ase(path, width: int, height: int, frames: int = 1):
+    import struct
+    path.write_bytes(struct.pack("<IHHHHH", 128, 0xA5E0, frames, width, height, 32)
+                     + b"\0" * 114)
+    return path
+
+
+@pytest.fixture
+def nothing_launches(monkeypatch):
+    def launched(*_args, **_kwargs):
+        raise AssertionError("Aseprite was launched for a call that is refused before it")
+    for module in (export, inspect_tools):
+        monkeypatch.setattr(module, "run_lua", launched)
+        monkeypatch.setattr(module, "run_cli", launched)
+
+
+def test_the_header_reader_reads_canvas_and_frames(tmp_path):
+    from aseprite_mcp.core import asefile
+
+    assert asefile.read_header(_ase(tmp_path / "a.aseprite", 320, 200, 7)) == (320, 200, 7)
+    (tmp_path / "not.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 20)
+    assert asefile.read_header(tmp_path / "not.png") is None
+    (tmp_path / "short.aseprite").write_bytes(b"\0\0")
+    assert asefile.read_header(tmp_path / "short.aseprite") is None
+    assert asefile.read_header(tmp_path / "missing.aseprite") is None
+
+
+def test_an_export_scale_past_the_canvas_caps_is_refused_before_launch(
+        tmp_path, nothing_launches):
+    """Nothing bounded the top: a 16x16 sprite at scale 50000 was handed to Aseprite."""
+    src = _ase(tmp_path / "s.aseprite", 16, 16)
+    with pytest.raises(ExportError, match=r"800000x800000.*largest scale that fits is 256"):
+        export.export_png(str(src), str(tmp_path / "o.png"), scale=50_000)
+
+
+@pytest.mark.parametrize("call", [
+    lambda s, o: export.export_gif(s, o, scale=5_000),
+    lambda s, o: export.export_frames(s, o.replace(".png", "_{frame}.png"), scale=5_000),
+    lambda s, o: export.export_layers(s, o.replace(".png", "_{layer}.png"), scale=5_000),
+    lambda s, o: export.export_onion_skin(s, 1, o, scale=5_000),
+    lambda s, o: export.export_motion_trail(s, o, scale=5_000),
+], ids=["export_gif", "export_frames", "export_layers", "export_onion_skin",
+        "export_motion_trail"])
+def test_every_scaled_export_is_bounded_the_same_way(tmp_path, nothing_launches, call):
+    src = _ase(tmp_path / "s.aseprite", 16, 16)
+    with pytest.raises(ExportError, match="past the caps"):
+        call(str(src), str(tmp_path / "o.png"))
+
+
+def test_a_sheet_is_bounded_by_all_of_its_frames(tmp_path, nothing_launches):
+    """One 1024x1024 frame fits; a hundred of them in one sheet is 104,857,600 px, past
+    what one sprite may hold, at any scale."""
+    src = _ase(tmp_path / "s.aseprite", 1024, 1024, frames=100)
+    with pytest.raises(ExportError, match=r"100 frames of 1024x1024.*No scale fits"):
+        export.export_spritesheet(str(src), str(tmp_path / "sheet.png"))
+
+
+def test_an_export_frame_is_checked_from_the_header_without_a_launch(
+        tmp_path, nothing_launches):
+    """It used to launch Aseprite once to count the frames and again to export."""
+    src = _ase(tmp_path / "s.aseprite", 16, 16, frames=3)
+    with pytest.raises(ExportError, match="frame 4 does not exist; the sprite has 3"):
+        export.export_png(str(src), str(tmp_path / "o.png"), frame=4)
+
+
+def test_a_preview_of_a_missing_frame_is_refused_not_swapped(tmp_path, nothing_launches):
+    """Aseprite renders frame 1 for a frame range past the end, and the preview showed it."""
+    src = _ase(tmp_path / "s.aseprite", 16, 16, frames=1)
+    with pytest.raises(ValidationFailed, match="frame 99 does not exist"):
+        inspect_tools.render_preview(str(src), frame=99)
+
+
+@pytest.mark.parametrize("width, height, asked, used", [
+    (16, 16, 8, 8),        # small sprites are unchanged
+    (512, 512, 8, 4),      # 2048 / 512
+    (1920, 1080, 8, 1),    # the scene that came back 15360x8640
+    (4096, 4096, 8, 1),    # longer than the edge already: 1x, never shrunk
+])
+def test_a_preview_fits_its_longer_side_to_the_edge(tmp_path, monkeypatch, width, height,
+                                                    asked, used):
+    from PIL import Image as PILImage
+
+    seen = {}
+
+    def fake_cli(args, *_a, **_k):
+        seen["scale"] = int(args[args.index("--scale") + 1])
+        PILImage.new("RGBA", (1, 1)).save(args[args.index("--save-as") + 1])
+
+    monkeypatch.setattr(inspect_tools, "run_cli", fake_cli)
+    src = _ase(tmp_path / "s.aseprite", width, height)
+    inspect_tools.render_preview(str(src), scale=asked)
+
+    assert seen["scale"] == used
