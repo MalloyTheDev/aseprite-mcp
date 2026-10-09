@@ -1132,6 +1132,7 @@ RAMP_TOOLS = {
     "cast_shadow": {"layer": "art"},
     "contact_shadow": {"occluder_color": "#101010"},
     "dither_band": {"from_step": 0, "to_step": 1},
+    "export_game_asset_bundle": {},
     "glow": {},
     "shade_facets": {"rows": ["ab"], "legend": {"a": 90, "b": 0}},
     "seam_occlusion": {"rows": ["ab"], "legend": {"a": 1, "b": 0}},

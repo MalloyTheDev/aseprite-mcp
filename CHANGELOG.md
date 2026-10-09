@@ -50,7 +50,10 @@ All notable changes to this project are documented here. The format is based on
   manifest's new `assessment` section. A *defect* refuses the bundle, naming the frames
   and the fix: an absent keyline on a figure of several masses, or, with the new `ramp`
   argument, a drawn pixel off it. `allow_defects=True` bundles anyway and records them
-  as `warnings`. Every other reading is an observation, listed and never blocking,
+  as `warnings`. The ramp is refused before anything is launched, like every tool's, and
+  on an indexed sprite whose palette cannot hold it exactly the harness's reading of what
+  it became goes in `assessment.palette` and in a refusal for pixels off it, since the
+  palette may be why they are off it. Every other reading is an observation, listed and never blocking,
   because observations do not separate good art from poor: calibrated on 22 pieces from
   this repository (showcase and probe sprites, the death knight and warden judged poor,
   two potions drawn for a comparison, three template placeholders), the item sheet, the

@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ..app import mcp
-from ..core import validation
+from ..core import indexed, validation
 from ..core.errors import ExportError, ValidationFailed
 from ..core.limits import (
     MAX_BATCH_OPERATIONS,
+    MAX_COLOR_LIST_LENGTH,
     MAX_FRAMES_PER_DIRECTION,
     MAX_GRID_CELLS,
     MAX_WALK_DIRECTIONS,
@@ -267,7 +268,10 @@ def export_game_asset_bundle(
             planned output is checked up front, so the bundle fails before writing any
             file if a target already exists.
         ramp: The colours the art is drawn from, as given to `assess_sprite`. When set,
-            every drawn pixel must be one of them.
+            every drawn pixel must be one of them. Refused before anything is launched
+            past the colour-list cap or in a notation that does not parse. On an indexed
+            sprite whose palette cannot hold it exactly, `assessment.palette` says so,
+            and a refusal for pixels off it carries that reading.
         allow_defects: Bundle even when the assessment finds a defect (default False).
             The defects are then the manifest's `warnings`, and `assessment.waived` is
             true.
@@ -275,6 +279,10 @@ def export_game_asset_bundle(
     Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
     disk as manifest.json inside the bundle).
     """
+    if ramp:
+        # Refused before anything is launched, as every tool that takes a ramp refuses one.
+        check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+        ramp = inspect.ramp_as_hex(ramp)
     info = inspect.get_sprite_info(filename)
     base = Path(filename).stem
     bundle = bundle_name or f"{base}_bundle"
@@ -298,12 +306,18 @@ def export_game_asset_bundle(
     assessment = inspect.assess_frames(filename, frame_count=info["frameCount"],
                                        width=info["width"], height=info["height"],
                                        ramp=ramp)
+    # On an indexed sprite whose palette cannot hold the ramp exactly, pixels off it are
+    # the palette's doing rather than the shading's, so that reading travels with them.
+    palette_notes = indexed.ramp_readings(assessment.pop("ramp_on_palette", None) or {})
+    if palette_notes:
+        assessment["palette"] = palette_notes
     defects = [_frames_reading(found) for found in assessment["defects"]]
     if defects and not allow_defects:
         count = f"{len(defects)} defect{'s' if len(defects) > 1 else ''}"
         raise ValidationFailed(
             f"The art has {count}, so nothing was bundled:\n"
             + "".join(f"- {line}\n" for line in defects)
+            + "".join(f"The palette may be why: {note}\n" for note in palette_notes)
             + "Fix them (assess_sprite measures one frame in full), or pass "
             "allow_defects=True to bundle anyway; they are then the manifest's warnings."
         )

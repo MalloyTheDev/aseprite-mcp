@@ -129,3 +129,29 @@ def test_a_bundle_too_large_to_assess_says_so(monkeypatch):
     manifest = workflow.export_game_asset_bundle(name)
     assert "no frame was judged" in manifest["assessment"]["skipped"]
     assert any(w.startswith("The art was not assessed") for w in manifest["warnings"])
+
+
+def test_on_an_indexed_palette_the_refusal_says_the_palette_may_be_why():
+    """The default indexed palette holds none of RAMP exactly, so the square is drawn in
+    its nearest entries and every pixel is off the declared ramp. That is the palette's
+    doing, not the shading's, and the refusal has to say so or it sends the caller to
+    fix art that is not wrong."""
+    name = "gate/indexed.aseprite"
+    sprite.create_sprite(name, 16, 16, color_mode="indexed", overwrite=True)
+    drawing.draw_rectangle(name, 4, 4, 8, 8, RAMP[1], filled=True)
+    drawing.draw_rectangle(name, 4, 4, 8, 8, RAMP[0])
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        workflow.export_game_asset_bundle(name, ramp=RAMP)
+    message = str(excinfo.value)
+    assert "off the declared ramp" in message
+    assert "The palette may be why:" in message and "indexed" in message
+
+
+@pytest.mark.pure
+def test_a_ramp_that_does_not_parse_is_refused_before_anything_launches(monkeypatch):
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("Aseprite was launched for a ramp that cannot parse")
+    monkeypatch.setattr(inspect, "run_lua", refuse)
+    with pytest.raises(ValueError, match="Could not parse colour 'nope'"):
+        workflow.export_game_asset_bundle("gate/any.aseprite", ramp=["#000000", "nope"])

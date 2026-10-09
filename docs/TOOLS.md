@@ -4343,7 +4343,10 @@ Args:
         planned output is checked up front, so the bundle fails before writing any
         file if a target already exists.
     ramp: The colours the art is drawn from, as given to `assess_sprite`. When set,
-        every drawn pixel must be one of them.
+        every drawn pixel must be one of them. Refused before anything is launched
+        past the colour-list cap or in a notation that does not parse. On an indexed
+        sprite whose palette cannot hold it exactly, `assessment.palette` says so,
+        and a refusal for pixels off it carries that reading.
     allow_defects: Bundle even when the assessment finds a defect (default False).
         The defects are then the manifest's `warnings`, and `assessment.waived` is
         true.

@@ -458,7 +458,7 @@ def assess_sprite(
         # with the palette capped at 256), so this is consistency and not a weakness: a
         # cap that holds for seven of eight call sites is a cap nobody can rely on.
         check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
-        ramp = _ramp_hex(ramp)
+        ramp = ramp_as_hex(ramp)
     src = resolve_path(filename)
     measured = run_lua(_ASSESS_LUA, {
         "src": lua_path(src), "frame": int(frame), "layer": layer,
@@ -562,7 +562,7 @@ def assess_sprite(
     }
 
 
-def _ramp_hex(ramp: list[str]) -> list[str]:
+def ramp_as_hex(ramp: list[str]) -> list[str]:
     """A declared ramp as hex, whatever notation each colour was given in.
 
     The metrics compare against hex and parse nothing else, so a ramp named the way every
@@ -618,10 +618,13 @@ def assess_frames(filename: str, *, frame_count: int, width: int, height: int,
     run to. Past it, an evenly spaced sample including the first and last frame is judged
     and `frames_assessed` says which; a single frame past it is not judged at all, and
     `skipped` says why rather than the gate passing in silence.
+
+    With a `ramp` on an indexed sprite, `ramp_on_palette` carries the harness's
+    measurement of what the ramp became on the palette, for `indexed.ramp_readings`.
     """
     if ramp:
         check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
-        ramp = _ramp_hex(ramp)
+        ramp = ramp_as_hex(ramp)
     result: dict = {"frames_total": frame_count, "frames_assessed": [],
                     "defects": [], "observations": []}
     budget = MAX_ASSESS_PIXELS // max(1, width * height)
@@ -633,7 +636,12 @@ def assess_frames(filename: str, *, frame_count: int, width: int, height: int,
     measured = run_lua(_ASSESS_FRAMES_LUA, {
         "src": lua_path(resolve_path(filename)),
         "frames": _spread(frame_count, budget),
+        # Passed through only so the harness measures what the ramp becomes on an
+        # indexed palette, as it does for assess_sprite; the Lua does nothing else with it.
+        "ramp": [parse_color(c) for c in ramp] if ramp else None,
     })
+    if measured.get("ramp_on_palette"):
+        result["ramp_on_palette"] = measured["ramp_on_palette"]
     palette = measured["palette"]
     scored: dict[tuple, dict] = {}
     per_frame: list[tuple[int, dict]] = []
