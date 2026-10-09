@@ -125,7 +125,7 @@ def shift_along_ramp(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
 
     local rx, ry = ARG.x, ARG.y
     local rw = ARG.width or (spr.width - rx)
@@ -136,7 +136,7 @@ def shift_along_ramp(
     for yy = ry, ry + rh - 1 do
       for xx = rx, rx + rw - 1 do
         if xx >= 0 and yy >= 0 and xx < img.width and yy < img.height then
-          local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
+          local r, g, b, a = img_rgba(spr, img, xx, yy)
           if a > 0 then
             local idx, dist = ramp_match(ramp, r, g, b)
             if dist <= ARG.tolerance then
@@ -239,7 +239,7 @@ local function build_region(spr, img, W, H, base, tolerance)
     mask[y] = {}
     for x = 0, W - 1 do
       local inside = false
-      local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+      local r, g, b, a = img_rgba(spr, img, x, y)
       if a > 0 and (_sel == nil or _sel:contains(x, y)) then
         if base == nil then
           inside = true
@@ -517,7 +517,7 @@ def shade_region_by_light(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
 
@@ -573,7 +573,7 @@ def shade_region_by_light(
           if idx < 1 then idx = 1 end
           if idx > #ramp then idx = #ramp end
           local c = ramp[idx]
-          local _, _, _, a = px_to_rgba(spr, img:getPixel(x, y))
+          local _, _, _, a = img_rgba(spr, img, x, y)
           img_set(img, x, y, rgba_to_px(spr, c.r, c.g, c.b, a))
           per_step[idx] = per_step[idx] + 1
           shaded = shaded + 1
@@ -728,7 +728,7 @@ def specular_highlight(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name, 0) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
     local W, H = img.width, img.height
 
     local mask, count = build_region(spr, img, W, H, ARG.base, ARG.tolerance)
@@ -1001,7 +1001,7 @@ def contact_shadow(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
     local W, H = img.width, img.height
     local ramp, occ = ARG.ramp, ARG.occluder
     local R = ARG.radius
@@ -1014,7 +1014,7 @@ def contact_shadow(
     for y = 0, H - 1 do
       is_occ[y] = {}
       for x = 0, W - 1 do
-        local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+        local r, g, b, a = img_rgba(spr, img, x, y)
         local hit = false
         if a > 0 then
           opaque = opaque + 1
@@ -1047,7 +1047,7 @@ def contact_shadow(
     for y = 0, H - 1 do
       for x = 0, W - 1 do
         if not is_occ[y][x] then
-          local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+          local r, g, b, a = img_rgba(spr, img, x, y)
           if a > 0 then
             -- Nearest occluder within the radius, so the darkening falls off with
             -- distance instead of being a hard band.
@@ -1242,7 +1242,7 @@ def seam_occlusion(
     if layer.isGroup then error("Cannot shade a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
 
@@ -1256,7 +1256,7 @@ def seam_occlusion(
       if p.x < 0 or p.y < 0 or p.x >= W or p.y >= H then
         off_canvas = off_canvas + 1
       else
-        local r, g, b, a = px_to_rgba(spr, img:getPixel(p.x, p.y))
+        local r, g, b, a = img_rgba(spr, img, p.x, p.y)
         if a == 0 then
           transparent = transparent + 1
         else
@@ -1447,7 +1447,7 @@ def surface_emission(
     end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
     local W, H = img.width, img.height
     local ramp, source = ARG.ramp, ARG.source
 
@@ -1460,7 +1460,7 @@ def surface_emission(
     for y = 0, H - 1 do
       outside[y], opaque[y] = {}, {}
       for x = 0, W - 1 do
-        local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+        local r, g, b, a = img_rgba(spr, img, x, y)
         local is_solid = a > 0
         local is_source = false
         if is_solid then
@@ -1503,7 +1503,7 @@ def surface_emission(
           local ring = math.floor(dist[y][x] / 3.0 + 0.5)
           if ring >= 1 and ring <= ARG.radius then
             in_reach = in_reach + 1
-            local r, g, b, a = px_to_rgba(spr, img:getPixel(x, y))
+            local r, g, b, a = img_rgba(spr, img, x, y)
             local idx, d = ramp_match(ramp, r, g, b)
             if d > ARG.tolerance then
               off_ramp = off_ramp + 1
@@ -1647,7 +1647,7 @@ def outline_smart(
     if layer.isGroup then error("Cannot outline a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
 
@@ -1675,7 +1675,7 @@ def outline_smart(
                   if lx ~= nil then dot = (-dx) * lx + (-dy) * ly end
                   if best_dot == nil or dot > best_dot then
                     best_dot = dot
-                    local r, g, b = px_to_rgba(spr, img:getPixel(sx, sy))
+                    local r, g, b = img_rgba(spr, img, sx, sy)
                     best_c = { r = r, g = g, b = b }
                   end
                 end
@@ -1803,7 +1803,7 @@ def dither_band(
     if layer.isGroup then error("Cannot dither a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
     local W, H = img.width, img.height
     local ramp = ARG.ramp
     local a_col, b_col = ramp[ARG.from_step], ramp[ARG.to_step]
@@ -1822,7 +1822,7 @@ def dither_band(
 
     local function which(x, y)
       if x < 0 or y < 0 or x >= W or y >= H then return nil end
-      local r, g, b, al = px_to_rgba(spr, img:getPixel(x, y))
+      local r, g, b, al = img_rgba(spr, img, x, y)
       if al == 0 then return nil end
       local da = math.sqrt(0.299*(r-a_col.r)^2 + 0.587*(g-a_col.g)^2 + 0.114*(b-a_col.b)^2)
       local db = math.sqrt(0.299*(r-b_col.r)^2 + 0.587*(g-b_col.g)^2 + 0.114*(b-b_col.b)^2)
@@ -1874,7 +1874,7 @@ def dither_band(
 
     local mark = landed()
     for _, p in ipairs(pending) do
-      local _, _, _, al = px_to_rgba(spr, img:getPixel(p.x, p.y))
+      local _, _, _, al = img_rgba(spr, img, p.x, p.y)
       img_set(img, p.x, p.y, rgba_to_px(spr, p.c.r, p.c.g, p.c.b, al))
     end
 
@@ -1970,7 +1970,7 @@ def gradient_map(
     if layer.isGroup then error("Cannot map a group layer: " .. layer.name) end
     local framenum = require_frame(spr, ARG.frame, "frame")
     local img = get_draw_image(spr, layer, framenum)
-    draw_target(spr, layer)
+    draw_target(spr, layer, img)
 
     local rx, ry = ARG.x, ARG.y
     local rw = ARG.width or (spr.width - rx)
@@ -2000,7 +2000,7 @@ def gradient_map(
     for yy = ry, ry + rh - 1 do
       for xx = rx, rx + rw - 1 do
         if xx >= 0 and yy >= 0 and xx < img.width and yy < img.height then
-          local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
+          local r, g, b, a = img_rgba(spr, img, xx, yy)
           if a > 0 then
             local t = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
             -- Contrast about mid-grey, then bias. Stated in that order because the two

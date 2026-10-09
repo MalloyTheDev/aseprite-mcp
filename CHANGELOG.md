@@ -6,7 +6,41 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`render_preview(views=...)` shows the checks a pixel artist makes by eye.** An agent
+  judging its own work can only make the checks it is shown, and it was shown colour
+  alone. `views` lays the frame out side by side, labelled, from the same single
+  launch: `color`; `value`, greys at each colour's own relative luminance (the WCAG
+  measure `assess_sprite` uses, not HLS lightness, which calls pure yellow and pure blue
+  equally light); `silhouette`, every drawn pixel black on white; and `actual`, the
+  frame at 1x. On the death knight the silhouette is a black bell with ears and the
+  cape is the same grey as the plate, which is what the assessment's fused-masses and
+  1.2:1 keyline readings say in numbers. Transparency shows as a checkerboard, the
+  panels share a scale fitted to 2048 px, and a sheet that cannot fit at 1x is refused
+  rather than shrunk below the pixels. The server's instructions now ask for the views
+  after every pass.
+
 ### Fixed
+
+- **Tools that read the layer they draw on treated an indexed Background's transparent
+  index as empty.** The writes were fixed earlier; the reads were not, so the same scene
+  behaved differently as an RGB and as an indexed Background. Measured on a 14x14 night
+  sky with four lone stars: `fill_gradient` with `respect_alpha` wrote 9 of 196 pixels on
+  the indexed one, skipping the whole sky as if it were transparent; `replace_color`
+  could not find the background's own colour, so recolouring a converted scene's sky did
+  nothing; `invert_colors` and the other filters skipped it; `remove_stray_pixels` left
+  3 of 4 stars that it recoloured on RGB. A new prelude reader, `img_rgba`, returns a
+  pixel of the image a tool draws into as Aseprite shows it (the transparent index as its
+  colour, a translucent entry blended over it, reproducing a measured render), and
+  `img_solid`, `replace_color`, the filters, the shading masks and the silhouette reader
+  behind `normalize_edge_runs` read through it. It is held to the draw target by
+  identity, so a tool that also reads another layer still sees that layer's
+  transparency, and a test proves an ordinary layer above an indexed Background keeps
+  it. `add_outline` now refuses a Background of either kind: on an indexed one it had
+  laid 20 pixels of the background's own colour over itself and reported them written,
+  and on an RGB one it returned ok having written nothing. Each fix's test fails on the
+  previous code.
 
 - **`quality.readings` ignored its tier on an empty frame.** The early return for a
   frame with nothing drawn handed back every reading whichever tier was asked for, so a
@@ -43,6 +77,18 @@ All notable changes to this project are documented here. The format is based on
   and a test now names it as it names them.
 
 ### Changed
+
+- **The server's instructions teach the method that produces better art.** They ended
+  with "`create_sprite`, then draw, then preview", and every client reads them before its
+  first call. They now say what this project's own output showed: pick the route by
+  subject (detailed subjects are where hand-placed output has been weakest, so convert a
+  source image when one exists; icons, props and small sprites draw well by hand), plan
+  the ramps first, block in with shapes, finish as placed pixels through
+  `get_pixels(format="map")` and `draw_pixel_map`, shade one material at a time, look at
+  `render_preview` after every pass, and treat a clean `assess_sprite` as the absence of
+  measured faults rather than a verdict. A test holds every tool and argument the
+  instructions name to the registered set, so a rename cannot leave them teaching a call
+  that fails.
 
 - **`export_game_asset_bundle` judges the art before it writes anything.** Every frame
   is assessed the way `assess_sprite` judges one, all of them in a single launch with

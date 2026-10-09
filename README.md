@@ -838,7 +838,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | Tool | Description |
 | --- | --- |
 | `get_sprite_info` | Full structured state: size, mode, frames, layer tree, tags, palette. |
-| `render_preview` | Render a frame to a PNG image you can view, scaled up for small sprites; a large one is fitted to 2048 px on its longer side. A frame the sprite does not have is refused. |
+| `render_preview` | Render a frame to a PNG image you can view, scaled up for small sprites; a large one is fitted to 2048 px on its longer side. A frame the sprite does not have is refused. `views` shows it several ways side by side from the same render: `color`, `value` (greys of each colour's own lightness, for whether the forms read without hue), `silhouette` (black on white, for whether the shape reads and its parts have air between them) and `actual` (1x). |
 | `get_pixels` | Read the pixel colours of a region, composited or from one named layer, as rows or as a compact symbol map (≤ 64×64 per call). |
 | `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why. |
 | `diff_sprites` | Compare two frames pixel for pixel: pixels added to or removed from the silhouette, repainted inside it, or changed in alpha alone, plus the colours involved and the box they sit in. Says so loudly when nothing changed, and takes `expect=` to turn the measurement into a pass or a fail. |
@@ -1195,9 +1195,11 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 - **Indexed sprites and the Background.** On an ordinary layer the transparent palette
   index means "no pixel". On a Background Aseprite draws it as a colour, and so do
   `get_pixels`, `assess_sprite`, `diff_sprites`, the palette tools, `trim_sprite`,
-  `set_color_mode`'s conversion check and the drawing tools here. Not yet: effects that
-  read their own layer before writing it, such as `add_outline`'s seed test and the
-  shading masks, still treat it as empty on a Background.
+  `set_color_mode`'s conversion check, the drawing tools, and every effect and shading
+  tool that reads the layer it is about to write (`replace_color`, the filters, the
+  shading masks, `remove_stray_pixels`, `normalize_edge_runs`, `fill_gradient` with
+  `respect_alpha`). The same scene behaves the same as an RGB or an indexed Background.
+  `add_outline` refuses a Background of either kind, since nothing on one is empty.
 - **Fills start from Aseprite's factory colours.** Where a Background gains pixels
   (`convert_layer_to_background`, or growing its canvas with `resize_canvas` or
   `crop_sprite`) they are black, or the transparent index on an indexed sprite, whatever

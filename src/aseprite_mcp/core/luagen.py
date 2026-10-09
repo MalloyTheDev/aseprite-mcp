@@ -300,6 +300,11 @@ end
 -- index through onto an ordinary layer, where it is invisible, #138) needs a tool to
 -- name a Background as its target and then write somewhere else.
 local _draw_opaque = false
+-- The image a tool draws into when that is an indexed Background, so `img_solid` reads
+-- it the way Aseprite draws it. Held by identity rather than as a mode flag, because a
+-- tool that also reads another layer (a drop shadow's source, a cast shadow's ground)
+-- must still see that layer's transparency.
+local _opaque_img = nil
 
 -- Which palette entry best matches an opaque colour. Entries that cannot draw a
 -- visible pixel are not candidates, however near they are.
@@ -363,8 +368,9 @@ end
 -- transparent index becomes a colour `nearest_index` may answer with, because Aseprite
 -- draws it there; anywhere else, and with no call at all, nothing changes. Pass nil to
 -- clear it, as each batch operation does before it runs.
-local function draw_target(spr, layer)
+local function draw_target(spr, layer, img)
   _draw_opaque = layer ~= nil and spr.colorMode == ColorMode.INDEXED and layer.isBackground
+  _opaque_img = _draw_opaque and img or nil
 end
 
 -- What a Background is filled with where it gains a pixel. The prelude's black, unless
@@ -484,10 +490,32 @@ local function rgba_to_px(spr, r, g, b, a)
   end
 end
 
--- Is the pixel at (x,y) opaque (alpha > 0 / not the transparent index)?
+-- A pixel of `img` as it shows. The same as px_to_rgba, except on the image a tool draws
+-- into when that is an indexed Background (`draw_target`): Aseprite draws every pixel of
+-- one over its transparent index's colour, so that index shows as its colour rather than
+-- as nothing, and a translucent entry blends over it (measured: #0000c8 at alpha 128 over
+-- #0a141e renders #050a73, which this reproduces). Read as nothing, the index made
+-- replace_color miss the background's own colour, a filter skip it, and add_outline lay
+-- 20 pixels of it over itself and report them written.
+local function img_rgba(spr, img, x, y)
+  local px = img:getPixel(x, y)
+  if _opaque_img == nil or not rawequal(img, _opaque_img) then
+    return px_to_rgba(spr, px)
+  end
+  local pal = spr.palettes[1]
+  local base = pal:getColor(spr.transparentColor)
+  if px == spr.transparentColor then return base.red, base.green, base.blue, 255 end
+  local c = pal:getColor(px)
+  local t = c.alpha / 255
+  return math.floor(c.red * t + base.red * (1 - t) + 0.5),
+         math.floor(c.green * t + base.green * (1 - t) + 0.5),
+         math.floor(c.blue * t + base.blue * (1 - t) + 0.5), 255
+end
+
+-- Is the pixel at (x,y) drawn, as it shows (see img_rgba)?
 local function img_solid(spr, img, x, y)
   if x < 0 or y < 0 or x >= img.width or y >= img.height then return false end
-  local _, _, _, a = px_to_rgba(spr, img:getPixel(x, y))
+  local _, _, _, a = img_rgba(spr, img, x, y)
   return a > 0
 end
 

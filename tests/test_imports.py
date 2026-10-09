@@ -574,3 +574,23 @@ def test_the_ramp_measurement_is_keyed_on_the_name_every_tool_uses():
                 f"{name} calls run_ramp_lua but passes no \"ramp\" key to Lua, so the "
                 "harness has nothing to measure and the wrapper will always be silent"
             )
+
+
+def test_every_name_the_instructions_give_is_a_real_tool_or_argument():
+    """The instructions are the one text every client reads before its first call, and
+    they now teach a method by naming tools. A renamed tool would leave them teaching a
+    call that fails, so each backticked name has to be a registered tool or an argument
+    one of them takes."""
+    import asyncio
+    import re
+
+    from aseprite_mcp.app import INSTRUCTIONS
+    from aseprite_mcp.server import mcp
+
+    tools = asyncio.run(mcp.list_tools())
+    names = {t.name for t in tools}
+    arguments = {arg for t in tools for arg in (t.input_schema.get("properties") or {})}
+    named = set(re.findall(r"`([a-z_]+)(?:\(|`)", INSTRUCTIONS))
+    assert {"draw_pixel_map", "render_preview", "assess_sprite"} <= named, named
+    unknown = sorted(named - names - arguments)
+    assert not unknown, f"the instructions name what no tool is or takes: {unknown}"

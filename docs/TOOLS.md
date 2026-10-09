@@ -427,11 +427,22 @@ scale, so the image is at most 2048 px on its longer side; one already longer th
 that is shown at 1x. A frame the sprite does not have is refused, not swapped for
 another.
 
+Args:
+    views: Show the frame several ways side by side, labelled, instead of in colour
+        alone. Choose from "color"; "value", the frame in greys of each colour's own
+        lightness, which shows whether the forms read without hue (a figure drawn in
+        dark colours on a dark outline turns to mud here and nowhere else);
+        "silhouette", every drawn pixel black on white, which shows whether the shape
+        reads with no interior and whether its parts have air between them; and
+        "actual", the frame at 1x, the size a player sees. `["color", "value",
+        "silhouette"]` is the usual check after a pass. Still one launch.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |
 | `frame` | integer | no | 1 |
 | `scale` | integer | no | 8 |
+| `views` | array<string> | no | _none_ |
 
 
 ## Layers
@@ -2584,6 +2595,11 @@ its two widths empty.
 
 For an outline in colours taken from the artwork's own ramp rather than one flat
 colour, see `outline_smart`, which varies hue instead of width.
+
+A Background is refused, in either colour mode: every pixel on one is drawn, so an
+outline has no empty pixel to go into or grow from. Outline the art on its own layer;
+on an indexed sprite, `convert_background_to_layer` turns the transparent index back
+into transparency first.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |

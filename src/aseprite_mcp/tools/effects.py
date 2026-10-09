@@ -212,6 +212,11 @@ def add_outline(
 
     For an outline in colours taken from the artwork's own ramp rather than one flat
     colour, see `outline_smart`, which varies hue instead of width.
+
+    A Background is refused, in either colour mode: every pixel on one is drawn, so an
+    outline has no empty pixel to go into or grow from. Outline the art on its own layer;
+    on an indexed sprite, `convert_background_to_layer` turns the transparent index back
+    into transparency first.
     """
     if connectivity not in (4, 8):
         raise ValidationFailed("connectivity must be 4 or 8")
@@ -282,6 +287,17 @@ def add_outline(
       return n
     end
     local W, H = img.width, img.height
+
+    -- A Background has no empty pixel: an outside outline has nowhere to go and an inside
+    -- one nothing to grow from. On an RGB Background this returned ok having written
+    -- nothing; on an indexed one it laid the background's own colour over itself and
+    -- reported the pixels written.
+    if layer.isBackground then
+      error("layer '" .. layer.name .. "' is a Background, where every pixel is drawn, so "
+        .. "an outline has no empty pixel to go into or grow from. Outline the art on its "
+        .. "own layer; on an indexed sprite, convert_background_to_layer first turns the "
+        .. "transparent index back into transparency.", 0)
+    end
 
     -- Nothing to outline is refused rather than reported as success. Pointed at a layer
     -- with no art, every pass found no seed, wrote nothing and returned ok with no
@@ -1316,7 +1332,7 @@ def replace_color(
     local tp = to_pixel(spr, ARG.to)
     for yy = 0, img.height - 1 do
       for xx = 0, img.width - 1 do
-        local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
+        local r, g, b, a = img_rgba(spr, img, xx, yy)
         if math.abs(r-fr) <= tol and math.abs(g-fg) <= tol
            and math.abs(b-fb) <= tol and math.abs(a-fa) <= tol then
           img_set(img, xx, yy, tp)
@@ -1332,7 +1348,7 @@ def _pixel_pass(snippet_inner: str) -> str:
     return f"""
     for yy = 0, img.height - 1 do
       for xx = 0, img.width - 1 do
-        local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy))
+        local r, g, b, a = img_rgba(spr, img, xx, yy)
         if a > 0 then
           local nr, ng, nb, na = r, g, b, a
           {snippet_inner}
@@ -1792,13 +1808,13 @@ if spr.width * spr.height > ARG.max_pixels then
         ARG.max_pixels .. ". Normalise a smaller sprite, or crop a copy of this one.", 0)
 end
 local img = get_draw_image(spr, layer, framenum)
+draw_target(spr, layer, img)
 
 local rows, drawn = {}, 0
 for yy = 0, spr.height - 1 do
   local row, n, state, length = {}, 0, false, 0
   for xx = 0, spr.width - 1 do
-    local _, _, _, a = px_to_rgba(spr, img:getPixel(xx, yy))
-    local solid = a > 0
+    local solid = img_solid(spr, img, xx, yy)
     if solid then drawn = drawn + 1 end
     if solid == state then
       length = length + 1
