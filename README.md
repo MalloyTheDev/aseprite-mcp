@@ -838,7 +838,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | Tool | Description |
 | --- | --- |
 | `get_sprite_info` | Full structured state: size, mode, frames, layer tree, tags, palette. |
-| `render_preview` | Render a frame to a PNG image you can view, scaled up for small sprites; a large one is fitted to 2048 px on its longer side. A frame the sprite does not have is refused. |
+| `render_preview` | Render a frame to a PNG image you can view, scaled up for small sprites; a large one is fitted to 2048 px on its longer side. A frame the sprite does not have is refused. `views` shows it several ways side by side from the same render: `color`, `value` (greys of each colour's own lightness, for whether the forms read without hue), `silhouette` (black on white, for whether the shape reads and its parts have air between them) and `actual` (1x). |
 | `get_pixels` | Read the pixel colours of a region, composited or from one named layer, as rows or as a compact symbol map (≤ 64×64 per call). |
 | `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why. |
 | `diff_sprites` | Compare two frames pixel for pixel: pixels added to or removed from the silhouette, repainted inside it, or changed in alpha alone, plus the colours involved and the box they sit in. Says so loudly when nothing changed, and takes `expect=` to turn the measurement into a pass or a fail. |

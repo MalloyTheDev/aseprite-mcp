@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`render_preview(views=...)` shows the checks a pixel artist makes by eye.** An agent
+  judging its own work can only make the checks it is shown, and it was shown colour
+  alone. `views` lays the frame out side by side, labelled, from the same single
+  launch: `color`; `value`, greys at each colour's own relative luminance (the WCAG
+  measure `assess_sprite` uses, not HLS lightness, which calls pure yellow and pure blue
+  equally light); `silhouette`, every drawn pixel black on white; and `actual`, the
+  frame at 1x. On the death knight the silhouette is a black bell with ears and the
+  cape is the same grey as the plate, which is what the assessment's fused-masses and
+  1.2:1 keyline readings say in numbers. Transparency shows as a checkerboard, the
+  panels share a scale fitted to 2048 px, and a sheet that cannot fit at 1x is refused
+  rather than shrunk below the pixels. The server's instructions now ask for the views
+  after every pass.
+
 ### Fixed
 
 - **Tools that read the layer they draw on treated an indexed Background's transparent

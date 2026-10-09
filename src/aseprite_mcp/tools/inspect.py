@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import io
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -42,7 +44,8 @@ def get_sprite_info(filename: str) -> dict:
 
 
 @mcp.tool()
-def render_preview(filename: str, frame: int = 1, scale: int = 8) -> Image:
+def render_preview(filename: str, frame: int = 1, scale: int = 8,
+                   views: list[str] | None = None) -> Image:
     """Render a single frame to a PNG and return it as an image you can view.
 
     Use this to *see* your work. frame is 1-based; scale enlarges small sprites
@@ -50,7 +53,19 @@ def render_preview(filename: str, frame: int = 1, scale: int = 8) -> Image:
     scale, so the image is at most 2048 px on its longer side; one already longer than
     that is shown at 1x. A frame the sprite does not have is refused, not swapped for
     another.
+
+    Args:
+        views: Show the frame several ways side by side, labelled, instead of in colour
+            alone. Choose from "color"; "value", the frame in greys of each colour's own
+            lightness, which shows whether the forms read without hue (a figure drawn in
+            dark colours on a dark outline turns to mud here and nowhere else);
+            "silhouette", every drawn pixel black on white, which shows whether the shape
+            reads with no interior and whether its parts have air between them; and
+            "actual", the frame at 1x, the size a player sees. `["color", "value",
+            "silhouette"]` is the usual check after a pass. Still one launch.
     """
+    if views is not None:
+        views = _check_views(views)
     src = resolve_path(filename)
     if not src.exists():
         raise AsepriteError(f"No such sprite: {src}")
@@ -66,6 +81,9 @@ def render_preview(filename: str, frame: int = 1, scale: int = 8) -> Image:
             )
         scale = min(scale, max(1, MAX_PREVIEW_EDGE // max(head.width, head.height)))
     f0 = max(0, int(frame) - 1)
+    # The views are built from one render at 1x and scaled here, where each panel's
+    # scale can be fitted to the sheet rather than to the frame alone.
+    render_scale = 1 if views else scale
 
     fd, out = tempfile.mkstemp(suffix=".png", prefix="asemcp_prev_")
     os.close(fd)
@@ -73,14 +91,133 @@ def render_preview(filename: str, frame: int = 1, scale: int = 8) -> Image:
         run_cli([
             str(src),
             "--frame-range", f"{f0},{f0}",
-            "--scale", str(scale),
+            "--scale", str(render_scale),
             "--save-as", out,
         ])
         data = Path(out).read_bytes()
     finally:
         with contextlib.suppress(OSError):
             os.unlink(out)
+    if views:
+        data = _views_sheet(data, views, scale)
     return Image(data=data, format="png")
+
+
+# The ways render_preview can show a frame besides colour. Each is a check pixel artists
+# make by eye, and a model judging its own work only gets to make it if it is shown.
+PREVIEW_VIEWS = ("color", "value", "silhouette", "actual")
+_SHEET_GAP = 12
+_LABEL_H = 14
+_CHECKER = ((205, 205, 205, 255), (230, 230, 230, 255))
+_CHECKER_CELL = 8
+
+
+def _check_views(views: list[str]) -> list[str]:
+    if not isinstance(views, list) or not views:
+        raise ValidationFailed(
+            f"views is empty; choose one or more of {list(PREVIEW_VIEWS)}, or leave it "
+            "out for the colour image alone.")
+    unknown = [v for v in views if v not in PREVIEW_VIEWS]
+    if unknown:
+        raise ValidationFailed(
+            f"views has {unknown}, which render_preview does not draw; choose from "
+            f"{list(PREVIEW_VIEWS)}.")
+    if len(set(views)) != len(views):
+        raise ValidationFailed(f"views names a view twice: {views}.")
+    return list(views)
+
+
+def _grey(lum: float) -> int:
+    """The sRGB grey whose relative luminance is `lum`, so it looks as light as the colour."""
+    encoded = 12.92 * lum if lum <= 0.0031308 else 1.055 * lum ** (1 / 2.4) - 0.055
+    return max(0, min(255, round(encoded * 255)))
+
+
+def _view_panel(frame, view: str):
+    """One view of an RGBA frame at 1x, before scaling and backdrop."""
+    from PIL import Image as PILImage
+
+    if view in ("color", "actual"):
+        return frame
+    fill = (0, 0, 0, 0) if view == "value" else (255, 255, 255, 255)
+    out = PILImage.new("RGBA", frame.size, fill)
+    src, dst = frame.load(), out.load()
+    # quality.luminance, not HLS lightness, which calls pure yellow and pure blue equally
+    # light; cached per colour because a frame repeats a handful of them.
+    greys: dict[tuple[int, int, int], int] = {}
+    for y in range(frame.height):
+        for x in range(frame.width):
+            r, g, b, a = src[x, y]
+            if not a:
+                continue
+            if view == "silhouette":
+                dst[x, y] = (0, 0, 0, 255)
+                continue
+            grey = greys.get((r, g, b))
+            if grey is None:
+                grey = greys[(r, g, b)] = _grey(quality.luminance((r, g, b, a)))
+            dst[x, y] = (grey, grey, grey, a)
+    return out
+
+
+def _views_sheet(png: bytes, views: list[str], scale: int) -> bytes:
+    """The frame in `views`, side by side and labelled, within MAX_PREVIEW_EDGE.
+
+    The scaled panels share one scale, lowered until the sheet fits; "actual" is always
+    1x. A sheet that cannot fit even at 1x is refused rather than shrunk, because a pixel
+    art preview below 1x no longer shows the pixels.
+    """
+    from PIL import Image as PILImage
+    from PIL import ImageDraw
+
+    with PILImage.open(io.BytesIO(png)) as rendered:
+        frame = rendered.convert("RGBA")
+    w, h = frame.size
+    labels = {v: "actual (1x)" if v == "actual" else v for v in views}
+    # A column is as wide as its label where the panel is narrower: a 1x panel of a
+    # 32 px sprite is narrower than "actual (1x)", and the label ran off the sheet.
+    measure = ImageDraw.Draw(PILImage.new("RGB", (1, 1)))
+    label_w = {v: math.ceil(measure.textlength(labels[v])) for v in views}
+    scaled = [v for v in views if v != "actual"]
+    fixed = _SHEET_GAP * (len(views) + 1)
+    if "actual" in views:
+        fixed += max(w, label_w["actual"])
+    if scaled:
+        scale = min(scale,
+                    max(1, (MAX_PREVIEW_EDGE - fixed) // (len(scaled) * w)),
+                    max(1, (MAX_PREVIEW_EDGE - _LABEL_H - 2 * _SHEET_GAP) // h))
+    column = {v: max(w * (1 if v == "actual" else scale), label_w[v]) for v in views}
+    width = _SHEET_GAP * (len(views) + 1) + sum(column.values())
+    height = _LABEL_H + 2 * _SHEET_GAP + h * (scale if scaled else 1)
+    if max(width, height) > MAX_PREVIEW_EDGE:
+        raise ValidationFailed(
+            f"{len(views)} views of a {w}x{h} frame side by side come to {width}x{height} "
+            f"even at 1x, past the {MAX_PREVIEW_EDGE} px a preview may be. Ask for fewer "
+            "views.")
+
+    sheet = PILImage.new("RGB", (width, height), (244, 244, 244))
+    draw = ImageDraw.Draw(sheet)
+    x = _SHEET_GAP
+    for view in views:
+        k = 1 if view == "actual" else scale
+        panel = _view_panel(frame, view).resize((w * k, h * k), PILImage.NEAREST)
+        if view != "silhouette":
+            # A checkerboard behind anything with transparency, as an editor shows it, so
+            # an empty pixel cannot pass for a light grey one.
+            backdrop = PILImage.new("RGBA", panel.size, _CHECKER[0])
+            cells = backdrop.load()
+            for py in range(panel.height):
+                for px in range(panel.width):
+                    if (px // _CHECKER_CELL + py // _CHECKER_CELL) % 2:
+                        cells[px, py] = _CHECKER[1]
+            backdrop.alpha_composite(panel)
+            panel = backdrop
+        sheet.paste(panel.convert("RGB"), (x, _SHEET_GAP + _LABEL_H))
+        draw.text((x, _SHEET_GAP // 2), labels[view], fill=(40, 36, 52))
+        x += column[view] + _SHEET_GAP
+    out = io.BytesIO()
+    sheet.save(out, format="PNG")
+    return out.getvalue()
 
 
 @mcp.tool()

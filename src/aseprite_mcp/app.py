@@ -64,8 +64,9 @@ Making art that holds up, learned from this server's own output:
     or a thicker outline on the shadow side gets written.
   * Shade one material at a time: `shade_region_by_light` scoped with `base_color`,
     then `specular_highlight` with the ramp's top step held back, then `outline_smart`.
-  * Look after every pass with `render_preview`: the silhouette reads, the light
-    comes from one side, no pixel sits alone, the outline is unbroken.
+  * Look after every pass with `render_preview(views=["color", "value", "silhouette"])`:
+    the silhouette reads with air between its parts, the forms still read in grey, the
+    light comes from one side, no pixel sits alone, the outline is unbroken.
   * `assess_sprite` measures faults (pixels off the ramp, a missing keyline, noise,
     fused masses) but cannot tell whether art is good: a clean assessment is not a
     finished sprite, and only the preview can say that. `export_game_asset_bundle`
