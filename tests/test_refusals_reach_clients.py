@@ -1,18 +1,19 @@
 """A refusal must reach the MCP client with its message, not as a masked crash.
 
-Every refusal in this server is an AsepriteMCPError whose message names the way out.
-The 2.x SDK forwards the message of its own ToolError into the is_error result and
-treats every other exception as a crash, masking it to `Error executing tool <name>`
-while the text goes to the server log (mcp.server.mcpserver.exceptions). Measured on
-the live server before the fix: a ragged draw_pixel_map grid cost two blind retries,
-because the row count that named the defect never arrived.
+A refusal from this server names the way out in its message. The 2.x SDK forwards the
+message of its own ToolError into the is_error result and treats every other exception
+as a crash, masking it to `Error executing tool <name>` while the text goes to the
+server log (mcp.server.mcpserver.exceptions). Measured on the live server before the
+fix: a ragged draw_pixel_map grid cost two blind retries, because the row count that
+named the defect never arrived.
 
-`StrictMCPServer.call_tool` therefore translates AsepriteMCPError into ToolError with
-the message intact and the typed error chained as __cause__, and leaves anything else
-masked exactly as the SDK intends for a crash. These tests run at that boundary on the
-real registered server, the same place test_strict_args.py runs. The step after it,
-a raised ToolError's text landing verbatim in the is_error result, is the SDK's own
-documented contract, not ours to re-test.
+`StrictMCPServer.call_tool` therefore translates AsepriteMCPError, and the ValueError
+with which `core` refuses a value, into ToolError with the message intact and the
+original chained as __cause__, and leaves anything else masked exactly as the SDK
+intends for a crash. These tests run at that boundary on the real registered server,
+the same place test_strict_args.py runs. The step after it, a raised ToolError's text
+landing verbatim in the is_error result, is the SDK's own documented contract, not ours
+to re-test.
 """
 
 from __future__ import annotations
@@ -87,3 +88,19 @@ def test_a_refusal_buried_under_a_crash_is_still_surfaced():
     with pytest.raises(ToolError) as excinfo:
         call("wraps_its_refusal", {}, server=server)
     assert "minimum is 1" in str(excinfo.value)
+
+
+def test_a_colour_that_does_not_parse_arrives_with_the_accepted_forms(monkeypatch):
+    """`core` refuses a bad value with ValueError by design. It is a refusal, not a crash,
+    and a mistyped colour is the commonest mistake a caller makes."""
+    from aseprite_mcp.tools import drawing
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("Aseprite was launched for a colour that cannot parse")
+    monkeypatch.setattr(drawing, "run_lua", refuse)
+
+    with pytest.raises(ToolError) as excinfo:
+        call("draw_rectangle", {"filename": "refusals/x.aseprite", "x": 0, "y": 0,
+                                "width": 2, "height": 2, "color": "nope"})
+    message = str(excinfo.value)
+    assert "ValueError" in message and "'nope'" in message and "#RRGGBB" in message

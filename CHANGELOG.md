@@ -14,10 +14,20 @@ All notable changes to this project are documented here. The format is based on
   other exception to `Error executing tool <name>`, with the text going to the server
   log. Measured on the live server, a ragged `draw_pixel_map` grid cost two blind
   retries because the row count that named the defect never arrived. `call_tool` now
-  translates `AsepriteMCPError` into `ToolError` with the message intact and the typed
-  error chained as `__cause__`, for refusals raised inside a tool and for the
-  unknown-argument check alike; a genuine crash stays masked exactly as the SDK
-  intends. Verified through a real stdio client session, not only at the boundary.
+  translates `AsepriteMCPError`, and the `ValueError` with which `core` refuses a value,
+  into `ToolError` with the message intact and the original chained as `__cause__`, for
+  refusals raised inside a tool and for the unknown-argument check alike; any other
+  exception stays masked as the SDK intends for a crash. The `ValueError` half matters
+  most: a mistyped colour, the commonest mistake a caller makes, used to arrive as
+  `Error executing tool draw_rectangle` and now lists the accepted forms. Verified
+  through a real stdio client session, not only at the boundary. `SECURITY.md` records
+  what this discloses.
+
+- **`assess_sprite` crashed on a ramp named the way every drawing tool takes colours.**
+  `ramp=["red"]` or `"10,20,30"` passed the colour check, launched Aseprite, and then
+  crashed in the metrics, which parse hex only; a three-digit `#abc` was silently
+  misread. The ramp is now normalised to hex before anything is measured, and a palette
+  index in a ramp is refused by name, since a ramp is measured against drawn colours.
 
 - **`validate_asset_against_spec` did not carry `readOnlyHint`**, so a client that
   auto-approves read-only tools prompted before every check of a built sprite against its

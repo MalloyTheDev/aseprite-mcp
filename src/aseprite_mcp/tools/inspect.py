@@ -451,6 +451,7 @@ def assess_sprite(
         # with the palette capped at 256), so this is consistency and not a weakness: a
         # cap that holds for seven of eight call sites is a cap nobody can rely on.
         check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+        ramp = _ramp_hex(ramp)
     src = resolve_path(filename)
     measured = run_lua(_ASSESS_LUA, {
         "src": lua_path(src), "frame": int(frame), "layer": layer,
@@ -552,6 +553,26 @@ def assess_sprite(
         "metrics": metrics,
         "readings": notes,
     }
+
+
+def _ramp_hex(ramp: list[str]) -> list[str]:
+    """A declared ramp as hex, whatever notation each colour was given in.
+
+    The metrics compare against hex and parse nothing else, so a ramp named the way every
+    drawing tool accepts colours (`"red"`, `"10,20,30"`, `"#abc"`) crashed the assessment
+    after its launch, or for three-digit hex was silently misread. Opaque colours come
+    back as `#rrggbb`, the form a caller usually wrote, and translucent ones keep alpha.
+    """
+    out = []
+    for colour in ramp:
+        parsed = parse_color(colour)
+        if "index" in parsed:
+            raise ValidationFailed(
+                f"ramp colour {colour!r} is a palette index; a ramp is measured against "
+                "the colours drawn, so give each step as a colour.")
+        hex_colour = "#{r:02x}{g:02x}{b:02x}".format(**parsed)
+        out.append(hex_colour if parsed["a"] == 255 else f"{hex_colour}{parsed['a']:02x}")
+    return out
 
 
 # How a diff finds its differences, and why it is not one pass over both images.

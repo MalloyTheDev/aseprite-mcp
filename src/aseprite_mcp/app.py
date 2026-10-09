@@ -306,6 +306,16 @@ def annotations_for(name: str, *, accepts_overwrite: bool) -> ToolAnnotations:
     return ToolAnnotations(read_only_hint=False, open_world_hint=False)
 
 
+# The exceptions whose message a client may read. `AsepriteMCPError` is this server's own
+# refusal. `ValueError` is how `core` refuses a value, by design, because `core` may not
+# import the tool layer: a colour that does not parse, an easing that does not exist, a
+# light outside its range, each with a message naming the accepted forms. An accidental
+# ValueError's text is disclosed with them, which reveals nothing a caller lacks: every
+# result already carries resolved paths, and the message describes the caller's own
+# input. Anything else is a crash and stays masked, as the SDK intends.
+_REFUSALS = (AsepriteMCPError, ValueError)
+
+
 class StrictMCPServer(MCPServer):
     """An MCPServer that rejects arguments its tools do not declare.
 
@@ -321,14 +331,12 @@ class StrictMCPServer(MCPServer):
     The same registration hook attaches each tool's annotations, and `list_tools` puts the
     input schemas into their portable wire form.
 
-    `call_tool` also translates this server's own refusals into the SDK's `ToolError`.
-    The 2.x SDK treats any other exception as a crash and withholds its message: the
-    client reads only `Error executing tool <name>` while the text goes to the server
-    log. Every refusal here is an `AsepriteMCPError` whose message names the way out,
-    and measured on the live server, a ragged `draw_pixel_map` grid cost two blind
-    retries because the row that named the defect never arrived. The translation keeps
-    the message and chains the typed error as `__cause__`; anything that is not an
-    `AsepriteMCPError` stays masked, exactly as the SDK intends for a crash.
+    `call_tool` also translates this server's refusals into the SDK's `ToolError`. The
+    2.x SDK treats any other exception as a crash and withholds its message: the client
+    reads only `Error executing tool <name>` while the text goes to the server log.
+    Measured on the live server, a ragged `draw_pixel_map` grid cost two blind retries
+    because the row that named the defect never arrived. The translation keeps the
+    message and chains the original as `__cause__`; see `_REFUSALS` for what counts.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -381,14 +389,14 @@ class StrictMCPServer(MCPServer):
             # `context` parameter in the 2.x SDK, and an override that pins the older
             # two-argument shape silently stops receiving anything added after it.
             return await super().call_tool(name, arguments, *args, **kwargs)
-        except AsepriteMCPError as exc:
+        except _REFUSALS as exc:
             # Raised above, or leaked raw by an SDK that does not wrap crashes itself.
             raise ToolError(f"{type(exc).__name__}: {exc}") from exc
         except UnexpectedToolError as exc:
             # The SDK's crash wrapper chains what the tool raised as __cause__ (one more
-            # wrapper deep for a nested tool), so walk the chain for a refusal of ours.
+            # wrapper deep for a nested tool), so walk the chain for a refusal.
             cause = exc.__cause__
-            while cause is not None and not isinstance(cause, AsepriteMCPError):
+            while cause is not None and not isinstance(cause, _REFUSALS):
                 cause = cause.__cause__
             if cause is None:
                 raise
