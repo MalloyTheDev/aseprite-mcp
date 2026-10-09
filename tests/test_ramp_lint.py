@@ -40,6 +40,7 @@ import sys
 import pytest
 
 from aseprite_mcp.core import quality, ramplint
+from aseprite_mcp.tools import palette
 
 pytestmark = pytest.mark.pure
 
@@ -954,3 +955,53 @@ def test_cvd_reading_is_silent_when_value_carries_the_boundary() -> None:
     recheck = ramplint.cvd_recheck(g)
     assert recheck["deuteranopia"]["collapsed_pairs"] == 0, recheck["deuteranopia"]
     assert ramplint.cvd_readings(recheck) == []
+
+
+# --- the black floor, and the three ramps that taught it -------------------------------
+
+
+@pytest.mark.pure
+def test_black_floor_catches_every_ramp_that_actually_failed() -> None:
+    """The three ramps that bottomed out at pure black in one piece, and the fix.
+
+    Each was written, shipped into a build, and found by hand only after the sprite's
+    separator reading collapsed to under one percent: a wide `light_range` around a dark
+    base clips the first step to #000000, which is darker than any usable keyline, so the
+    drawing's darkest colour stops being the outline.
+
+    The check is the keyline-aware one in `core.craft`, not a reading on the ramp. Asked
+    to judge alone, `black_floor` fires on two known-good showcase ramps whose art uses
+    black as its own darkest value, which is why it reports and does not speak.
+    """
+    from aseprite_mcp.core import craft
+
+    keyline = "#07080f"
+    failing = (
+        ("cloth", {"base_color": "#7a2634", "steps": 8, "chroma": 0.52,
+                   "shadow_hue": "#2a0e22", "light_hue": "#ffb08a",
+                   "sat_curve": "peak", "easing": "perceptual",
+                   "light_range": 0.68}),
+        ("steel", {"base_color": "#4a5368", "steps": 12, "chroma": 0.30,
+                   "shadow_hue": "#1b2140", "light_hue": "#e8f0ff",
+                   "sat_curve": "peak", "saturation_shift": 28.0,
+                   "easing": "perceptual", "light_range": 0.86}),
+        ("leather", {"base_color": "#4a3526", "steps": 5, "chroma": 0.38,
+                     "shadow_hue": "#170d08", "light_hue": "#c79a6a",
+                     "easing": "perceptual", "light_range": 0.44}),
+    )
+    for name, spec in failing:
+        colours = palette.generate_ramp(**spec)["colors"]
+        assert ramplint.ramp_lints(colours)["black_floor"]["is_black"], (
+            f"{name} stopped clipping to black")
+        assert not craft.ramp_floor_clears(colours, keyline), (
+            f"{name} clips to black and the guard let it through")
+
+    fixed = palette.generate_ramp(
+        base_color="#7a2634", steps=10, chroma=0.52, shadow_hue="#2a0e22",
+        light_hue="#ffb08a", sat_curve="peak", easing="perceptual",
+        light_range=0.52)["colors"]
+    assert not ramplint.ramp_lints(fixed)["black_floor"]["is_black"]
+    assert craft.ramp_floor_clears(fixed, keyline)
+
+    # And the ramp half of the ranking gate still reports exactly one firing ramp.
+    assert ramplint.ramp_readings(ramplint.ramp_lints(fixed)) == []

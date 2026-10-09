@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **160 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **163 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -20,16 +20,16 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Effects & colour adjustments](#effects--colour-adjustments) (13)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
-- [Image stamping](#image-stamping) (2)
+- [Image stamping](#image-stamping) (3)
 - [Palette](#palette) (15)
 - [Slices](#slices) (4)
 - [Transforms](#transforms) (2)
-- [Export & import](#export--import) (11)
+- [Export & import](#export--import) (12)
 - [Engine export presets](#engine-export-presets) (2)
 - [Minecraft resource packs](#minecraft-resource-packs) (4)
 - [Reference / rotoscope](#reference--rotoscope) (2)
 - [Workflows (high-level scaffolding)](#workflows-high-level-scaffolding) (9)
-- [Asset spec (declarative build)](#asset-spec-declarative-build) (3)
+- [Asset spec (declarative build)](#asset-spec-declarative-build) (4)
 - [Batch operations](#batch-operations) (1)
 - [GUI companion mode](#gui-companion-mode) (2)
 - [Health & self-test](#health--self-test) (1)
@@ -48,6 +48,12 @@ Convert the Background layer back into a normal (transparent-capable) layer.
 ### `convert_layer_to_background`
 
 Convert a normal layer into the sprite's opaque Background layer.
+
+Its transparent pixels are filled: with black on an RGB or grayscale sprite, and with
+the transparent palette index on an indexed one, which a Background shows as that
+entry's colour, so no index changes and converting back restores the transparency.
+The fill used to come from the editor's colour bar, so the same call gave a different
+colour on every machine.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -95,7 +101,8 @@ Returns the new sprite's structured info.
 Crop the canvas to the rectangle (x, y, width, height).
 
 The resulting canvas is subject to the same dimension/area caps as `create_sprite`
-(a "crop" to a larger rectangle grows the canvas).
+(a "crop" to a larger rectangle grows the canvas). Where it grows a Background, the new
+area is black, or the transparent palette index on an indexed sprite.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -121,7 +128,8 @@ Resize the canvas WITHOUT scaling the artwork (adds or trims space).
 
 anchor controls where existing content sits in the new canvas:
 "top_left" (default) or "center". The new canvas is subject to the same
-dimension/area caps as `create_sprite`.
+dimension/area caps as `create_sprite`. New area is transparent, except on a
+Background, where it is black, or the transparent palette index on an indexed sprite.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -414,7 +422,10 @@ _No parameters._
 Render a single frame to a PNG and return it as an image you can view.
 
 Use this to *see* your work. frame is 1-based; scale enlarges small sprites
-(default 8x) so individual pixels are visible.
+(default 8x) so individual pixels are visible. A large sprite is shown at a lower
+scale, so the image is at most 2048 px on its longer side; one already longer than
+that is shown at 1x. A frame the sprite does not have is refused, not swapped for
+another.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -551,19 +562,25 @@ Update one or more layer properties. Only the arguments you pass are changed.
 
 ### `add_frame`
 
-Add a frame: appended when it is empty, inserted when it copies another.
+Add a frame: an empty one goes at the end, a copy goes right after the frame it copies.
 
 Args:
-    duration_ms: Frame duration in milliseconds (default 100).
-    copy_from: If given (1-based), duplicate the content of that frame; otherwise the
-        new frame is empty and goes at the end. Must name an existing frame: an
-        out-of-range number is rejected, not clamped. **A copy is inserted, not
-        appended**, so every frame from that point on is renumbered: on a two-frame
-        sprite, `copy_from=1` gives three frames whose second is the original first.
-        Pass no `copy_from` and the sprite's existing frames keep their numbers.
+    duration_ms: The new frame's duration in milliseconds (default 100). With
+        `copy_from` it is set on the copy; the frame copied keeps its own.
+    copy_from: If given (1-based), the new frame duplicates that frame and is
+        **inserted directly after it**, so every later frame is renumbered: on a red,
+        blue sprite, `copy_from=1` gives red, red, blue, the copy being frame 2 and
+        blue moving from 2 to 3. Copying the last frame moves nothing. Tags follow
+        their frames: one that covered the copied frame grows by one to take in the
+        copy, and one after it moves up by one. Must name an existing frame: an
+        out-of-range number is rejected, not clamped. Without `copy_from` the new
+        frame is empty, goes at the end, and nothing moves.
 
-Returns the new frame number and updated frame count. With `copy_from`, `newFrame` is
-where the copy landed, which is also the number the frames after it shifted from.
+Returns `newFrame`, the number of the frame this call added (with `copy_from`, always
+`copy_from + 1`), and the new `frameCount`. `inserted` says whether existing frames
+were renumbered; when they were, `renumbered_from` is the first number affected: every
+frame that had that number or a higher one before the call is one higher after it, so
+a caller holding frame numbers from before the call adds one to each of those.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -574,10 +591,15 @@ where the copy landed, which is also the number the frames after it shifted from
 
 ### `duplicate_frame`
 
-Duplicate an existing frame (1-based); the copy is inserted after it.
+Duplicate an existing frame (1-based); the copy is inserted directly after it.
 
 `frame` must already exist: an out-of-range number is rejected with the sprite's
 valid range rather than clamped to it.
+
+Returns `newFrame`, the copy's number (always `frame + 1`), and the new `frameCount`,
+plus `inserted` and `renumbered_from` exactly as `add_frame` reports them: every frame
+after the one duplicated moves up by one, and a tag that covered it grows to take in
+the copy.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -2510,6 +2532,11 @@ Args:
 
 Add a pixel outline around the artwork on a layer, optionally weighted by light.
 
+The outline is drawn around the art **already on the layer given, onto that same
+layer**. It does not outline other layers, so it cannot draw a keyline onto a fresh
+empty layer of its own; a layer with no drawn pixels on the frame is refused rather
+than reported as an outline that drew nothing.
+
 Args:
     color: Outline colour.
     thickness: Outline width in pixels (default 1). With `light_angle`, this is the
@@ -3158,6 +3185,45 @@ anything larger, write the file into the workspace and use `stamp_file`.
 | `frame` | integer | no | 1 |
 
 
+### `import_spritesheet`
+
+Turn a sprite sheet image into an animated sprite, one frame per cell.
+
+The inbound seam for art made elsewhere, such as a PixelPrep strip, and the reverse of
+`export_spritesheet`. Aseprite's own Import Sprite Sheet does the slicing.
+
+Args:
+    filename: The .aseprite file to create.
+    source: The sheet: a PNG, or anything else Aseprite opens, in the workspace.
+    frame_width: One cell's width in pixels.
+    frame_height: One cell's height in pixels. Both must divide the sheet exactly in
+        the direction the layout reads it: a partial cell is refused, never cropped
+        or padded, and the refusal names the sizes that would divide.
+    layout: "horizontal" reads one row left to right, so frame_height must be the
+        sheet's height. "vertical" reads one column top to bottom, so frame_width
+        must be its width. "grid" reads rows left to right, top to bottom.
+    overwrite: Replace `filename` if it already exists (default False = no-clobber).
+
+The sprite is one cell in size, with one layer holding every frame, in the sheet's
+colour mode and palette. An opaque sheet keeps its Background layer, which on an
+indexed sheet is what keeps the colour at the transparent palette index visible.
+Frames are 100ms: time them with `set_all_frame_durations` or `apply_timing_curve`.
+A cell with nothing in it still becomes a frame, and `empty_frames` lists them, so a
+grid's spare cells are visible as such. A sheet with frames of its own, such as a
+GIF, is refused rather than sliced from its first frame. At most 4,096 frames.
+
+Returns the sprite's info, plus `layer` and `empty_frames`.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `source` | string | yes |  |
+| `frame_width` | integer | yes |  |
+| `frame_height` | integer | yes |  |
+| `layout` | string | no | horizontal |
+| `overwrite` | boolean | no | False |
+
+
 ### `stamp_file`
 
 Composite another image/sprite file onto a layer at (x, y).
@@ -3734,6 +3800,41 @@ file matching the pattern already exists.
 | `overwrite` | boolean | no | False |
 
 
+### `export_motion_trail`
+
+Export every frame of a motion composited into one image, the oldest faintest.
+
+The way to judge whether a whole motion reads: arc shape, spacing and squash are all
+visible at once in a still image that can be studied, where a GIF moves on before a
+defect can be seen, and `export_onion_skin` shows only a few frames either side of one.
+
+Args:
+    filename: The sprite.
+    output: The image to write. Use .png: the fades are alpha, which a GIF cannot keep.
+    tag: Composite this tag's frames.
+    frames: Or these frames (1-based), in the order given. Pass neither for every
+        frame of the sprite, and not both.
+    scale: Integer upscaling of the output (default 6). The scaled image is held to
+        the same caps as any canvas.
+    overwrite: Replace `output` if it already exists (default False = no-clobber).
+
+Frame i of n is drawn at opacity 255 * i / n, so the last is fully opaque and on top.
+An opaque Background layer would bury every frame under the next, so when there is one
+it is drawn once, as of the last frame, and the frames contribute their other layers.
+
+Returns the frames used, the opacity each was drawn at, and whether a Background was
+laid underneath.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `output` | string | yes |  |
+| `tag` | string | no | _none_ |
+| `frames` | array<integer> | no | _none_ |
+| `scale` | integer | no | 6 |
+| `overwrite` | boolean | no | False |
+
+
 ### `export_onion_skin`
 
 Export a frame with neighbouring frames ghosted behind it (onion skin).
@@ -4226,10 +4327,29 @@ Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
 GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
 `manifest.json` describing everything.
 
+**The art is judged before anything is written.** Every frame is assessed the way
+`assess_sprite` judges one (all of them in one launch, identical frames once), and
+the result is the manifest's `assessment` section. A *defect* refuses the bundle: an
+absent keyline on a figure of several masses, or, with `ramp`, a drawn pixel that is
+not on it. Those are the readings that scored as faults against sprites known to be
+good and bad. Every other reading is an *observation*, listed and never blocking,
+because observations do not separate good art from poor: on this project's own
+gallery its best sheet draws three and a featureless blob none. So a clean assessment
+means none of the measured faults, not that the art is good; looking at
+`render_preview` is still the only judge of that.
+
 Args:
     overwrite: Replace existing bundle files (default False = no-clobber). Every
         planned output is checked up front, so the bundle fails before writing any
         file if a target already exists.
+    ramp: The colours the art is drawn from, as given to `assess_sprite`. When set,
+        every drawn pixel must be one of them. Refused before anything is launched
+        past the colour-list cap or in a notation that does not parse. On an indexed
+        sprite whose palette cannot hold it exactly, `assessment.palette` says so,
+        and a refusal for pixels off it carries that reading.
+    allow_defects: Bundle even when the assessment finds a defect (default False).
+        The defects are then the manifest's `warnings`, and `assessment.waived` is
+        true.
 
 Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
 disk as manifest.json inside the bundle).
@@ -4240,6 +4360,8 @@ disk as manifest.json inside the bundle).
 | `bundle_name` | string | no | _none_ |
 | `scale` | integer | no | 1 |
 | `overwrite` | boolean | no | False |
+| `ramp` | array<string> | no | _none_ |
+| `allow_defects` | boolean | no | False |
 
 
 ### `make_4_frame_idle_animation`
@@ -4406,6 +4528,39 @@ returns the validation report instead.
 | `spec` | object | yes |  |
 
 
+### `validate_asset_against_spec`
+
+Does a built sprite actually match the spec it was built from.
+
+The loop closer. `validate_asset_spec` asks whether a document is well formed and
+`plan_asset_spec` asks what it would do; this asks the question that bites, which is
+whether the artifact and the declaration agree.
+
+That gap is where this project's worst bugs have lived. A figure shipped with no
+keyline at all because the outline was drawn onto an empty layer, and every count in
+the result reported success. Three ramps clipped to pure black and beat their own
+outline while passing every check that existed. Nothing was comparing what was asked
+for against what arrived.
+
+**Structure only, like `build_asset_from_spec`:** canvas size, layer names, frame
+count, tag names, slice names and palette capacity. The spec layer declares no pixels,
+so this verifies no pixels; `assess_sprite` is where the drawing itself is judged.
+
+Args:
+    filename: The sprite to check. Defaults to the spec's own ``<name>.aseprite``,
+        which is what `build_asset_from_spec` would have written.
+
+Returns `ok`, the list of fields `checked`, and a `mismatches` list naming the
+declared value, the observed one and what the difference means. `verifiable` is false
+when the spec declares nothing this can check, so an empty result is never mistaken
+for a passing one.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `spec` | object | yes |  |
+| `filename` | string | no | _none_ |
+
+
 ### `validate_asset_spec`
 
 Validate an ``aseprite_mcp.asset_spec.v1`` document (does the *spec* make sense?).
@@ -4451,7 +4606,7 @@ Operations and their arguments ('?' marks an optional argument):
   add_frame(duration_ms=int?, copy_from=frame?)
   add_layer(name=str, group=str?, opacity=int?, blend_mode=str?, visible=bool?)
   add_slice(name=str, x=int, y=int, width=int, height=int, color=color?)
-  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?)  [also accepts from_frame for from, to_frame for to]
+  add_tag(name=str, from=frame, to=frame, direction=str?, color=color?, repeats=int?)  [also accepts from_frame for from, to_frame for to]
   clear_layer(layer=str?, frame=frame?)
   copy_cel(layer=str, from=frame, to=frame, to_layer=str?)  [also accepts from_frame for from, to_frame for to]
   delete_cel(layer=str, frame=frame)

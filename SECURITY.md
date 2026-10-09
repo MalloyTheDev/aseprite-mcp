@@ -24,8 +24,9 @@ One consequence is worth stating outright rather than leaving to be assembled fr
 two exclusions: **image parsing happens in Aseprite, not here.** Opening, importing or
 stamping a file hands it to Aseprite's own decoders. The size and dimension guards below
 bound how much work a file can cause, not whether a decoder handles it correctly, and the
-pre-stamp header check reads dimensions with Pillow only for formats Pillow recognizes, so
-for Aseprite's native `.aseprite`/`.ase` it makes no claim at all. A malformed or hostile
+header check made before an outside image is opened (to stamp it, import it, slice it into
+frames or lay it in as a reference) reads dimensions with Pillow only for formats Pillow
+recognizes, so for Aseprite's native `.aseprite`/`.ase` it makes no claim at all. A malformed or hostile
 image is therefore parsed by Aseprite with whatever robustness Aseprite has. Treat putting
 a file you do not trust into the workspace as handing it to that parser.
 
@@ -115,6 +116,19 @@ a file you do not trust into the workspace as handing it to that parser.
     invocation timeout, and `draw_ellipse(radius_x=1000000, radius_y=1000000,
     filled=True)` asked for ~3.1e12 point tables, which is an out-of-memory rather than
     a slow call.
+  - **Every outside image, not only stamped ones (unreleased).** The declared-dimension
+    check ran before stamping alone (`stamp_file`, `draw_image_base64`). `import_image`,
+    `stamp_pattern`, `add_reference_layer`, `import_reference_sequence` and
+    `import_spritesheet` opened their images without it, so a few-kilobyte PNG declaring
+    16384x16384 reached Aseprite through any of them. Each now refuses before anything is
+    launched or created, every image of a reference sequence included.
+  - **Rendered output (unreleased).** No export bounded `scale`: a 16x16 sprite at scale
+    50000 asked Aseprite for an 800,000-pixel-square image. Every export now refuses a
+    scaled image past the canvas caps before launch, with a sprite sheet bounded by all its
+    frames together, reading the size from the `.aseprite` header. A sheet's `padding` is
+    held to 64, `render_preview` fits its image to 2048 px on the longer side (a 1920x1080
+    scene used to come back 15360x8640), `import_spritesheet` makes at most 4,096 frames,
+    and `export_motion_trail` composites at most 512.
 - **Timeouts.** Every Aseprite invocation runs under `ASEPRITE_MCP_TIMEOUT` (default 90s,
   clamped to 1-3600s so a hostile or fat-fingered value can't disable the guard). On
   expiry the child is killed, not abandoned, and the generated script is removed.
@@ -141,6 +155,16 @@ a file you do not trust into the workspace as handing it to that parser.
   checkout run third-party code (`uv sync` executes the build backends the lock resolves
   to). Dependencies are installed with `uv sync --locked`, so the committed `uv.lock` is
   what gets tested and a stale lock fails CI rather than being silently re-resolved.
+
+- **Which error text reaches a client (unreleased).** A refusal's message is sent to the
+  client so a caller can correct itself: this server's own `AsepriteMCPError`, and the
+  `ValueError` with which `core` refuses a value (a colour that does not parse, an easing
+  that does not exist). Any other exception is a crash, which the MCP SDK masks to
+  `Error executing tool <name>`, sending the text only to the server log. The disclosed
+  messages describe the caller's own input and resolved workspace paths, which every
+  successful result already returns, so over the HTTP transports this reveals nothing a
+  client lacks. It does mean an accidental `ValueError`'s text is disclosed along with the
+  deliberate ones, and nothing distinguishes the two.
 
 ## Out of scope (your responsibility)
 

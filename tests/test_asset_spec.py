@@ -14,6 +14,7 @@ from aseprite_mcp.core.asset_spec import (
     SCHEMA,
     _layer_and_animation_ops,
     _planned_operation_count,
+    compare_to_built,
     plan_spec,
     sprite_filename,
     validate_spec,
@@ -435,3 +436,82 @@ def test_tileset_cells_catches_two_individually_legal_axes():
     spec = {"schema": SCHEMA, "kind": "tileset", "name": "t", "tile_size": 16,
             "columns": 64, "rows": 64}
     assert not validate_spec(spec)["passed"]
+
+
+# --- the loop closer: did what got built match what was asked for ----------------------
+
+
+def _knight_spec() -> dict:
+    return {
+        "schema": "aseprite_mcp.asset_spec.v1", "name": "knight", "kind": "character",
+        "canvas": {"width": 128, "height": 128},
+        "layers": ["cape", "plate", "keyline"],
+        "animations": [{"name": "idle", "frame_count": 4}],
+        "slices": [{"name": "hitbox"}],
+    }
+
+
+def test_compare_to_built_passes_a_sprite_that_matches():
+    observed = {
+        "width": 128, "height": 128,
+        "layers": [{"name": "cape"}, {"name": "plate"}, {"name": "keyline"}],
+        "frames": [{"number": i} for i in range(1, 5)],
+        "tags": [{"name": "idle"}], "slices": [{"name": "hitbox"}],
+    }
+    result = compare_to_built(_knight_spec(), observed)
+    assert result["ok"]
+    assert result["verifiable"]
+    assert set(result["checked"]) == {"canvas", "layers", "animations", "slices"}
+
+
+def test_compare_to_built_names_every_way_a_build_drifted():
+    """Each of these is a real failure mode, not a hypothetical.
+
+    The missing layer is the one that matters most: a figure shipped from this repository
+    with no keyline because `add_outline` was pointed at a layer that was never created,
+    and every count in the build's own result reported success. A declared layer that is
+    absent from the sprite is exactly that bug, and nothing was watching for it.
+    """
+    drifted = {
+        "width": 128, "height": 160,
+        "layers": [{"name": "cape"}, {"name": "plate"}],
+        "frames": [{"number": 1}, {"number": 2}],
+        "tags": [], "slices": [],
+    }
+    result = compare_to_built(_knight_spec(), drifted)
+    assert not result["ok"]
+    fields = {m["field"] for m in result["mismatches"]}
+    assert fields == {"canvas", "layers", "animations", "tags", "slices"}
+    layer_miss = next(m for m in result["mismatches"] if m["field"] == "layers")
+    assert "keyline" in layer_miss["detail"]
+    # Every mismatch says what was asked for and what arrived, not just that they differ.
+    for mismatch in result["mismatches"]:
+        assert mismatch["declared"] is not None
+        assert mismatch["detail"]
+
+
+def test_a_spec_with_nothing_checkable_is_not_reported_as_passing():
+    """"Nothing was wrong" and "nothing was checked" must not look the same.
+
+    This is the shape of the session's recurring failure: a measurement that fires on
+    nothing reads identically to art with no faults, and a skipped test reads identically
+    to a passing one in a summary line.
+    """
+    result = compare_to_built(
+        {"schema": "aseprite_mcp.asset_spec.v1", "name": "n", "kind": "character"},
+        {"width": 64, "height": 64, "layers": [{"name": "Layer 1"}]})
+    assert result["ok"]
+    assert not result["verifiable"]
+    assert result["checked"] == []
+
+
+def test_layer_names_are_found_inside_groups():
+    """A layer declared in the spec may be built inside a group, and still exists."""
+    observed = {
+        "width": 128, "height": 128,
+        "layers": [{"name": "body", "layers": [{"name": "cape"}, {"name": "plate"}]},
+                   {"name": "keyline"}],
+        "frames": [{"number": i} for i in range(1, 5)],
+        "tags": [{"name": "idle"}], "slices": [{"name": "hitbox"}],
+    }
+    assert compare_to_built(_knight_spec(), observed)["ok"]

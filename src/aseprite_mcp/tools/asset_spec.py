@@ -16,7 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..app import mcp
-from ..core.asset_spec import plan_spec, sprite_filename, validate_spec
+from ..core.asset_spec import (
+    compare_to_built,
+    plan_spec,
+    sprite_filename,
+    validate_spec,
+)
 from ..core.errors import ValidationFailed
 from ..core.manifest import file_entry, sprite_summary, workflow_manifest
 from . import (
@@ -185,3 +190,50 @@ def _build_next_actions(kind: str, fname: str) -> list[str]:
         )
     actions.append("Re-run the export_* tools (overwrite=True) to regenerate engine files after editing.")
     return actions
+
+
+@mcp.tool()
+def validate_asset_against_spec(spec: dict, filename: str | None = None) -> dict:
+    """Does a built sprite actually match the spec it was built from.
+
+    The loop closer. `validate_asset_spec` asks whether a document is well formed and
+    `plan_asset_spec` asks what it would do; this asks the question that bites, which is
+    whether the artifact and the declaration agree.
+
+    That gap is where this project's worst bugs have lived. A figure shipped with no
+    keyline at all because the outline was drawn onto an empty layer, and every count in
+    the result reported success. Three ramps clipped to pure black and beat their own
+    outline while passing every check that existed. Nothing was comparing what was asked
+    for against what arrived.
+
+    **Structure only, like `build_asset_from_spec`:** canvas size, layer names, frame
+    count, tag names, slice names and palette capacity. The spec layer declares no pixels,
+    so this verifies no pixels; `assess_sprite` is where the drawing itself is judged.
+
+    Args:
+        filename: The sprite to check. Defaults to the spec's own ``<name>.aseprite``,
+            which is what `build_asset_from_spec` would have written.
+
+    Returns `ok`, the list of fields `checked`, and a `mismatches` list naming the
+    declared value, the observed one and what the difference means. `verifiable` is false
+    when the spec declares nothing this can check, so an empty result is never mistaken
+    for a passing one.
+    """
+    report = validate_spec(spec)
+    if not report["passed"]:
+        raise ValidationFailed("Invalid asset spec: " + "; ".join(report["errors"]))
+    target = filename or sprite_filename(spec["name"])
+    observed = inspect.get_sprite_info(target)
+    result = compare_to_built(spec, observed)
+    result["sprite"] = target
+    if not result["verifiable"]:
+        result["suggested_next_actions"] = [
+            "This spec declares nothing structural to check: add canvas, layers, "
+            "animations, slices or palette to make it verifiable.",
+        ]
+    elif not result["ok"]:
+        result["suggested_next_actions"] = [
+            f"{len(result['mismatches'])} mismatch(es) between the spec and the sprite.",
+            "Rebuild with build_asset_from_spec, or correct the spec to match intent.",
+        ]
+    return result

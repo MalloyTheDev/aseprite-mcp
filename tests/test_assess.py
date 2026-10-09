@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from aseprite_mcp.core.errors import ValidationFailed
 from aseprite_mcp.core.runner import AsepriteError
 from aseprite_mcp.tools import drawing, effects, inspect, layers, palette, shading, sprite
 
@@ -216,3 +217,27 @@ def test_the_map_format_shows_the_shape_rather_than_a_full_canvas(request):
 
     assert mapped["rows"][0] == "........"
     assert mapped["rows"][3][2:5] == "aaa"
+
+
+# ------------------------------------------------------- a ramp in any colour notation
+@pytest.mark.pure
+def test_a_ramp_in_any_notation_is_measured_as_hex():
+    """The metrics parse hex only, so `ramp=["red"]` crashed after the launch and `#abc`
+    was silently misread, though every drawing tool accepts both."""
+    assert inspect.ramp_as_hex(["red", "#AABBCC", "#abc", "10,20,30", "#ff000080"]) == [
+        "#ff0000", "#aabbcc", "#aabbcc", "#0a141e", "#ff000080"]
+
+
+@pytest.mark.pure
+def test_a_palette_index_in_a_ramp_is_refused_by_name():
+    with pytest.raises(ValidationFailed, match="'index:3' is a palette index"):
+        inspect.ramp_as_hex(["#000000", "index:3"])
+
+
+def test_a_named_ramp_measures_exactly_as_its_hex_does(request):
+    name = _orb(request)
+    by_name = inspect.assess_sprite(name, ramp=["black", "white"])
+    by_hex = inspect.assess_sprite(name, ramp=["#000000", "#ffffff"])
+    assert by_name["metrics"]["palette_conformance"] == 0.0
+    assert by_name["metrics"] == by_hex["metrics"]
+    assert by_name["readings"] == by_hex["readings"]

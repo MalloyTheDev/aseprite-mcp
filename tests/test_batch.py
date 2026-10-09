@@ -376,3 +376,26 @@ def test_the_generated_reference_lists_the_new_operations():
     for op in ("set_cel_position", "set_cel_opacity", "copy_cel", "delete_cel",
                "draw_pixels", "remove_frame", "set_all_frame_durations"):
         assert op in reference, f"{op} is registered but undocumented"
+
+
+def test_add_tag_op_sets_repeats_read_back_off_the_saved_sprite():
+    """Issue #223: the batch op could not set `repeats`, so a one-shot tag was impossible
+    inside a batch while a direct call made one fine.
+
+    Read back with `get_sprite_info` rather than taken from the call's result, because
+    the result only reports what the batch *said* it did; the tag in the saved file is
+    what an engine will play.
+    """
+    name = "b/t223.aseprite"
+    sprite.create_sprite(name, 8, 8, "rgb")
+    batch.apply_operations(name, [
+        {"op": "add_frame", "args": {}},
+        {"op": "add_frame", "args": {}},
+        {"op": "add_tag", "args": {"name": "attack", "from": 1, "to": 3, "repeats": 1}},
+        {"op": "add_tag", "args": {"name": "idle", "from": 1, "to": 2}},
+    ])
+    found = {t["name"]: t for t in inspect.get_sprite_info(name)["tags"]}
+    assert found["attack"]["repeats"] == 1
+    # Optional, and absent means a loop: 0 is how the file format says "play forever",
+    # which is the right default for a cycle and must not start being required.
+    assert found["idle"]["repeats"] == 0

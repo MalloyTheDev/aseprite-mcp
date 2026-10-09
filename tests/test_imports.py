@@ -225,6 +225,14 @@ def test_the_tools_an_agent_calls_after_every_pass_are_read_only():
         assert name in READ_ONLY_TOOLS, f"{name} writes nothing and should say so"
 
 
+def test_the_spec_check_is_read_only():
+    """Named for the same reason as the three above: it reads a sprite and compares it with
+    a spec, and it shipped without the annotation anyway."""
+    from aseprite_mcp.app import READ_ONLY_TOOLS
+
+    assert "validate_asset_against_spec" in READ_ONLY_TOOLS
+
+
 def test_every_read_only_tool_actually_exists():
     """A renamed tool would leave a stale name here, silently annotating nothing."""
     import asyncio
@@ -458,8 +466,11 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     resolves_its_ramp_in_python = {"smear_frame"}
     # assess_sprite measures instead of writing, so its reading belongs in `readings`
     # beside the conformance number it qualifies, not in `warnings`. It passes the ramp
-    # to Lua for the measurement and consumes it itself.
-    reports_it_as_a_reading = {"assess_sprite"}
+    # to Lua for the measurement and consumes it itself. export_game_asset_bundle takes
+    # its ramp for the same measurement, through `inspect.assess_frames`, and carries the
+    # reading in `assessment.palette` and in any refusal for pixels off the ramp, since
+    # on an indexed sprite the palette may be why they are off it.
+    reports_it_as_a_reading = {"assess_sprite", "export_game_asset_bundle"}
     # shade_facets consumes its ramp in Python, picking one entry per facet from the
     # directions it was given, and then writes those as ordinary colours. So it never
     # hands a ramp to Lua either, and `run_ramp_lua` has nothing of its own to wrap. It
@@ -520,8 +531,8 @@ def test_every_tool_that_takes_a_ramp_reports_it_against_an_indexed_palette():
     # The list is asserted rather than just iterated: a lookup that quietly found nothing
     # would pass every assertion above and prove nothing at all.
     assert sorted(checked) == [
-        "assess_sprite", "cast_shadow", "contact_shadow", "dither_band", "glow",
-        "gradient_map", "outline_smart", "seam_occlusion", "shade_facets",
+        "assess_sprite", "cast_shadow", "contact_shadow", "dither_band",
+        "export_game_asset_bundle", "glow", "gradient_map", "outline_smart", "seam_occlusion", "shade_facets",
         "shade_region_by_light",
         "shift_along_ramp",
         "smear_frame", "specular_highlight", "surface_emission",

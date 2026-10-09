@@ -16,6 +16,7 @@ from ..core.models import FRAME_GUARD_LUA
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
 from .drawing import _draw
+from .image import check_image_dimensions
 
 
 @mcp.tool()
@@ -105,9 +106,12 @@ def stamp_pattern(
         opacity, blend_mode: Compositing of each tile.
     """
     check_region_size(width, height, x=x, y=y, field="pattern region")
+    source_path = resolve_path(source)
+    # The same decompression-bomb guard as stamp_file: the tile is opened in full.
+    check_image_dimensions(str(source_path))
     args = {
         "src": lua_path(resolve_path(filename)),
-        "source": lua_path(resolve_path(source)),
+        "source": lua_path(source_path),
         "layer": layer, "frame": int(frame),
         "x": int(x), "y": int(y), "width": width, "height": height,
         "sx": max(0, int(spacing_x)), "sy": max(0, int(spacing_y)),

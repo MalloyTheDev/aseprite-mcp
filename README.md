@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **160 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **163 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -123,7 +123,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 160 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 163 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -506,12 +506,14 @@ ramp's top step. A highlight turned out to be load-bearing.
 And on a *shaded* subject the reading then fires anyway, in both modes, because the darker
 pixels run out of ramp before the trail ends and clamp at the dark entry. That is not
 avoidable by drawing better: the only subject that cannot clamp is one painted in a single
-colour. The warning is right that those copies come out the same colour, and wrong about
-why, which is filed as
-[#226](https://github.com/MalloyTheDev/aseprite-mcp/issues/226): it blames the palette and
-suggests adding colours while its own numbers say the palette holds every target exactly.
-So the generator asserts on `trail_on_palette`'s counts rather than on the sentence, and
-those counts are what separate a clamped ramp from a palette that is genuinely too small.
+colour. The reading used to blame the palette for it and suggest adding colours, while its
+own numbers said the palette held every target exactly
+([#226](https://github.com/MalloyTheDev/aseprite-mcp/issues/226)). It now tells the two
+apart, a clamp being copies that wanted one colour and a short palette copies that wanted
+several, and gives each its own remedy: for a stretch, `mode='echo'`. The generator asserts
+on the sentence as well as on `trail_on_palette`'s counts, and the "crushed palette" case it
+builds turned out to be clamps too: the two colours there that share a palette entry belong
+to different parts of the subject, so no copy merges because of the palette.
 
 ### Scaffold a whole asset in one call
 
@@ -709,11 +711,12 @@ deterministic scaffolding, no AI generation.
 | `create_icon_set` | Grid sheet of icon cells, each a placeholder inside a named slice (`icon_0`, …). |
 | `create_rpg_item_sheet` | Grid sheet with a named slice per item (sword/shield/potion/…). |
 | `make_8_direction_walk_template` | 8-direction walk template: frames + one tag per direction (N/NE/E/…). |
-| `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. |
+| `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. Assesses every frame first and refuses on a measured defect (an absent keyline, or with `ramp`, a pixel off it) unless `allow_defects=True`; every other reading is listed in the manifest's `assessment`. |
 | `export_godot_spriteframes` | Godot 4 `SpriteFrames` resource (.tres) + packed sheet; one animation per tag, timed from frame durations. |
 | `export_slice_metadata` | Engine-agnostic `<sprite>_slices.json`: hitbox/hurtbox/collision/attach/9-slice/pivot from slice names or JSON data. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
 | `validate_asset_spec` / `plan_asset_spec` / `build_asset_from_spec` | Describe an asset once (`aseprite_mcp.asset_spec.v1`), then validate it, dry-run the plan, or build it (structure only, canvas/layers/frames/tags/slices/palette + exports; you draw the art). |
+| `validate_asset_against_spec` | Closes the loop: does the sprite that got built actually match the spec it was built from. Canvas, layer names, frame count, tags, slices, palette capacity. Reports what it checked as well as what failed, so "nothing was wrong" and "nothing was checked" cannot be confused. |
 
 > "Make me an idle-animated hero and a game-ready bundle."
 
@@ -721,7 +724,30 @@ deterministic scaffolding, no AI generation.
 2. Draw the character on the `body` / `details` layers (low-level tools).
 3. `make_4_frame_idle_animation("hero.aseprite")` makes a 4-frame loop tagged `idle`.
 4. `validate_sprite_for_game_export("hero.aseprite", expected_width=32, required_tags=["idle"])` confirms it is game-ready.
-5. `export_game_asset_bundle("hero.aseprite", scale=8)` writes PNG/GIF/sheet+JSON/manifest into `hero_bundle/`.
+5. `export_game_asset_bundle("hero.aseprite", scale=8)` judges every frame, then writes PNG/GIF/sheet+JSON/manifest into `hero_bundle/`. A defect refuses the bundle with the frames and the fix named; the manifest's `assessment` lists the readings worth a look that do not block it.
+
+### Bring art in from elsewhere
+
+Art made outside the server (a PixelPrep conversion, a downloaded sheet, a screenshot)
+comes in through two tools, and the rest of the toolset then works on it as on anything
+drawn here.
+
+1. `import_image("scene.png", "scene.aseprite")` for one picture. A PNG with an alpha
+   channel, which is what PixelPrep writes, arrives as an ordinary layer; an opaque one
+   without alpha, or an opaque indexed PNG, arrives as a **Background**, which Aseprite
+   draws opaque everywhere.
+2. `import_spritesheet("walk.aseprite", "walk_strip.png", 32, 48)` for a strip, a column
+   (`layout="vertical"`) or a grid (`layout="grid"`) of frames. A cell size that does not
+   divide the sheet is refused before anything is launched, and spare grid cells come back
+   as `empty_frames`.
+3. `set_color_mode("scene.aseprite", "indexed")` to limit the palette. An opaque scene keeps
+   every pixel: one of its colours can land on the transparent index (in both scenes tried
+   while building this it was the darkest), which a Background shows as a colour, and the
+   readers and drawing tools treat it as one.
+4. `assess_sprite` and `render_preview` to look at it (a large scene previews at a scale that
+   keeps the image within 2048 px), then edit it like any other sprite.
+5. For animation, `export_motion_trail` shows every frame of a motion in one image, so arcs
+   and spacing can be judged before anything is exported.
 
 ### Workflow manifest contract
 
@@ -737,7 +763,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 `selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
 section of their own, because the sections above each describe the *product* while these
 are a verdict on the *call*, and because every other result in this server reports them
-there: one rule reads them across all 160 tools. They are **absent rather than zero**, so a
+there: one rule reads them across all 163 tools. They are **absent rather than zero**, so a
 key that is present at all means there is something to read, and a tool that writes no
 pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
 them, which let a batch report `status: applied` for an op whose every pixel an active
@@ -812,7 +838,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | Tool | Description |
 | --- | --- |
 | `get_sprite_info` | Full structured state: size, mode, frames, layer tree, tags, palette. |
-| `render_preview` | Render a frame to a PNG image you can view (scaled). |
+| `render_preview` | Render a frame to a PNG image you can view, scaled up for small sprites; a large one is fitted to 2048 px on its longer side. A frame the sprite does not have is refused. |
 | `get_pixels` | Read the pixel colours of a region, composited or from one named layer, as rows or as a compact symbol map (≤ 64×64 per call). |
 | `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why. |
 | `diff_sprites` | Compare two frames pixel for pixel: pixels added to or removed from the silhouette, repainted inside it, or changed in alpha alone, plus the colours involved and the box they sit in. Says so loudly when nothing changed, and takes `expect=` to turn the measurement into a pass or a fail. |
@@ -831,7 +857,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 ### Frames (animation)
 | Tool | Description |
 | --- | --- |
-| `add_frame` | Append a frame (empty, or a copy of another). |
+| `add_frame` | Add a frame: empty at the end, or a copy right after the frame it copies. |
 | `duplicate_frame` · `remove_frame` | Duplicate / delete a frame. |
 | `set_frame_duration` · `set_all_frame_durations` | Set per-frame / uniform durations (ms). |
 | `reverse_frames` · `move_frame` | Turn a run of frames round, or move one frame to another position. Cels on every layer, durations and cel links all travel with the frame. |
@@ -999,7 +1025,9 @@ entry.
 | `export_layer` · `export_layers` | Export one layer / each layer to separate files. |
 | `export_tags` | Export each animation tag's frames to separate files. |
 | `export_onion_skin` | Render a frame with neighbouring frames ghosted behind it. |
+| `export_motion_trail` | Every frame of a motion in one image, oldest faintest, so arcs and spacing can be judged at a glance. |
 | `import_image` | Build an editable `.aseprite` from a flat image. |
+| `import_spritesheet` | Slice a sprite sheet image into frames, one per cell: a strip, a column or a grid. |
 
 ### Minecraft resource packs
 | Tool | Description |
@@ -1126,7 +1154,7 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
   symlink that points outside it) are **rejected** unless you set
   `ASEPRITE_MCP_ALLOW_ABSOLUTE=1`.
 - **No-clobber by default.** Every output-writing tool (`create_sprite`, `save_sprite_as`,
-  `import_image`, all `export_*`, `export_game_asset_bundle`) refuses to overwrite an
+  `import_image`, `import_spritesheet`, all `export_*`, `export_game_asset_bundle`) refuses to overwrite an
   existing file; pass `overwrite=True` to replace it on purpose. Multi-file exports
   validate every target up front, so they fail before writing anything if any target
   already exists. Pattern exports (`frames/walk_{frame}.png`) are expanded by Aseprite
@@ -1135,6 +1163,9 @@ This server hands an AI agent a **file capability**, so access is scoped by defa
   pixel/tile/colour lists are capped, canvases are capped at 16384px per axis **and**
   16,777,216 pixels of area (so two individually-legal axes can't add up to gigabytes),
   inline base64 images at 32 MB, and text rasterization is budgeted while it renders.
+  An outside image whose header declares more than the canvas caps is refused before it
+  is opened, an export's `scale` and a sheet's `padding` are held so the rendered image
+  stays inside them, and `render_preview` fits a large sprite to 2048 px.
   `ASEPRITE_MCP_TIMEOUT` is clamped to 1-3600s so it can't be set to something that
   disables the timeout.
 - **No shell, no injection.** Aseprite is invoked with list-form arguments (never a
@@ -1161,6 +1192,16 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 - `get_pixels` is capped at 4096 px (e.g. 64×64) per call; read in tiles for larger areas.
 - Anti-aliasing (`antialias=True`) only applies to RGB sprites; it's ignored on
   indexed/gray. Tilemaps and reference layers require **Aseprite 1.3+**.
+- **Indexed sprites and the Background.** On an ordinary layer the transparent palette
+  index means "no pixel". On a Background Aseprite draws it as a colour, and so do
+  `get_pixels`, `assess_sprite`, `diff_sprites`, the palette tools, `trim_sprite`,
+  `set_color_mode`'s conversion check and the drawing tools here. Not yet: effects that
+  read their own layer before writing it, such as `add_outline`'s seed test and the
+  shading masks, still treat it as empty on a Background.
+- **Fills start from Aseprite's factory colours.** Where a Background gains pixels
+  (`convert_layer_to_background`, or growing its canvas with `resize_canvas` or
+  `crop_sprite`) they are black, or the transparent index on an indexed sprite, whatever
+  the editor's colour bar holds. A headless run used to inherit that colour bar.
 
 ## Troubleshooting
 

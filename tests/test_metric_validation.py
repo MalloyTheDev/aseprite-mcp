@@ -936,3 +936,63 @@ def test_the_rejected_candidate_still_beats_the_readings_it_was_written_against(
     assert paired is not None
     assert paired.auc > 0.75
     assert paired.better >= 1, "one matched pair inverts, which is part of why it is discarded"
+
+
+# --- the craft measures, and why none of them judges -----------------------------------
+
+
+@pytest.mark.pure
+def test_the_craft_thresholds_stay_discarded():
+    """Pins the verdict, so nobody promotes these on the strength of the idea.
+
+    All three were proposed, measured against the corpus and discarded the same day. The
+    failure is not that the thresholds were badly chosen: the orderings invert. Good art
+    here runs 0 to 68 percent singleton colour regions and bad art 36 to 47, so the ranges
+    overlap almost entirely and the good side is the wider one. Edge variety is worse than
+    useless at AUC 0.168, because a sprite sheet's panels have perfectly straight edges and
+    are perfectly good art while the known-bad golem has the most varied edges in the set.
+    """
+    from aseprite_mcp.core import craft
+
+    built = corpus.build()
+
+    def column(samples, fn):
+        return [fn(craft.score(s.grid)) for s in samples]
+
+    bad = list(built.known_bad) + [
+        s for s in built.mutants if s.defect in ("stray single pixels", "masses welded")]
+    for name, fn in (("singleton_share",
+                      lambda m: m["clusters"]["singleton_share"]),
+                     ("share_in_8plus",
+                      lambda m: -m["clusters"]["share_in_8plus"]),
+                     ("edge_variety",
+                      lambda m: -m["edge_runs"]["distinct"])):
+        discordant = V.discordant_pairs(column(built.good, fn), column(bad, fn))
+        assert discordant, (
+            f"{name} stopped inverting on the corpus. If that is real rather than a "
+            "corpus change, re-read the DISCARDED block in core/craft.py before "
+            "promoting it: the gate is the ordering, not the threshold.")
+
+    # And the module says so: it reports numbers and judges nothing.
+    assert craft.readings(craft.score(built.good[0].grid)) == []
+
+
+@pytest.mark.pure
+def test_the_ramp_floor_guard_survives_because_it_is_definitional():
+    """The one craft check that does judge, and the fault it was written for.
+
+    Three separate ramps in one piece bottomed out at or near pure black, which is darker
+    than any sensible keyline, so the drawing's darkest colour became a handful of
+    interior shadow pixels and the outline stopped being measurable. `ramp_chroma` cannot
+    see it, because a step at pure black has no hue and so is not a grey step.
+    """
+    from aseprite_mcp.core import craft, quality
+
+    keyline = "#07080f"
+    assert craft.ramp_floor_clears(["#151823", "#2d3647", "#46536a"], keyline)
+    assert not craft.ramp_floor_clears(["#000000", "#2d3647"], keyline)
+    assert not craft.ramp_floor_clears(["#040103", "#2d3647"], keyline)
+    # The hole it plugs: a pure-black step passes the chroma check it would otherwise
+    # have to get past.
+    assert quality.ramp_chroma(["#000000", "#40141f", "#95342f", "#d59779"])[
+        "grey_steps"] == 0

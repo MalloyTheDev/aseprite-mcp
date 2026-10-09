@@ -7,6 +7,10 @@ is `color_mode` and the schema layer discards keys it does not recognise.
 
 The same bug was found and fixed in pixelprep-mcp first; this is the port, with the op-level
 equivalent inside apply_operations covered too.
+
+At the MCP boundary the refusal arrives as the SDK's ToolError, the one exception type
+whose message the 2.x SDK forwards to the client (test_refusals_reach_clients.py has the
+full story); the typed UnknownArgumentError rides along as its __cause__.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ import asyncio
 import json
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 import aseprite_mcp.server  # noqa: F401  -- importing registers the real tools
 from aseprite_mcp.app import StrictMCPServer, mcp
@@ -54,30 +59,33 @@ def test_a_declared_argument_is_passed_through(server):
 
 
 def test_an_unknown_argument_raises(server):
-    with pytest.raises(UnknownArgumentError):
+    with pytest.raises(ToolError):
         call(server, "sprite", {"colour_mode": "indexed"})
 
 
 def test_the_message_names_the_offender_and_the_alternatives(server):
-    with pytest.raises(UnknownArgumentError) as excinfo:
+    with pytest.raises(ToolError) as excinfo:
         call(server, "sprite", {"colour_mode": "indexed"})
     message = str(excinfo.value)
     assert "colour_mode" in message and "color_mode" in message and "width" in message
 
 
 def test_a_valid_argument_alongside_an_invalid_one_still_raises(server):
-    with pytest.raises(UnknownArgumentError):
+    with pytest.raises(ToolError):
         call(server, "sprite", {"width": 64, "colour_mode": "indexed"})
 
 
-def test_it_is_an_aseprite_error_so_existing_handling_reports_it(server):
-    with pytest.raises(AsepriteMCPError):
+def test_the_typed_error_is_preserved_as_the_cause(server):
+    """Handlers that catch AsepriteMCPError still get the typed refusal, one link down."""
+    with pytest.raises(ToolError) as excinfo:
         call(server, "sprite", {"nope": 1})
+    assert isinstance(excinfo.value.__cause__, UnknownArgumentError)
+    assert isinstance(excinfo.value.__cause__, AsepriteMCPError)
 
 
 def test_the_real_server_rejects_a_misspelled_parameter():
     """Regression: this exact call created an RGB sprite and reported success."""
-    with pytest.raises(UnknownArgumentError) as excinfo:
+    with pytest.raises(ToolError) as excinfo:
         call(mcp, "create_sprite",
              {"filename": "x.aseprite", "width": 64, "height": 64, "colour_mode": "indexed"})
     assert "color_mode" in str(excinfo.value)

@@ -151,6 +151,35 @@ MAX_SHADOW_ELLIPSE_POINTS = 2_097_152
 # 0 as "forever", which is how a cycle is marked; the cap is the format's, not ours.
 MAX_TAG_REPEATS = 65_535
 
+
+def tag_repeat_count(repeats: int | None) -> int | None:
+    """Validate a tag's repeat count before Aseprite gets a chance to reinterpret it.
+
+    Aseprite takes -1 and stores 0, which means "forever": the opposite of the one-shot
+    anybody typing a negative number is after. It is refused here rather than quietly
+    turned into its own opposite.
+
+    Lives in `core` rather than beside the `add_tag` tool because both the tool and the
+    batch op have to refuse the same values with the same sentence, and `core` may not
+    import from `tools`. It used to be private to `tools/tags.py`, which is why the batch
+    op could not reuse it and so could not take `repeats` at all.
+    """
+    if repeats is None:
+        return None
+    count = int(repeats)
+    if count < 0:
+        raise ValidationFailed(
+            f"repeats must be 0 or more; got {count}. Aseprite stores a negative count "
+            "as 0, which means 'play forever', the opposite of a one-shot. Use 1 for a "
+            "tag that plays once."
+        )
+    if count > MAX_TAG_REPEATS:
+        raise ValidationFailed(
+            f"repeats is {count}; the file format stores at most {MAX_TAG_REPEATS}. "
+            "Use 0 for a tag that plays forever."
+        )
+    return count
+
 # Frames one call may move a cel across. The distribution is computed in Python and
 # applied inside a single transaction, so the work is one launch whatever the count; the
 # cap is here because the frame list comes from the caller, and a request for more frames
@@ -210,6 +239,24 @@ MAX_FRAMES_PER_DIRECTION = 32
 # Each cell is a placeholder plus a named slice, so cells cost launches. 1,024 cells is
 # a 32x32 grid: a larger atlas than any of these scaffolds is meant to start.
 MAX_GRID_CELLS = 1_024
+# Frames one `import_spritesheet` call may create. Not a time bound: measured, 16,384
+# frames of 2x2 import in 0.6s. It is here because the frame count is the sheet's area
+# divided by the cell's, so a 1x1 cell on a large sheet asks for millions of frames, past
+# the 65,535 the file format can store; 4,096 is a 64x64 grid, larger than any animation
+# sheet, so a request past it is a cell-size mistake and is named as one before launch.
+MAX_SHEET_FRAMES = 4_096
+# The longer side of the image `render_preview` returns, past which it lowers the scale.
+# The image goes back to the client, and a vision model downsamples anything much past
+# this anyway, so a bigger render only costs time and transfer: a 1920x1080 scene at the
+# default scale of 8 was a 15360x8640 image, 132 Mpx and six seconds, which Pillow's own
+# decompression-bomb check warned about on the way back. A sprite already longer than
+# this is shown at 1x, never shrunk.
+MAX_PREVIEW_EDGE = 2_048
+# Pixels of padding a sprite sheet export may put around and between frames. Padding keeps
+# a texture filter from bleeding one frame into the next, which takes 1 to 4 px, and
+# extrude covers a frame's own edge. The sheet grows by the padding around every cell, so
+# with no ceiling it was a size request with none either; 64 is far past any use.
+MAX_SHEET_PADDING = 64
 
 # --- Declarative asset specs ----------------------------------------------- #
 # The spec layer amplifies harder than any tool: one integer becomes two batch operations

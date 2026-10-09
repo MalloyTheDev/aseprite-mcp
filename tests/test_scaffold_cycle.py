@@ -20,7 +20,7 @@ import pytest
 
 from aseprite_mcp.core import timing
 from aseprite_mcp.core.errors import ValidationFailed
-from aseprite_mcp.tools import animation, frames, inspect, sprite, workflow
+from aseprite_mcp.tools import animation, drawing, frames, inspect, sprite, workflow
 
 # What issue #91 records, written out here rather than read from the table under test:
 # "idle 4 or 6, run 6 or 8, attack 5 to 7 one-shot, hurt 2 to 3, death 6 to 10", and a
@@ -195,8 +195,8 @@ def test_the_two_older_scaffolds_are_still_registered():
 def built():
     """Every kind scaffolded once: the manifest, and a fresh read of the saved sprite.
 
-    Module-scoped because each scaffold is fourteen-odd Aseprite launches (about three
-    seconds) and nothing below mutates what it is handed.
+    Module-scoped because each scaffold launches Aseprite several times and nothing below
+    mutates what it is handed.
     """
     out = {}
     for kind in CONVENTIONS:
@@ -339,34 +339,39 @@ def test_frames_past_the_cycle_are_left_alone_and_the_manifest_says_so():
     assert any("frames 3-5" in w for w in manifest["warnings"]), manifest["warnings"]
     for tag in info["tags"]:
         assert tag["to"] <= 2, f"{tag['name']} reaches frame {tag['to']}"
-    # The frames it did not tag kept whatever duration they already had: asserted against
-    # what was measured before the call, not against a literal, because
-    # `add_frame(copy_from=1)` inserts rather than appends and the set-up's own durations
-    # therefore end up in an order a literal would have to encode.
+    # The frames it did not tag kept whatever duration they already had, measured before
+    # the call. (This comment used to blame the set-up's odd 500, 500, 500, 500, 100 on
+    # insertion order. It was `add_frame` putting each duration on the frame it copied
+    # rather than on the copy, #222; the set-up now reads 100, 500, 500, 500, 500.)
+    assert before == [100, 500, 500, 500, 500]
     assert durations(name)[2:] == before[2:]
     assert durations(name)[:2] == manifest["animation"]["durations_ms"]
 
 
 def test_inserting_frames_into_a_drawn_sprite_says_the_existing_ones_moved():
-    """Measured: Aseprite's newFrame(n) inserts at n, so a copy does not append.
+    """Measured: a copy of frame 1 goes in directly after frame 1, so it does not append.
 
     One `add_frame(copy_from=1)` on a sprite holding a red frame 1 and a blue frame 2
     produces red, red, blue: the blue frame is still there and is no longer frame 2. That
     is `tools/frames.py` and `core/oplib.py` behaviour rather than this scaffold's, and a
     scaffold that quietly reordered a caller's drawn frames would be the worse of the two
-    failures, so it is reported.
+    failures, so it is reported, with the numbers it moved to checked against the file.
     """
     name = "cyc/drawn.aseprite"
     sprite.create_sprite(name, 4, 4, "rgb", overwrite=True)
-    frames.add_frame(name, 100, copy_from=1)
-    assert inspect.get_sprite_info(name)["frameCount"] == 2
+    frames.add_frame(name, 100)
+    for frame, colour in ((1, "#ff0000"), (2, "#0000ff")):
+        drawing.draw_rectangle(name, 0, 0, 4, 4, colour, filled=True, frame=frame)
 
     manifest = workflow.scaffold_cycle(name, "death")
 
     assert inspect.get_sprite_info(name)["frameCount"] == 6
-    assert any("inserted at frame 1" in w for w in manifest["warnings"]), (
+    assert any("frame 2 is now frame 6" in w for w in manifest["warnings"]), (
         manifest["warnings"]
     )
+    firsts = [inspect.get_pixels(name, 0, 0, 1, 1, frame=f)["pixels"][0][0][:7]
+              for f in range(1, 7)]
+    assert firsts == ["#ff0000"] * 5 + ["#0000ff"]
 
 
 def test_an_odd_frame_count_says_which_frames_the_holds_landed_on():
@@ -383,3 +388,39 @@ def test_an_odd_frame_count_says_which_frames_the_holds_landed_on():
     assert roles["contactL"] == "extreme"
     assert roles["passL"] == "extreme"  # the misalignment the warning is about
     assert roles["contactR"] == "passing"
+
+
+def test_the_tags_go_into_the_frame_batch_not_one_launch_each(monkeypatch):
+    """Issue #223: every tag used to cost its own Aseprite launch.
+
+    An 8-frame walk was fourteen launches, about 3.4 seconds, because the batch `add_tag`
+    op could not take `repeats` and so every tag went through the standalone tool, each
+    one opening and saving the same sprite to set one integer. With `repeats` on the op
+    the tags ride in the frame batch.
+
+    Counted off the real launches rather than inferred from the code, and asserted as an
+    exact number so a regression to one-launch-per-tag cannot hide inside a looser bound.
+    """
+    from aseprite_mcp.core import runner
+
+    name = "cyc/launches.aseprite"
+    sprite.create_sprite(name, 16, 16, "rgb", overwrite=True)
+    seen: list[int] = []
+    real = runner.run_lua
+
+    def counting_run_lua(body, args=None, timeout=None):
+        seen.append(1)
+        return real(body, args, timeout)
+
+    for mod in (workflow.inspect, workflow.batch, animation):
+        monkeypatch.setattr(mod, "run_lua", counting_run_lua)
+
+    manifest = workflow.scaffold_cycle(name, "walk")
+    # One read, one batch for the frames and all nine tags, two for the timing curve,
+    # one read back. Fourteen before.
+    assert len(seen) == 5, f"{len(seen)} launches; the tags are being set one at a time"
+    tags = {t["name"]: t for t in inspect.get_sprite_info(name)["tags"]}
+    assert len(tags) == 9, sorted(tags)
+    # A walk is a cycle, so every tag must say "forever", read back off the file.
+    assert all(t["repeats"] == 0 for t in tags.values()), tags
+    assert manifest["animation"]["loops"] is True

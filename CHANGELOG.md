@@ -6,6 +6,303 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **`quality.readings` ignored its tier on an empty frame.** The early return for a
+  frame with nothing drawn handed back every reading whichever tier was asked for, so a
+  caller asking for defects alone was told an empty frame was one. It now answers the
+  tier asked: the empty-frame line is an observation, as it was always filed. Found by
+  the bundle gate below, whose calibration run reported an empty frame as a defect.
+
+- **Refusals now reach MCP clients.** Every refusal this server writes is an
+  `AsepriteMCPError` whose message names the way out, and none of it arrived: the 2.x
+  SDK forwards only its own `ToolError` into the `is_error` result and masks every
+  other exception to `Error executing tool <name>`, with the text going to the server
+  log. Measured on the live server, a ragged `draw_pixel_map` grid cost two blind
+  retries because the row count that named the defect never arrived. `call_tool` now
+  translates `AsepriteMCPError`, and the `ValueError` with which `core` refuses a value,
+  into `ToolError` with the message intact and the original chained as `__cause__`, for
+  refusals raised inside a tool and for the unknown-argument check alike; any other
+  exception stays masked as the SDK intends for a crash. The `ValueError` half matters
+  most: a mistyped colour, the commonest mistake a caller makes, used to arrive as
+  `Error executing tool draw_rectangle` and now lists the accepted forms. Verified
+  through a real stdio client session, not only at the boundary. `SECURITY.md` records
+  what this discloses.
+
+- **`assess_sprite` crashed on a ramp named the way every drawing tool takes colours.**
+  `ramp=["red"]` or `"10,20,30"` passed the colour check, launched Aseprite, and then
+  crashed in the metrics, which parse hex only; a three-digit `#abc` was silently
+  misread. The ramp is now normalised to hex before anything is measured, and a palette
+  index in a ramp is refused by name, since a ramp is measured against drawn colours.
+
+- **`validate_asset_against_spec` did not carry `readOnlyHint`**, so a client that
+  auto-approves read-only tools prompted before every check of a built sprite against its
+  spec. It validates the spec document, reads the sprite through `get_sprite_info` and
+  compares the two in Python, and saves nothing. It shipped without the entry in
+  `READ_ONLY_TOOLS`, the same miss the set's own comment records for three earlier tools,
+  and a test now names it as it names them.
+
+### Changed
+
+- **`export_game_asset_bundle` judges the art before it writes anything.** Every frame
+  is assessed the way `assess_sprite` judges one, all of them in a single launch with
+  identical frames scored once (`inspect.assess_frames`), and the result is the
+  manifest's new `assessment` section. A *defect* refuses the bundle, naming the frames
+  and the fix: an absent keyline on a figure of several masses, or, with the new `ramp`
+  argument, a drawn pixel off it. `allow_defects=True` bundles anyway and records them
+  as `warnings`. The ramp is refused before anything is launched, like every tool's, and
+  on an indexed sprite whose palette cannot hold it exactly the harness's reading of what
+  it became goes in `assessment.palette` and in a refusal for pixels off it, since the
+  palette may be why they are off it. Every other reading is an observation, listed and never blocking,
+  because observations do not separate good art from poor: calibrated on 22 pieces from
+  this repository (showcase and probe sprites, the death knight and warden judged poor,
+  two potions drawn for a comparison, three template placeholders), the item sheet, the
+  best art here, drew three observations and the death knight five, while the
+  featureless walk-cycle blob drew none. The defect tier fired once, on a head whose
+  keyline is 5% of the drawing, and not on the death knight or the warden, so this gate
+  stops the measured faults and makes no claim to judge whether art is good. Past
+  `MAX_ASSESS_PIXELS` in total an even sample including the first and last frame is
+  judged; a frame past it alone is not judged, and the manifest says so. Calibration
+  timing: under 1.3 s for 1 to 12 frames, under 5 s for 24 frames of 96x64.
+
+- **The documentation describes what merged with #231 to #235.** The README gains a
+  "Bring art in from elsewhere" workflow (`import_image`, `import_spritesheet`, palette
+  limiting, `export_motion_trail`), and its `render_preview` row, smear section (written
+  while #226 was open), security bounds and notes on indexed Backgrounds and fills are
+  brought up to date. `SECURITY.md` records the image check on every tool that opens an
+  outside image and the new bounds on rendered output. `docs/HEADLESS.md` gains a section
+  of measured answers that are not what they look like (`Sprite:newFrame` returning the
+  original, an indexed Background drawn over its transparent index's colour,
+  `ImportSpriteSheet` rendering onto a transparent layer) and the colour-bar measurement
+  that justifies the prelude setting it, beside the section warning against writing
+  preferences. `docs/CLIENTS.md` counts twenty-one read-only tools, and the server's
+  instructions say how outside art comes in.
+
+### Added
+
+- **`export_motion_trail`: every frame of a motion composited into one image, the oldest
+  faintest** (#77). The way to judge whether a whole motion reads: arc shape, spacing and
+  squash are visible at once in a still that can be studied, where a GIF moves on before a
+  defect can be seen and `export_onion_skin` shows only a few frames either side of one.
+  Frame i of n is drawn at opacity 255 * i / n, so the last is opaque and on top; frames
+  come from a tag, an explicit list in the order given, or the whole sprite. An opaque
+  Background would bury every frame under the next, the last at full opacity covering the
+  lot, so when there is one it is laid once underneath and the frames contribute their
+  other layers. The scaled image is held to the canvas caps before anything is scaled.
+  (163 tools.)
+
+### Fixed
+
+- **No export bounded `scale`, and `render_preview` ignored the sprite's size.** Every
+  export handed `scale` straight to Aseprite, so a 16x16 sprite at scale 50000 asked for
+  an 800,000-pixel-square image. They now refuse a scaled image past the canvas caps
+  before anything is launched, naming the largest scale that fits; a sprite sheet is
+  bounded by all its frames at once. `render_preview` clamped its scale to 32 whatever the
+  sprite, so a 1920x1080 scene previewed at the default 8 came back 15360x8640, 132 Mpx
+  in six seconds, which Pillow's own decompression-bomb check warned about; it now lowers
+  the scale so the image is at most 2048 px on its longer side (a sprite already longer
+  is shown at 1x). It also rendered frame 1 for a frame the sprite did not have, the
+  silent swap every export already refuses; it now refuses too. All of it is read from
+  the `.aseprite` header (`core/asefile.py`), which also saves each `export_png` and
+  `export_layer` the launch it spent counting frames.
+
+- **Sprite sheet padding was unbounded.** `export_spritesheet` passed `padding` to
+  Aseprite unchecked in both directions, and the sheet grows by it around every cell;
+  `export_spritesheet_packed` refused a negative value only. Both now take 0 to 64
+  (`MAX_SHEET_PADDING`): an engine needs 1 to 4 px to stop frames bleeding, and extrude
+  covers a frame's own edge.
+
+### Fixed
+
+- **On an indexed sprite's Background, the transparent index's own colour could not be
+  drawn.** A colour resolves to the nearest palette entry, and the transparent index is
+  left out of the search because on an ordinary layer it is invisible (#138). On a
+  Background Aseprite draws it, so a request for that exact colour was painted in the
+  nearest *other* entry and reported ok: a Background whose index 0 is `#0a141e` came out
+  red when filled with `#0a141e`. That is the state an opaque PNG is in after
+  `import_image` and `set_color_mode("indexed")`, whose dominant colour lands on index 0,
+  so repainting with the background's own colour failed on exactly the art that route
+  produces. A tool now names the layer it is about to write (`draw_target`), and on an
+  indexed Background the search includes the transparent index. The drawing tools, the
+  batch operations (named per operation, so one cannot leak into the next) and the
+  shading tools do; a tool that names no target behaves exactly as before. Not covered:
+  tools that read their own surface before writing it, such as `add_outline` and the
+  shading tools' masks, still read the transparent index on a Background as empty.
+
+- **A Background's fill came from the editor's colour bar, so the same call gave a
+  different file on every machine.** `convert_layer_to_background`, and `resize_canvas`
+  and `crop_sprite` where they grow a Background, filled new pixels with whatever the
+  editor last had as its background colour, user state a headless run inherits: on the
+  machine this was found on, a purple at alpha 186, and on an indexed sprite palette entry
+  4 of a 3-entry palette. Every script now starts from Aseprite's factory colours, a black
+  background and a white foreground. Measured, a headless run never saves the colour bar
+  back, so the editor's own colours are untouched. On an indexed sprite the fill is the
+  transparent index, which a Background shows as that entry's colour, so no index changes
+  and converting the layer back restores the transparency.
+
+### Fixed
+
+- **An indexed sprite's Background was read as transparent wherever it held the
+  transparent palette index**, which Aseprite draws as a colour there. On an ordinary layer
+  that index means "no pixel", and every reader decoded it that way on a Background too.
+  `get_pixels` returned a whole dark background as `#00000000`; `assess_sprite` measured an
+  opaque scene as mostly empty canvas; `diff_sprites` saw a changed background pixel as an
+  added one; `extract_palette` left the background colour out; `trim_sprite` cropped margins
+  that happened to be that colour; and `list_palette_usage` reported the background's pixels
+  as transparent.
+
+  The visible failure was a refusal. An opaque PNG imports as a Background, and
+  palette-limiting it with `set_color_mode("indexed")` put its dark background on index 0:
+  the conversion guard counted those pixels as lost and refused with "would lose 60 of 64
+  drawn pixels", when nothing was lost, and the remedy it offered was already the default.
+  Bringing outside art in and limiting its palette, the PixelPrep route, could not be done.
+
+  Measured, and stranger than "index 0 is opaque": Aseprite draws an indexed Background
+  over its transparent index's colour, so a palette entry that is itself transparent shows
+  that colour there, and a half-transparent one blends with it (`#0000c8` at 50% over
+  `#0a141e` is `#050a73`). Rather than re-implement that, the readers now take Aseprite's own
+  RGB render in exactly that case, an indexed sprite with a visible Background, through two
+  prelude helpers, `readable_composite` and `readable_layer`; every other sprite is read
+  exactly as before. A Background read alone is rendered with the other layers hidden, in
+  memory, and they are put back. Every test is held to that render rather than to a colour
+  the test computes.
+
+  Writing has the same blind spot and is not fixed here: on a Background, a colour that is
+  the transparent index's still resolves to the nearest other entry, so
+  `fill_layer("#000000")` painted a black-at-index-0 Background red and reported `ok`.
+
+### Added
+
+- **`import_spritesheet`: a sheet image becomes a sprite with one frame per cell** (#93).
+  The inbound seam for art made elsewhere, a PixelPrep strip or a downloaded sheet, and the
+  reverse of `export_spritesheet`. Aseprite's own Import Sprite Sheet does the slicing;
+  `layout` is `horizontal` (one row), `vertical` (one column) or `grid` (rows, read left to
+  right and top to bottom). A cell size that does not divide the sheet is refused, never
+  cropped or padded, and the refusal happens in Python from the image header before
+  Aseprite is launched, naming the sizes that would divide; an `.aseprite` sheet, which has
+  no header Pillow reads, gets the same refusal once it is open. A cell that holds nothing
+  still becomes a frame, and `empty_frames` lists them, so a grid's spare cells at the end
+  are visible as such. A sheet with frames of its own (a GIF) is refused rather than sliced
+  from its first frame. At most 4,096 frames: measured, 16,384 frames of 2x2 import in
+  0.6s, so the cap is not about time but about a cell-size mistake on a large sheet asking
+  for millions of frames.
+
+  **An opaque indexed sheet keeps its Background, and with it the colour at the transparent
+  palette index.** Measured while building this: the importer renders the cells onto a new,
+  transparent layer, where that index means "no pixel", so on a PNG with no transparency
+  whatever was drawn in palette entry 0 vanished (a whole frame of the test sheet). The
+  layer is made a Background again with the fill set to that same index, which rewrites
+  those pixels with the value they already hold. Restoring the Background with Aseprite's
+  default fill instead painted them with an entry the palette did not have. (162 tools.)
+
+### Fixed
+
+- **Four tools opened an outside image without the size guard.** `check_image_dimensions`
+  refuses an image whose header declares more than the canvas caps, because a
+  solid-colour PNG a few kilobytes on disk can declare 16384x16384 and Aseprite allocates
+  all of it on open. Only the two stamping tools ran it; `import_image`, `stamp_pattern`,
+  `add_reference_layer` and `import_reference_sequence` opened their images unchecked.
+  All four now refuse before anything is launched or created, every image of a
+  reference sequence included, and a test over all five entry points pins that the
+  refusal comes before the launch.
+
+### Fixed
+
+- **`add_frame(copy_from=N)` and `duplicate_frame(N)` named the original as the new
+  frame, and `add_frame` gave it the duration meant for the copy** (#222). Both returned
+  `newFrame: N`. Aseprite's `spr:newFrame(n)` inserts the copy at n + 1 and returns frame
+  n, and the two frames are pixel-identical, so every check that read colours back
+  passed, including the issue's own measurement. A linked cel tells them apart: with
+  frame 2 linked to frame 4, copying frame 2 leaves frame 2 still linked and frame 3 not,
+  and drawing on the reported `newFrame` changed the linked frame too. Four
+  `add_frame(500, copy_from=1)` calls on a 100ms frame left durations 500, 500, 500, 500,
+  100.
+
+  `newFrame` is now the copy (`copy_from + 1`), the duration goes on it, and the result
+  says when frames moved: `inserted`, and `renumbered_from`, the first old number now one
+  higher. Copying the last frame moves nothing and says so. The batch ops report the same
+  facts, through one shared Lua helper. Tags follow their frames, and one that covered the
+  copied frame grows to take in the copy. Where a copy lands did not change, so no
+  template's output moves; making a copy append, the issue's other option, is a behaviour
+  change of its own and was not taken. `scaffold_cycle`'s warning, which said its copies
+  go in "at frame 1", now names where the drawn frames ended up.
+
+- **The batch `add_tag` op could not set `repeats`**, so a one-shot tag could not be made
+  inside a batch at all while a direct call made one fine (#223). The tool's validator
+  moved into `core/limits.py` as `tag_repeat_count`, so the op refuses exactly what the
+  tool refuses, with the same sentence; that matters because Aseprite stores a negative
+  count as 0, "play forever", the opposite of the one-shot asked for. `scaffold_cycle`
+  now writes its frames and every tag in one batch: five Aseprite launches for any frame
+  count, down from fourteen (about 3.4s) for an 8-frame walk.
+
+- **`smear_frame`'s trail reading blamed the palette for a ramp clamp** (#226). On a
+  shaded sphere with the whole eleven-step ramp on its palette, a stretch smear collided
+  at shifts 5 through 10, and the reading said the palette held 10 of the 10 colours and,
+  in the same breath, that it did not; every remedy it offered was unusable. The cause:
+  `ramp_headroom` measures only the subject's lightest colour, while its darker pixels
+  sit nearer the bottom of the ramp and clamp there first. Each collision group is now
+  classified on its own, one wanted colour being a clamp and several a short palette, and
+  each gets its own sentence and remedy. The palette sentence is byte-identical to before.
+  The smear showcase's "crushed palette" case turned out never to have exercised the
+  palette path at all: measured, its collisions are all clamps.
+
+- **`add_outline` on a layer with nothing drawn on it reported success.** It found no
+  seed, wrote nothing, and returned ok with no `pixels_written` at all, so neither
+  checking `ok` nor comparing the count caught it. That is how a figure built in this
+  repository shipped with no keyline: the outline was aimed at a freshly created, empty
+  layer, and the tool outlines the art already on the layer it is given, onto that same
+  layer. It now refuses, naming the layer and frame and saying what to point it at, as
+  `link_cels` already refuses a frame with no cel. Nothing with art changes: the six
+  showcase generators that call it reproduce all nine of their images byte for byte.
+
+### Added
+
+- **`validate_asset_against_spec`: whether the sprite that got built matches the spec it
+  was built from.** `validate_asset_spec` asks whether a document is well formed and
+  `plan_asset_spec` what it would do; neither asked whether the artifact and the
+  declaration agree, and that gap is where this project's worst bugs have lived. A figure
+  shipped with no keyline because `add_outline` was pointed at a layer that had just been
+  created and was empty, and every count in the result reported success.
+
+  Structure only, like `build_asset_from_spec`: canvas, layer names including those nested
+  in groups, frame count, tag names, slice names and palette capacity. The spec layer
+  declares no pixels, so this verifies none; `assess_sprite` is where the drawing is
+  judged. `verifiable` is returned separately from `ok`, so a spec that declares nothing
+  checkable comes back ok and unverifiable rather than simply ok: "nothing was wrong" and
+  "nothing was checked" must not read the same. The comparison itself is the pure
+  `core.asset_spec.compare_to_built`, testable without launching Aseprite. 161 tools.
+
+- **`assess_sprite` reports how a drawing was made**, as `metrics.craft` from the new
+  `core.craft`: the size distribution of single-colour regions, which says whether colour
+  was placed or painted; the run lengths down the silhouette's edges, which say whether it
+  was drawn or ruled; how luminance distributes; and whether the darkest colour is the one
+  bounding the drawing. None of the existing measures could say that three of the four
+  reference pieces this project was being compared against are not pixel art: 85 to 96
+  percent of their colour clusters are single pixels, and they carry 3,000 to 145,000
+  colours.
+
+  **It produces no readings, on purpose.** Three thresholds were written for these
+  measures and the ranking gate over `tests/corpus` discarded all three the same day:
+  singleton share AUC 0.619 with 132 discordant pairs, share in clusters of eight AUC
+  0.674 with 116, edge variety AUC 0.168 with 277. Good art here runs 0 to 68 percent
+  singleton regions and bad art 36 to 47, so the ranges overlap and the good side is the
+  wider one; edge variety inverts outright, because a sprite sheet's panels have perfectly
+  straight edges and are perfectly good art. The numbers describe a drawing and do not
+  judge one, and a test pins that verdict so the idea is not tried again blind.
+
+- **`black_floor` in `assess_sprite`'s ramp lints: how close a ramp's darkest step comes
+  to pure black.** A ramp built with a wide `light_range` around a dark base can clip its
+  first step to `#000000`, darker than any usable keyline, at which point the keyline
+  stops being measurable; `ramp_chroma` cannot see it, because a step at pure black has no
+  hue and so is not a grey step. It catches the three ramps that actually failed this way,
+  which a test rebuilds.
+
+  Reported, not judged. Asked to judge alone it fired on two of the eleven known-good
+  showcase ramps, WOOD at `#060402` and RIBBON at `#000000`, and both are right: that art
+  uses black as its own darkest value and has no outline to lose. A step at pure black is
+  only a fault relative to a keyline, which a ramp does not know; where the keyline is
+  known, `craft.ramp_floor_clears` makes the comparison.
+
 ### Added
 
 - **`scaffold_cycle`: one named cycle, at the frame count the craft actually uses**

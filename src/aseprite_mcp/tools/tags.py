@@ -3,35 +3,10 @@
 from __future__ import annotations
 
 from ..app import mcp
-from ..core.errors import ValidationFailed
-from ..core.limits import MAX_TAG_REPEATS
+from ..core.limits import tag_repeat_count
 from ..core.models import FRAME_GUARD_LUA, FrameRef
 from ..core.runner import run_lua
 from .common import lua_path, parse_color, resolve_path
-
-
-def _repeat_count(repeats: int | None) -> int | None:
-    """Validate a tag's repeat count before Aseprite gets a chance to reinterpret it.
-
-    Aseprite takes -1 and stores 0, which means "forever": the opposite of the one-shot
-    anybody typing a negative number is after. It is refused here rather than quietly
-    turned into its own opposite.
-    """
-    if repeats is None:
-        return None
-    count = int(repeats)
-    if count < 0:
-        raise ValidationFailed(
-            f"repeats must be 0 or more; got {count}. Aseprite stores a negative count "
-            "as 0, which means 'play forever', the opposite of a one-shot. Use 1 for a "
-            "tag that plays once."
-        )
-    if count > MAX_TAG_REPEATS:
-        raise ValidationFailed(
-            f"repeats is {count}; the file format stores at most {MAX_TAG_REPEATS}. "
-            "Use 0 for a tag that plays forever."
-        )
-    return count
 
 
 @mcp.tool()
@@ -66,7 +41,7 @@ def add_tag(
         "to": FrameRef.arg("to_frame", to_frame),
         "direction": direction,
         "color": parse_color(color) if color else None,
-        "repeats": _repeat_count(repeats),
+        "repeats": tag_repeat_count(repeats),
     }
     body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
@@ -128,7 +103,7 @@ def set_tag(
         "new_name": new_name,
         "direction": direction,
         "color": parse_color(color) if color else None,
-        "repeats": _repeat_count(repeats),
+        "repeats": tag_repeat_count(repeats),
     }
     body = FRAME_GUARD_LUA + """
     local spr = open_sprite(ARG.src)
