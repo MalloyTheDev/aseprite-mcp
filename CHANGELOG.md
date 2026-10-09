@@ -44,6 +44,18 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
+- **The server's instructions teach the method that produces better art.** They ended
+  with "`create_sprite`, then draw, then preview", and every client reads them before its
+  first call. They now say what this project's own output showed: pick the route by
+  subject (detailed subjects are where hand-placed output has been weakest, so convert a
+  source image when one exists; icons, props and small sprites draw well by hand), plan
+  the ramps first, block in with shapes, finish as placed pixels through
+  `get_pixels(format="map")` and `draw_pixel_map`, shade one material at a time, look at
+  `render_preview` after every pass, and treat a clean `assess_sprite` as the absence of
+  measured faults rather than a verdict. A test holds every tool and argument the
+  instructions name to the registered set, so a rename cannot leave them teaching a call
+  that fails.
+
 - **`export_game_asset_bundle` judges the art before it writes anything.** Every frame
   is assessed the way `assess_sprite` judges one, all of them in a single launch with
   identical frames scored once (`inspect.assess_frames`), and the result is the
