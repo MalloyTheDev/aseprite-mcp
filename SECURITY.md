@@ -156,6 +156,16 @@ a file you do not trust into the workspace as handing it to that parser.
   to). Dependencies are installed with `uv sync --locked`, so the committed `uv.lock` is
   what gets tested and a stale lock fails CI rather than being silently re-resolved.
 
+- **Which error text reaches a client (unreleased).** A refusal's message is sent to the
+  client so a caller can correct itself: this server's own `AsepriteMCPError`, and the
+  `ValueError` with which `core` refuses a value (a colour that does not parse, an easing
+  that does not exist). Any other exception is a crash, which the MCP SDK masks to
+  `Error executing tool <name>`, sending the text only to the server log. The disclosed
+  messages describe the caller's own input and resolved workspace paths, which every
+  successful result already returns, so over the HTTP transports this reveals nothing a
+  client lacks. It does mean an accidental `ValueError`'s text is disclosed along with the
+  deliberate ones, and nothing distinguishes the two.
+
 ## Out of scope (your responsibility)
 
 - **Contents of the workspace.** Anything already in `ASEPRITE_MCP_WORKSPACE` is fair game

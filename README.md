@@ -711,7 +711,7 @@ deterministic scaffolding, no AI generation.
 | `create_icon_set` | Grid sheet of icon cells, each a placeholder inside a named slice (`icon_0`, …). |
 | `create_rpg_item_sheet` | Grid sheet with a named slice per item (sword/shield/potion/…). |
 | `make_8_direction_walk_template` | 8-direction walk template: frames + one tag per direction (N/NE/E/…). |
-| `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. |
+| `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. Assesses every frame first and refuses on a measured defect (an absent keyline, or with `ramp`, a pixel off it) unless `allow_defects=True`; every other reading is listed in the manifest's `assessment`. |
 | `export_godot_spriteframes` | Godot 4 `SpriteFrames` resource (.tres) + packed sheet; one animation per tag, timed from frame durations. |
 | `export_slice_metadata` | Engine-agnostic `<sprite>_slices.json`: hitbox/hurtbox/collision/attach/9-slice/pivot from slice names or JSON data. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
@@ -724,7 +724,7 @@ deterministic scaffolding, no AI generation.
 2. Draw the character on the `body` / `details` layers (low-level tools).
 3. `make_4_frame_idle_animation("hero.aseprite")` makes a 4-frame loop tagged `idle`.
 4. `validate_sprite_for_game_export("hero.aseprite", expected_width=32, required_tags=["idle"])` confirms it is game-ready.
-5. `export_game_asset_bundle("hero.aseprite", scale=8)` writes PNG/GIF/sheet+JSON/manifest into `hero_bundle/`.
+5. `export_game_asset_bundle("hero.aseprite", scale=8)` judges every frame, then writes PNG/GIF/sheet+JSON/manifest into `hero_bundle/`. A defect refuses the bundle with the frames and the fix named; the manifest's `assessment` lists the readings worth a look that do not block it.
 
 ### Bring art in from elsewhere
 

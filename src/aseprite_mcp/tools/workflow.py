@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ..app import mcp
-from ..core import validation
+from ..core import indexed, validation
 from ..core.errors import ExportError, ValidationFailed
 from ..core.limits import (
     MAX_BATCH_OPERATIONS,
+    MAX_COLOR_LIST_LENGTH,
     MAX_FRAMES_PER_DIRECTION,
     MAX_GRID_CELLS,
     MAX_WALK_DIRECTIONS,
@@ -244,19 +245,44 @@ def export_game_asset_bundle(
     bundle_name: str | None = None,
     scale: int = 1,
     overwrite: bool = False,
+    ramp: list[str] | None = None,
+    allow_defects: bool = False,
 ) -> dict:
     """Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
     GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
     `manifest.json` describing everything.
 
+    **The art is judged before anything is written.** Every frame is assessed the way
+    `assess_sprite` judges one (all of them in one launch, identical frames once), and
+    the result is the manifest's `assessment` section. A *defect* refuses the bundle: an
+    absent keyline on a figure of several masses, or, with `ramp`, a drawn pixel that is
+    not on it. Those are the readings that scored as faults against sprites known to be
+    good and bad. Every other reading is an *observation*, listed and never blocking,
+    because observations do not separate good art from poor: on this project's own
+    gallery its best sheet draws three and a featureless blob none. So a clean assessment
+    means none of the measured faults, not that the art is good; looking at
+    `render_preview` is still the only judge of that.
+
     Args:
         overwrite: Replace existing bundle files (default False = no-clobber). Every
             planned output is checked up front, so the bundle fails before writing any
             file if a target already exists.
+        ramp: The colours the art is drawn from, as given to `assess_sprite`. When set,
+            every drawn pixel must be one of them. Refused before anything is launched
+            past the colour-list cap or in a notation that does not parse. On an indexed
+            sprite whose palette cannot hold it exactly, `assessment.palette` says so,
+            and a refusal for pixels off it carries that reading.
+        allow_defects: Bundle even when the assessment finds a defect (default False).
+            The defects are then the manifest's `warnings`, and `assessment.waived` is
+            true.
 
     Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
     disk as manifest.json inside the bundle).
     """
+    if ramp:
+        # Refused before anything is launched, as every tool that takes a ramp refuses one.
+        check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+        ramp = inspect.ramp_as_hex(ramp)
     info = inspect.get_sprite_info(filename)
     base = Path(filename).stem
     bundle = bundle_name or f"{base}_bundle"
@@ -277,6 +303,30 @@ def export_game_asset_bundle(
                     *(p for _, p in tag_rels), manifest_rel):
         ensure_output_path(planned, overwrite=overwrite, error_type=ExportError)
 
+    assessment = inspect.assess_frames(filename, frame_count=info["frameCount"],
+                                       width=info["width"], height=info["height"],
+                                       ramp=ramp)
+    # On an indexed sprite whose palette cannot hold the ramp exactly, pixels off it are
+    # the palette's doing rather than the shading's, so that reading travels with them.
+    palette_notes = indexed.ramp_readings(assessment.pop("ramp_on_palette", None) or {})
+    if palette_notes:
+        assessment["palette"] = palette_notes
+    defects = [_frames_reading(found) for found in assessment["defects"]]
+    if defects and not allow_defects:
+        count = f"{len(defects)} defect{'s' if len(defects) > 1 else ''}"
+        raise ValidationFailed(
+            f"The art has {count}, so nothing was bundled:\n"
+            + "".join(f"- {line}\n" for line in defects)
+            + "".join(f"The palette may be why: {note}\n" for note in palette_notes)
+            + "Fix them (assess_sprite measures one frame in full), or pass "
+            "allow_defects=True to bundle anyway; they are then the manifest's warnings."
+        )
+    warnings = list(defects)
+    if defects:
+        assessment["waived"] = True
+    if assessment.get("skipped"):
+        warnings.append(f"The art was not assessed: {assessment['skipped']}.")
+
     # Sub-exports use overwrite=True: the up-front pass already enforced the policy.
     exports = [
         export_entry("png", export.export_png(filename, png_rel, 1, scale, overwrite=True)["output"], "png"),
@@ -293,18 +343,33 @@ def export_game_asset_bundle(
     manifest_path = resolve_path(manifest_rel)
     # No `counters=`: a bundle only reads the sprite and writes export files, so it never
     # offers a pixel to `img_set` and the harness's report is empty by construction (#201).
+    actions = [
+        "Import the sprite sheet + JSON into your engine (Godot/Unity/Phaser).",
+        "Use the per-tag GIFs to preview each animation.",
+    ]
+    if assessment["observations"]:
+        actions.append(
+            f"{len(assessment['observations'])} reading(s) in assessment.observations are "
+            "worth a look before this ships; none of them blocks it."
+        )
     manifest = workflow_manifest(
         "game_asset_bundle",
         sprite=sprite_summary(info),
         created_files=[file_entry("manifest", manifest_path, "json")],
         exports=exports,
-        suggested_next_actions=[
-            "Import the sprite sheet + JSON into your engine (Godot/Unity/Phaser).",
-            "Use the per-tag GIFs to preview each animation.",
-        ],
+        assessment=assessment,
+        suggested_next_actions=actions,
+        warnings=warnings,
     )
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8", newline="\n")
     return manifest
+
+
+def _frames_reading(found: dict) -> str:
+    """One grouped reading as a line: the frames it was made on, then the reading."""
+    frames = found["frames"]
+    label = "frame" if len(frames) == 1 else "frames"
+    return f"{label} {', '.join(str(n) for n in frames)}: {found['reading']}"
 
 
 @mcp.tool()

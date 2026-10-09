@@ -298,7 +298,45 @@ def list_sprites() -> dict:
 # 4096 pixels because its rows go back to the caller and a model should not be handed a
 # megabyte of hex; here the pixels never leave the process, only the measurements do, so
 # the cap that applies is the one on how long the measuring takes.
-_ASSESS_LUA = FRAME_GUARD_LUA + """
+# The pixels of one image as run-length rows of palette indices. The palette is passed in
+# so several frames read in one launch intern their colours into one shared list, which is
+# what lets a whole animation be read for the price of a single Aseprite start.
+_RLE_ROWS_LUA = """
+local function rle_rows(spr, img, palette, seen)
+  -- In the image's own mode: Aseprite's RGB render for an indexed sprite with a
+  -- Background, whose transparent index would otherwise measure as empty canvas.
+  local mode = img.colorMode
+  local rows = {}
+  for yy = 0, spr.height - 1 do
+    local row, n, run, length = {}, 0, nil, 0
+    for xx = 0, spr.width - 1 do
+      local r, g, b, a = px_to_rgba(spr, img:getPixel(xx, yy), mode)
+      local hex = string.format("#%02x%02x%02x%02x", r, g, b, a)
+      local index = seen[hex]
+      if index == nil then
+        palette[#palette + 1] = hex
+        index = #palette
+        seen[hex] = index
+      end
+      if index == run then
+        length = length + 1
+      else
+        if run ~= nil then
+          n = n + 1; row[n] = run
+          n = n + 1; row[n] = length
+        end
+        run, length = index, 1
+      end
+    end
+    n = n + 1; row[n] = run
+    n = n + 1; row[n] = length
+    rows[yy + 1] = row
+  end
+  return rows
+end
+"""
+
+_ASSESS_LUA = FRAME_GUARD_LUA + _RLE_ROWS_LUA + """
 local spr = open_sprite(ARG.src)
 local framenum = require_frame(spr, ARG.frame, "frame")
 if spr.width * spr.height > ARG.max_pixels then
@@ -313,39 +351,8 @@ if ARG.layer ~= nil then
 else
   img = readable_composite(spr, framenum)
 end
--- In the image's own mode: Aseprite's RGB render for an indexed sprite with a Background,
--- whose transparent index would otherwise measure as empty canvas.
-local mode = img.colorMode
-local function px_hex(px)
-  local r, g, b, a = px_to_rgba(spr, px, mode)
-  return string.format("#%02x%02x%02x%02x", r, g, b, a)
-end
-
-local palette, seen, rows = {}, {}, {}
-for yy = 0, spr.height - 1 do
-  local row, n, run, length = {}, 0, nil, 0
-  for xx = 0, spr.width - 1 do
-    local hex = px_hex(img:getPixel(xx, yy))
-    local index = seen[hex]
-    if index == nil then
-      palette[#palette + 1] = hex
-      index = #palette
-      seen[hex] = index
-    end
-    if index == run then
-      length = length + 1
-    else
-      if run ~= nil then
-        n = n + 1; row[n] = run
-        n = n + 1; row[n] = length
-      end
-      run, length = index, 1
-    end
-  end
-  n = n + 1; row[n] = run
-  n = n + 1; row[n] = length
-  rows[yy + 1] = row
-end
+local palette = {}
+local rows = rle_rows(spr, img, palette, {})
 
 RESULT = {
   width = spr.width, height = spr.height, frame = framenum,
@@ -451,6 +458,7 @@ def assess_sprite(
         # with the palette capped at 256), so this is consistency and not a weakness: a
         # cap that holds for seven of eight call sites is a cap nobody can rely on.
         check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+        ramp = ramp_as_hex(ramp)
     src = resolve_path(filename)
     measured = run_lua(_ASSESS_LUA, {
         "src": lua_path(src), "frame": int(frame), "layer": layer,
@@ -552,6 +560,101 @@ def assess_sprite(
         "metrics": metrics,
         "readings": notes,
     }
+
+
+def ramp_as_hex(ramp: list[str]) -> list[str]:
+    """A declared ramp as hex, whatever notation each colour was given in.
+
+    The metrics compare against hex and parse nothing else, so a ramp named the way every
+    drawing tool accepts colours (`"red"`, `"10,20,30"`, `"#abc"`) crashed the assessment
+    after its launch, or for three-digit hex was silently misread. Opaque colours come
+    back as `#rrggbb`, the form a caller usually wrote, and translucent ones keep alpha.
+    """
+    out = []
+    for colour in ramp:
+        parsed = parse_color(colour)
+        if "index" in parsed:
+            raise ValidationFailed(
+                f"ramp colour {colour!r} is a palette index; a ramp is measured against "
+                "the colours drawn, so give each step as a colour.")
+        hex_colour = "#{r:02x}{g:02x}{b:02x}".format(**parsed)
+        out.append(hex_colour if parsed["a"] == 255 else f"{hex_colour}{parsed['a']:02x}")
+    return out
+
+
+_ASSESS_FRAMES_LUA = FRAME_GUARD_LUA + _RLE_ROWS_LUA + """
+local spr = open_sprite(ARG.src)
+local palette, seen, frames = {}, {}, {}
+for i, number in ipairs(ARG.frames) do
+  local framenum = require_frame(spr, number, "frame")
+  frames[i] = { frame = framenum,
+                rows = rle_rows(spr, readable_composite(spr, framenum), palette, seen) }
+end
+RESULT = { width = spr.width, height = spr.height, palette = palette, frames = frames }
+"""
+
+
+def _spread(count: int, budget: int) -> list[int]:
+    """`budget` frame numbers out of `count`, evenly spaced and keeping the first and last."""
+    if budget >= count:
+        return list(range(1, count + 1))
+    if budget == 1:
+        return [1]
+    step = (count - 1) / (budget - 1)
+    return sorted({1 + round(i * step) for i in range(budget)})
+
+
+def assess_frames(filename: str, *, frame_count: int, width: int, height: int,
+                  ramp: list[str] | None = None) -> dict:
+    """Judge the frames of a sprite the way `assess_sprite` judges one, in one launch.
+
+    For a finishing step, which has to look at the whole animation and cannot afford a
+    launch per frame. Every frame is read in a single Aseprite run, identical frames are
+    scored once, and the readings come back grouped by `quality.frame_findings`: the
+    `defects` tier, which earned the right to call art wrong against a scored corpus,
+    apart from the `observations`, which are worth a look and not a verdict.
+
+    Bounded by `MAX_ASSESS_PIXELS` in total, the same cost one `assess_sprite` call may
+    run to. Past it, an evenly spaced sample including the first and last frame is judged
+    and `frames_assessed` says which; a single frame past it is not judged at all, and
+    `skipped` says why rather than the gate passing in silence.
+
+    With a `ramp` on an indexed sprite, `ramp_on_palette` carries the harness's
+    measurement of what the ramp became on the palette, for `indexed.ramp_readings`.
+    """
+    if ramp:
+        check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
+        ramp = ramp_as_hex(ramp)
+    result: dict = {"frames_total": frame_count, "frames_assessed": [],
+                    "defects": [], "observations": []}
+    budget = MAX_ASSESS_PIXELS // max(1, width * height)
+    if budget == 0:
+        result["skipped"] = (
+            f"each frame is {width}x{height}, past the {MAX_ASSESS_PIXELS:,} pixels an "
+            "assessment measures, so no frame was judged")
+        return result
+    measured = run_lua(_ASSESS_FRAMES_LUA, {
+        "src": lua_path(resolve_path(filename)),
+        "frames": _spread(frame_count, budget),
+        # Passed through only so the harness measures what the ramp becomes on an
+        # indexed palette, as it does for assess_sprite; the Lua does nothing else with it.
+        "ramp": [parse_color(c) for c in ramp] if ramp else None,
+    })
+    if measured.get("ramp_on_palette"):
+        result["ramp_on_palette"] = measured["ramp_on_palette"]
+    palette = measured["palette"]
+    scored: dict[tuple, dict] = {}
+    per_frame: list[tuple[int, dict]] = []
+    for entry in measured["frames"]:
+        key = tuple(tuple(row) for row in entry["rows"])
+        if key not in scored:
+            scored[key] = quality.score(_expand({"palette": palette, "rows": entry["rows"]}),
+                                        ramp)
+        per_frame.append((entry["frame"], scored[key]))
+    result["frames_assessed"] = [number for number, _ in per_frame]
+    result.update(quality.frame_findings(per_frame, width=measured["width"],
+                                         height=measured["height"]))
+    return result
 
 
 # How a diff finds its differences, and why it is not one pass over both images.

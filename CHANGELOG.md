@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **`quality.readings` ignored its tier on an empty frame.** The early return for a
+  frame with nothing drawn handed back every reading whichever tier was asked for, so a
+  caller asking for defects alone was told an empty frame was one. It now answers the
+  tier asked: the empty-frame line is an observation, as it was always filed. Found by
+  the bundle gate below, whose calibration run reported an empty frame as a defect.
+
+- **Refusals now reach MCP clients.** Every refusal this server writes is an
+  `AsepriteMCPError` whose message names the way out, and none of it arrived: the 2.x
+  SDK forwards only its own `ToolError` into the `is_error` result and masks every
+  other exception to `Error executing tool <name>`, with the text going to the server
+  log. Measured on the live server, a ragged `draw_pixel_map` grid cost two blind
+  retries because the row count that named the defect never arrived. `call_tool` now
+  translates `AsepriteMCPError`, and the `ValueError` with which `core` refuses a value,
+  into `ToolError` with the message intact and the original chained as `__cause__`, for
+  refusals raised inside a tool and for the unknown-argument check alike; any other
+  exception stays masked as the SDK intends for a crash. The `ValueError` half matters
+  most: a mistyped colour, the commonest mistake a caller makes, used to arrive as
+  `Error executing tool draw_rectangle` and now lists the accepted forms. Verified
+  through a real stdio client session, not only at the boundary. `SECURITY.md` records
+  what this discloses.
+
+- **`assess_sprite` crashed on a ramp named the way every drawing tool takes colours.**
+  `ramp=["red"]` or `"10,20,30"` passed the colour check, launched Aseprite, and then
+  crashed in the metrics, which parse hex only; a three-digit `#abc` was silently
+  misread. The ramp is now normalised to hex before anything is measured, and a palette
+  index in a ramp is refused by name, since a ramp is measured against drawn colours.
+
 - **`validate_asset_against_spec` did not carry `readOnlyHint`**, so a client that
   auto-approves read-only tools prompted before every check of a built sprite against its
   spec. It validates the spec document, reads the sprite through `get_sprite_info` and
@@ -16,6 +43,27 @@ All notable changes to this project are documented here. The format is based on
   and a test now names it as it names them.
 
 ### Changed
+
+- **`export_game_asset_bundle` judges the art before it writes anything.** Every frame
+  is assessed the way `assess_sprite` judges one, all of them in a single launch with
+  identical frames scored once (`inspect.assess_frames`), and the result is the
+  manifest's new `assessment` section. A *defect* refuses the bundle, naming the frames
+  and the fix: an absent keyline on a figure of several masses, or, with the new `ramp`
+  argument, a drawn pixel off it. `allow_defects=True` bundles anyway and records them
+  as `warnings`. The ramp is refused before anything is launched, like every tool's, and
+  on an indexed sprite whose palette cannot hold it exactly the harness's reading of what
+  it became goes in `assessment.palette` and in a refusal for pixels off it, since the
+  palette may be why they are off it. Every other reading is an observation, listed and never blocking,
+  because observations do not separate good art from poor: calibrated on 22 pieces from
+  this repository (showcase and probe sprites, the death knight and warden judged poor,
+  two potions drawn for a comparison, three template placeholders), the item sheet, the
+  best art here, drew three observations and the death knight five, while the
+  featureless walk-cycle blob drew none. The defect tier fired once, on a head whose
+  keyline is 5% of the drawing, and not on the death knight or the warden, so this gate
+  stops the measured faults and makes no claim to judge whether art is good. Past
+  `MAX_ASSESS_PIXELS` in total an even sample including the first and last frame is
+  judged; a frame past it alone is not judged, and the manifest says so. Calibration
+  timing: under 1.3 s for 1 to 12 frames, under 5 s for 24 frames of 96x64.
 
 - **The documentation describes what merged with #231 to #235.** The README gains a
   "Bring art in from elsewhere" workflow (`import_image`, `import_spritesheet`, palette

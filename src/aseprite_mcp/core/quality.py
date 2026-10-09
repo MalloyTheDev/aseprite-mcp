@@ -715,7 +715,7 @@ def readings(metrics: dict, *, width: int, height: int,
     box = metrics.get("bbox")
     if box is None:
         out.append("Nothing is drawn on this frame.")
-        return [text for _got, text in out.found]
+        return [text for got, text in out.found if tier is None or got == tier]
 
     usage = metrics.get("canvas_usage", 0.0)
     if usage < SPARSE_CANVAS:
@@ -865,3 +865,30 @@ def readings(metrics: dict, *, width: int, height: int,
     if tier is None:
         return [text for _got, text in out.found]
     return [text for got, text in out.found if got == tier]
+
+
+def frame_findings(per_frame: list[tuple[int, dict]], *, width: int,
+                   height: int) -> dict:
+    """The readings of several frames, split by tier, each reported once with its frames.
+
+    An animation repeats most of what is true of one frame on every other: a cycle that
+    is off-centre is off-centre on all eight frames, and eight copies of one sentence bury
+    the reading that is true of frame 5 alone. So each distinct reading appears once, with
+    the frames it was made on, in the order it was first seen. Readings that quote a count
+    differ from frame to frame and are reported separately, because they are different
+    findings.
+
+    `per_frame` pairs a frame number with that frame's `score`. Returns `defects` and
+    `observations`, each a list of `{"reading", "frames"}`.
+    """
+    grouped: dict[str, dict[str, list[int]]] = {DEFECT: {}, OBSERVATION: {}}
+    for number, metrics in per_frame:
+        for tier, found in grouped.items():
+            for text in readings(metrics, width=width, height=height, tier=tier):
+                found.setdefault(text, []).append(number)
+    return {
+        "defects": [{"reading": text, "frames": frames}
+                    for text, frames in grouped[DEFECT].items()],
+        "observations": [{"reading": text, "frames": frames}
+                         for text, frames in grouped[OBSERVATION].items()],
+    }

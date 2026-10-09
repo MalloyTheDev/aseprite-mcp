@@ -4327,10 +4327,29 @@ Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
 GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
 `manifest.json` describing everything.
 
+**The art is judged before anything is written.** Every frame is assessed the way
+`assess_sprite` judges one (all of them in one launch, identical frames once), and
+the result is the manifest's `assessment` section. A *defect* refuses the bundle: an
+absent keyline on a figure of several masses, or, with `ramp`, a drawn pixel that is
+not on it. Those are the readings that scored as faults against sprites known to be
+good and bad. Every other reading is an *observation*, listed and never blocking,
+because observations do not separate good art from poor: on this project's own
+gallery its best sheet draws three and a featureless blob none. So a clean assessment
+means none of the measured faults, not that the art is good; looking at
+`render_preview` is still the only judge of that.
+
 Args:
     overwrite: Replace existing bundle files (default False = no-clobber). Every
         planned output is checked up front, so the bundle fails before writing any
         file if a target already exists.
+    ramp: The colours the art is drawn from, as given to `assess_sprite`. When set,
+        every drawn pixel must be one of them. Refused before anything is launched
+        past the colour-list cap or in a notation that does not parse. On an indexed
+        sprite whose palette cannot hold it exactly, `assessment.palette` says so,
+        and a refusal for pixels off it carries that reading.
+    allow_defects: Bundle even when the assessment finds a defect (default False).
+        The defects are then the manifest's `warnings`, and `assessment.waived` is
+        true.
 
 Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
 disk as manifest.json inside the bundle).
@@ -4341,6 +4360,8 @@ disk as manifest.json inside the bundle).
 | `bundle_name` | string | no | _none_ |
 | `scale` | integer | no | 1 |
 | `overwrite` | boolean | no | False |
+| `ramp` | array<string> | no | _none_ |
+| `allow_defects` | boolean | no | False |
 
 
 ### `make_4_frame_idle_animation`
