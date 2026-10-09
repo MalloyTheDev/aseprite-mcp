@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **`quality.readings` ignored its tier on an empty frame.** The early return for a
+  frame with nothing drawn handed back every reading whichever tier was asked for, so a
+  caller asking for defects alone was told an empty frame was one. It now answers the
+  tier asked: the empty-frame line is an observation, as it was always filed. Found by
+  the bundle gate below, whose calibration run reported an empty frame as a defect.
+
 - **Refusals now reach MCP clients.** Every refusal this server writes is an
   `AsepriteMCPError` whose message names the way out, and none of it arrived: the 2.x
   SDK forwards only its own `ToolError` into the `is_error` result and masks every
@@ -37,6 +43,24 @@ All notable changes to this project are documented here. The format is based on
   and a test now names it as it names them.
 
 ### Changed
+
+- **`export_game_asset_bundle` judges the art before it writes anything.** Every frame
+  is assessed the way `assess_sprite` judges one, all of them in a single launch with
+  identical frames scored once (`inspect.assess_frames`), and the result is the
+  manifest's new `assessment` section. A *defect* refuses the bundle, naming the frames
+  and the fix: an absent keyline on a figure of several masses, or, with the new `ramp`
+  argument, a drawn pixel off it. `allow_defects=True` bundles anyway and records them
+  as `warnings`. Every other reading is an observation, listed and never blocking,
+  because observations do not separate good art from poor: calibrated on 22 pieces from
+  this repository (showcase and probe sprites, the death knight and warden judged poor,
+  two potions drawn for a comparison, three template placeholders), the item sheet, the
+  best art here, drew three observations and the death knight five, while the
+  featureless walk-cycle blob drew none. The defect tier fired once, on a head whose
+  keyline is 5% of the drawing, and not on the death knight or the warden, so this gate
+  stops the measured faults and makes no claim to judge whether art is good. Past
+  `MAX_ASSESS_PIXELS` in total an even sample including the first and last frame is
+  judged; a frame past it alone is not judged, and the manifest says so. Calibration
+  timing: under 1.3 s for 1 to 12 frames, under 5 s for 24 frames of 96x64.
 
 - **The documentation describes what merged with #231 to #235.** The README gains a
   "Bring art in from elsewhere" workflow (`import_image`, `import_spritesheet`, palette

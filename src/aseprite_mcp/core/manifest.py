@@ -18,6 +18,8 @@ suggested_next_actions, warnings; the rest are included only when relevant):
       "palette":   { "colors": [...], "count": N },
       "animation": { "tag": "idle", "frames": [1,2,3,4], "duration_ms": 120 },
       "tilemap":   { "layer", "tile_width", "tile_height", "tiles": [...], "grid": {...} },
+      "assessment": { "frames_total", "frames_assessed": [...], "defects": [...],
+                      "observations": [...], "waived"?, "skipped"? },
       "pixels_written": N, "pixels_outside_selection": N, "selection_applied": True,
       "suggested_next_actions": [ "...", ... ],
       "warnings": []
@@ -116,6 +118,7 @@ class WorkflowManifest(TypedDict, total=False):
     animation: dict
     tilemap: dict
     tiling: dict
+    assessment: dict
     validation: dict
     operations: list
     plan: list
@@ -216,6 +219,7 @@ def workflow_manifest(
     animation: dict | None = None,
     tilemap: dict | None = None,
     validation: dict | None = None,
+    assessment: dict | None = None,
     operations: list | None = None,
     plan: list | None = None,
     dry_run: bool = False,
@@ -226,8 +230,9 @@ def workflow_manifest(
     """Assemble a ``workflow_manifest.v1`` dict.
 
     Always includes ok/schema_version/kind/created_files/suggested_next_actions/warnings.
-    Optional sections (sprite/exports/palette/animation/tilemap) are included only when
-    non-empty, so empty sections are consistently omitted rather than left as null.
+    Optional sections (sprite/exports/palette/animation/tilemap/validation/assessment)
+    are included only when non-empty, so empty sections are consistently omitted rather
+    than left as null.
 
     `counters` is the harness's report, and only the keys in HARNESS_REPORT_KEYS are read
     out of it: pass a raw Lua result, a sub-tool's result, or `pixel_counters(...)` over
@@ -260,6 +265,8 @@ def workflow_manifest(
         manifest["tilemap"] = tilemap
     if validation:
         manifest["validation"] = validation
+    if assessment:
+        manifest["assessment"] = assessment
     if operations is not None:
         manifest["operations"] = operations
     if plan is not None:

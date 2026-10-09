@@ -541,3 +541,36 @@ def test_tier_argument_partitions_the_readings() -> None:
     assert len(defects) + len(observations) == len(everything)
     assert set(defects) | set(observations) == set(everything)
     assert not set(defects) & set(observations)
+
+
+def test_an_empty_frame_answers_the_tier_it_was_asked() -> None:
+    """The empty-frame early return handed back every reading whatever the tier, so a
+    caller asking for defects alone was told an empty frame was one."""
+    metrics = quality.score([[T] * 32 for _ in range(32)])
+    assert quality.readings(metrics, width=32, height=32, tier=quality.DEFECT) == []
+    assert quality.readings(metrics, width=32, height=32, tier=quality.OBSERVATION) == [
+        "Nothing is drawn on this frame."]
+
+
+def test_frame_findings_reports_a_shared_reading_once_with_its_frames() -> None:
+    empty = quality.score([[T] * 32 for _ in range(32)])
+    fused = quality.score(_joined_figure(1))
+    found = quality.frame_findings([(1, empty), (2, fused), (3, empty), (4, fused)],
+                                   width=32, height=32)
+
+    keyline = [d for d in found["defects"] if "keyline" in d["reading"]]
+    assert [d["frames"] for d in keyline] == [[2, 4]]
+    blank = [o for o in found["observations"] if o["reading"].startswith("Nothing is drawn")]
+    assert [o["frames"] for o in blank] == [[1, 3]]
+    texts = [f["reading"] for f in found["defects"] + found["observations"]]
+    assert len(texts) == len(set(texts)), "a reading was reported twice"
+
+
+def test_frame_findings_splits_the_tiers_exactly_as_readings_does() -> None:
+    fused = quality.score(_joined_figure(1))
+    found = quality.frame_findings([(7, fused)], width=32, height=32)
+    size = {"width": 32, "height": 32}
+    assert [d["reading"] for d in found["defects"]] == quality.readings(
+        fused, **size, tier=quality.DEFECT)
+    assert [o["reading"] for o in found["observations"]] == quality.readings(
+        fused, **size, tier=quality.OBSERVATION)
