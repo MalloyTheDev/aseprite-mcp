@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **Tools that read the layer they draw on treated an indexed Background's transparent
+  index as empty.** The writes were fixed earlier; the reads were not, so the same scene
+  behaved differently as an RGB and as an indexed Background. Measured on a 14x14 night
+  sky with four lone stars: `fill_gradient` with `respect_alpha` wrote 9 of 196 pixels on
+  the indexed one, skipping the whole sky as if it were transparent; `replace_color`
+  could not find the background's own colour, so recolouring a converted scene's sky did
+  nothing; `invert_colors` and the other filters skipped it; `remove_stray_pixels` left
+  3 of 4 stars that it recoloured on RGB. A new prelude reader, `img_rgba`, returns a
+  pixel of the image a tool draws into as Aseprite shows it (the transparent index as its
+  colour, a translucent entry blended over it, reproducing a measured render), and
+  `img_solid`, `replace_color`, the filters, the shading masks and the silhouette reader
+  behind `normalize_edge_runs` read through it. It is held to the draw target by
+  identity, so a tool that also reads another layer still sees that layer's
+  transparency, and a test proves an ordinary layer above an indexed Background keeps
+  it. `add_outline` now refuses a Background of either kind: on an indexed one it had
+  laid 20 pixels of the background's own colour over itself and reported them written,
+  and on an RGB one it returned ok having written nothing. Each fix's test fails on the
+  previous code.
+
 - **`quality.readings` ignored its tier on an empty frame.** The early return for a
   frame with nothing drawn handed back every reading whichever tier was asked for, so a
   caller asking for defects alone was told an empty frame was one. It now answers the

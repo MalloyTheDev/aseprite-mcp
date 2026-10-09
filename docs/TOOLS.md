@@ -2585,6 +2585,11 @@ its two widths empty.
 For an outline in colours taken from the artwork's own ramp rather than one flat
 colour, see `outline_smart`, which varies hue instead of width.
 
+A Background is refused, in either colour mode: every pixel on one is drawn, so an
+outline has no empty pixel to go into or grow from. Outline the art on its own layer;
+on an indexed sprite, `convert_background_to_layer` turns the transparent index back
+into transparency first.
+
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
 | `filename` | string | yes |  |

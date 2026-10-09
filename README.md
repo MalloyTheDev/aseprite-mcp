@@ -1195,9 +1195,11 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 - **Indexed sprites and the Background.** On an ordinary layer the transparent palette
   index means "no pixel". On a Background Aseprite draws it as a colour, and so do
   `get_pixels`, `assess_sprite`, `diff_sprites`, the palette tools, `trim_sprite`,
-  `set_color_mode`'s conversion check and the drawing tools here. Not yet: effects that
-  read their own layer before writing it, such as `add_outline`'s seed test and the
-  shading masks, still treat it as empty on a Background.
+  `set_color_mode`'s conversion check, the drawing tools, and every effect and shading
+  tool that reads the layer it is about to write (`replace_color`, the filters, the
+  shading masks, `remove_stray_pixels`, `normalize_edge_runs`, `fill_gradient` with
+  `respect_alpha`). The same scene behaves the same as an RGB or an indexed Background.
+  `add_outline` refuses a Background of either kind, since nothing on one is empty.
 - **Fills start from Aseprite's factory colours.** Where a Background gains pixels
   (`convert_layer_to_background`, or growing its canvas with `resize_canvas` or
   `crop_sprite`) they are black, or the transparent index on an indexed sprite, whatever

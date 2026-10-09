@@ -50,9 +50,10 @@ Workflow notes:
 Making art that holds up, learned from this server's own output:
   * Pick the route by subject. Detailed subjects (a full character, a scene) are where
     hand-placed output has been weakest; when a source image exists, convert it with a
-    pixel-art converter such as PixelPrep, bring it in with `import_image`, limit it
-    with `quantize_palette`, and clean it with `remove_stray_pixels` and
-    `normalize_edge_runs`. Icons, props and small sprites draw well by hand, as below.
+    pixel-art converter such as PixelPrep, bring it in with `import_image` and limit
+    it with `quantize_palette`; a sprite on transparency then cleans up with
+    `remove_stray_pixels` and `normalize_edge_runs`. Icons, props and small sprites
+    draw well by hand, as below.
   * Plan colour first: one ramp per material from `generate_ramp` (set `chroma`, or
     its greys go neutral), and an outline colour darker than every ramp.
   * Block in the silhouette with shapes (`draw_ellipse_in_box`, `draw_rectangle`),
