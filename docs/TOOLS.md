@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **163 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **165 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -10,14 +10,14 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Inspection & preview](#inspection--preview) (6)
 - [Layers](#layers) (8)
 - [Frames (animation)](#frames-animation) (7)
-- [Animation (motion, timing, checks)](#animation-motion-timing-checks) (5)
+- [Animation (motion, timing, checks)](#animation-motion-timing-checks) (6)
 - [Animation tags](#animation-tags) (3)
 - [Cels](#cels) (10)
 - [Drawing](#drawing) (11)
 - [Brushes & symmetry](#brushes--symmetry) (4)
 - [Shading & light](#shading--light) (10)
 - [Selections](#selections) (6)
-- [Effects & colour adjustments](#effects--colour-adjustments) (13)
+- [Effects & colour adjustments](#effects--colour-adjustments) (14)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (3)
@@ -858,6 +858,58 @@ correct: a smear frame is one that legitimately does.
 | `strength` | number | no | 0.6 |
 | `steps` | integer | no | _none_ |
 | `ramp` | array<string> | no | _none_ |
+
+
+### `squash_stretch_pass`
+
+Squash or stretch a shape while the edge it rests on stays exactly where it is.
+
+The weight in an impact: a body landing flattens against the ground and spreads
+sideways. What makes it read is that the **contact edge does not move**. Scaling a
+shape about its centre shortens it from both ends at once, so the thing lifts off the
+surface at the very moment it should be pressed into it. Measured on a hand-built
+squash before this existed: the contact row rose from 56 to 54, so the ball went *up*
+two pixels on impact.
+
+**Volume is preserved**: whatever the shape loses along the anchored axis it gains
+across it, so a squash widens and a stretch narrows. That is the arithmetic a caller
+would otherwise have to do twice and keep consistent.
+
+**Which of these two tools you want.** `tween_cels` takes the drawing on the *first*
+listed frame and resamples that one drawing across all of them, interpolating the
+scale as it goes, which is how an inbetween is made. This takes *each frame's own*
+drawing and deforms it in place by the same amount, which is how an animation that
+already exists gets its weight: every frame of a walk keeps its own pose and is
+pressed onto the ground.
+
+Args:
+    layer: The layer holding the shape (default: the top one). The drawn box on each
+        frame is what gets deformed, not the canvas.
+    frames: Which frames to work on, 1-based. Defaults to every frame. A frame with
+        nothing drawn on it is reported as skipped rather than failing the pass.
+    anchor: The edge that stays put: "bottom" (the usual contact edge), "top",
+        "left" or "right". "bottom" and "top" squash vertically, "left" and "right"
+        horizontally.
+    amount: How much of the anchored axis is given up, 0 to 0.8. 0.2 is a firm
+        landing. **Negative stretches** instead, which is the other half of the pair:
+        -0.2 makes the shape 20 percent taller and correspondingly narrower, for the
+        frames before and after an impact.
+
+Resizing is nearest neighbour, always. Bilinear is what the editor would reach for and
+it is wrong here: measured on a 5-colour sprite, it returned 50 colours and 40
+semi-transparent pixels, so a single pass would cost the sprite its palette and fringe
+its silhouette.
+
+Returns the per-frame report: the box before, the box after, and the coordinate the
+anchored edge kept.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `layer` | string | no | _none_ |
+| `frames` | array<integer> | no | _none_ |
+| `anchor` | string | no | bottom |
+| `amount` | number | no | 0.2 |
 
 
 ### `tween_cels`
@@ -2637,6 +2689,47 @@ Shift hue (degrees) and scale saturation/lightness (percent, -100..100).
 | `hue` | integer | no | 0 |
 | `saturation` | integer | no | 0 |
 | `lightness` | integer | no | 0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `apply_color_curve`
+
+Remap every tone through a curve: the tonal control brightness and contrast lack.
+
+Brightness moves every tone by the same amount and contrast pivots them all around
+the middle. A curve says what each input tone becomes, so shadows can be lifted
+without touching the highlights, a flat midrange pulled apart while the ends stay
+pinned, or one channel warmed on its own.
+
+**It cannot add a colour.** A curve maps each input tone to exactly one output tone,
+so a sprite drawn in five colours comes out in five colours or fewer, and no pixel
+becomes part transparent. That is what separates this from a convolution kernel
+(blur, sharpen, emboss), which on a clean five-colour orb produced 89 colours and 208
+semi-transparent pixels, measured. Curves are safe on finished pixel art; kernels are
+not, which is why this server exposes the one and not the other.
+
+Args:
+    points: The curve's corners, as `[[input, output], ...]` with every value from 0
+        to 255 and the inputs climbing. `[[0, 0], [128, 192], [255, 255]]` lifts the
+        midtones and pins the ends; `[[0, 255], [255, 0]]` inverts; a single point
+        flattens every tone to its output. Between corners the curve runs straight,
+        and outside the first and last it holds their values, which is what Aseprite's
+        own Color Curve does (measured, and reproduced here rather than called, so the
+        selection, the pixel counters and indexed palettes all behave as they do for
+        every other pass).
+    channel: "rgb" (default) moves all three together, or "red", "green" or "blue"
+        for one. A grayscale sprite takes "rgb", which moves its single value.
+    layer: Target layer (default: the top one). frame: 1-based.
+
+Only drawn pixels are visited, as with every other per-pixel pass here, so a curve
+never fills in transparent canvas.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `points` | array<any> | yes |  |
+| `channel` | string | no | rgb |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 

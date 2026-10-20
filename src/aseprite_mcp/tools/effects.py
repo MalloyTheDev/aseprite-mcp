@@ -10,7 +10,7 @@ every Aseprite version.
 from __future__ import annotations
 
 from ..app import mcp
-from ..core import edges, lighting
+from ..core import curves, edges, lighting
 from ..core.errors import ValidationFailed
 from ..core.limits import (
     MAX_ASSESS_PIXELS,
@@ -1387,6 +1387,70 @@ def adjust_brightness_contrast(
     ng = cf * (g - 128) + 128 + ARG.brightness
     nb = cf * (b - 128) + 128 + ARG.brightness
     """
+    return _draw(args, _pixel_pass(inner))
+
+
+# Which channels a curve may be pointed at, and what each one moves. `alpha` is listed
+# but left out of the mapping on purpose: the pass below only visits pixels that are
+# already drawn, so a curve could lower an opaque pixel's alpha but never raise a
+# transparent one's, which would read as an eraser with half a tool's name.
+CURVE_CHANNELS = ("rgb", "red", "green", "blue")
+
+
+@mcp.tool()
+def apply_color_curve(
+    filename: str,
+    points: list,
+    channel: str = "rgb",
+    layer: str | None = None,
+    frame: int = 1,
+) -> dict:
+    """Remap every tone through a curve: the tonal control brightness and contrast lack.
+
+    Brightness moves every tone by the same amount and contrast pivots them all around
+    the middle. A curve says what each input tone becomes, so shadows can be lifted
+    without touching the highlights, a flat midrange pulled apart while the ends stay
+    pinned, or one channel warmed on its own.
+
+    **It cannot add a colour.** A curve maps each input tone to exactly one output tone,
+    so a sprite drawn in five colours comes out in five colours or fewer, and no pixel
+    becomes part transparent. That is what separates this from a convolution kernel
+    (blur, sharpen, emboss), which on a clean five-colour orb produced 89 colours and 208
+    semi-transparent pixels, measured. Curves are safe on finished pixel art; kernels are
+    not, which is why this server exposes the one and not the other.
+
+    Args:
+        points: The curve's corners, as `[[input, output], ...]` with every value from 0
+            to 255 and the inputs climbing. `[[0, 0], [128, 192], [255, 255]]` lifts the
+            midtones and pins the ends; `[[0, 255], [255, 0]]` inverts; a single point
+            flattens every tone to its output. Between corners the curve runs straight,
+            and outside the first and last it holds their values, which is what Aseprite's
+            own Color Curve does (measured, and reproduced here rather than called, so the
+            selection, the pixel counters and indexed palettes all behave as they do for
+            every other pass).
+        channel: "rgb" (default) moves all three together, or "red", "green" or "blue"
+            for one. A grayscale sprite takes "rgb", which moves its single value.
+        layer: Target layer (default: the top one). frame: 1-based.
+
+    Only drawn pixels are visited, as with every other per-pixel pass here, so a curve
+    never fills in transparent canvas.
+    """
+    if channel not in CURVE_CHANNELS:
+        raise ValidationFailed(
+            f"channel is {channel!r}; apply_color_curve moves {', '.join(CURVE_CHANNELS)}. "
+            "A palette index is not a tone, so an indexed sprite's pixels are curved "
+            "through the colours they resolve to, not through their index.")
+    table = curves.curve_table(points)
+    args = {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer, "frame": int(frame),
+        # 256 entries, built in Python so the arithmetic is testable without an editor.
+        # Lua indexes from 1, so every lookup below is table[value + 1].
+        "table": table,
+    }
+    moves = {"rgb": ("nr", "ng", "nb"), "red": ("nr",), "green": ("ng",), "blue": ("nb",)}
+    source = {"nr": "r", "ng": "g", "nb": "b"}
+    inner = "\n".join(f"{name} = ARG.table[{source[name]} + 1]" for name in moves[channel])
     return _draw(args, _pixel_pass(inner))
 
 

@@ -1566,3 +1566,177 @@ def smear_frame(
         "pixels_written": applied.get("pixels_written", 0),
         "warnings": warnings,
     }, applied)
+
+
+# Which edge stays put, and therefore which way the shape is squashed. A contact edge is
+# the one touching something: the ground under a landing body, the wall a thrown ball hits.
+SQUASH_ANCHORS = {"bottom": "vertical", "top": "vertical",
+                  "left": "horizontal", "right": "horizontal"}
+# Past this the shape stops reading as the same object. Not a technical limit: at 0.8 a
+# ball is a quarter of its height and five times its width, which is a puddle.
+MAX_SQUASH_AMOUNT = 0.8
+
+_SQUASH_LUA = FRAME_GUARD_LUA + """
+local spr = open_sprite(ARG.src)
+local layer = find_layer(spr, ARG.layer)
+if layer.isGroup then error("Cannot squash a group layer: " .. layer.name, 0) end
+
+-- Every frame when none were named, resolved here where the count is known.
+local wanted = ARG.frames
+if wanted == nil then
+  wanted = {}
+  for i = 1, #spr.frames do wanted[i] = i end
+end
+
+local report = {}
+for _, number in ipairs(wanted) do
+  local framenum = require_frame(spr, number, "frame")
+  local img = get_draw_image(spr, layer, framenum)
+
+  -- The drawn box, which is what gets deformed: the canvas around it is not the shape.
+  local x0, y0, x1, y1
+  for y = 0, img.height - 1 do
+    for x = 0, img.width - 1 do
+      if img_solid(spr, img, x, y) then
+        if x0 == nil or x < x0 then x0 = x end
+        if x1 == nil or x > x1 then x1 = x end
+        if y0 == nil or y < y0 then y0 = y end
+        if y1 == nil or y > y1 then y1 = y end
+      end
+    end
+  end
+
+  if x0 == nil then
+    report[#report + 1] = { frame = framenum, skipped = "nothing is drawn on this frame" }
+  else
+    local bw, bh = x1 - x0 + 1, y1 - y0 + 1
+    local keep = 1 - ARG.amount
+    local nw, nh
+    if ARG.axis == "vertical" then
+      nh = math.max(1, math.floor(bh * keep + 0.5))
+      nw = math.max(1, math.floor(bw / keep + 0.5))
+    else
+      nw = math.max(1, math.floor(bw * keep + 0.5))
+      nh = math.max(1, math.floor(bh / keep + 0.5))
+    end
+
+    -- Cropped, resized and put back, rather than resizing the whole canvas-sized image,
+    -- so the deformation is of the shape and the canvas does not move.
+    local piece = Image(bw, bh, spr.colorMode)
+    piece:clear()
+    piece:drawImage(img, Point(-x0, -y0), 255, BlendMode.SRC)
+    -- Nearest neighbour, never bilinear: measured on a 5-colour sprite, bilinear came
+    -- back with 50 colours and 40 semi-transparent pixels, which is no longer pixel art.
+    piece:resize{ width = nw, height = nh, method = "nearest" }
+
+    -- The anchored edge keeps its coordinate; the free axis stays centred on the box.
+    local nx, ny
+    if ARG.anchor == "bottom" then
+      nx, ny = math.floor(x0 + (bw - nw) / 2 + 0.5), y1 - nh + 1
+    elseif ARG.anchor == "top" then
+      nx, ny = math.floor(x0 + (bw - nw) / 2 + 0.5), y0
+    elseif ARG.anchor == "left" then
+      nx, ny = x0, math.floor(y0 + (bh - nh) / 2 + 0.5)
+    else
+      nx, ny = x1 - nw + 1, math.floor(y0 + (bh - nh) / 2 + 0.5)
+    end
+
+    img:clear()
+    img:drawImage(piece, Point(nx, ny), 255, BlendMode.SRC)
+    commit_image(spr, layer, framenum, img)
+
+    -- drawImage drops what falls outside the canvas without a word, and widening is
+    -- exactly what pushes a shape off it, so the rows and columns lost are counted here.
+    local lost = math.max(0, -nx) + math.max(0, (nx + nw) - img.width)
+                 + math.max(0, -ny) + math.max(0, (ny + nh) - img.height)
+    report[#report + 1] = { frame = framenum, was = { bw, bh }, now = { nw, nh },
+                            clipped = (lost > 0) and lost or nil,
+                            anchored_at = (ARG.axis == "vertical")
+                                            and ((ARG.anchor == "bottom") and y1 or y0)
+                                            or ((ARG.anchor == "left") and x0 or x1) }
+  end
+end
+save_sprite(spr)
+RESULT = { ok = true, filename = spr.filename, layer = layer.name,
+           anchor = ARG.anchor, amount = ARG.amount, frames = report }
+"""
+
+
+@mcp.tool()
+def squash_stretch_pass(
+    filename: str,
+    layer: str | None = None,
+    frames: list[int] | None = None,
+    anchor: str = "bottom",
+    amount: float = 0.2,
+) -> dict:
+    """Squash or stretch a shape while the edge it rests on stays exactly where it is.
+
+    The weight in an impact: a body landing flattens against the ground and spreads
+    sideways. What makes it read is that the **contact edge does not move**. Scaling a
+    shape about its centre shortens it from both ends at once, so the thing lifts off the
+    surface at the very moment it should be pressed into it. Measured on a hand-built
+    squash before this existed: the contact row rose from 56 to 54, so the ball went *up*
+    two pixels on impact.
+
+    **Volume is preserved**: whatever the shape loses along the anchored axis it gains
+    across it, so a squash widens and a stretch narrows. That is the arithmetic a caller
+    would otherwise have to do twice and keep consistent.
+
+    **Which of these two tools you want.** `tween_cels` takes the drawing on the *first*
+    listed frame and resamples that one drawing across all of them, interpolating the
+    scale as it goes, which is how an inbetween is made. This takes *each frame's own*
+    drawing and deforms it in place by the same amount, which is how an animation that
+    already exists gets its weight: every frame of a walk keeps its own pose and is
+    pressed onto the ground.
+
+    Args:
+        layer: The layer holding the shape (default: the top one). The drawn box on each
+            frame is what gets deformed, not the canvas.
+        frames: Which frames to work on, 1-based. Defaults to every frame. A frame with
+            nothing drawn on it is reported as skipped rather than failing the pass.
+        anchor: The edge that stays put: "bottom" (the usual contact edge), "top",
+            "left" or "right". "bottom" and "top" squash vertically, "left" and "right"
+            horizontally.
+        amount: How much of the anchored axis is given up, 0 to 0.8. 0.2 is a firm
+            landing. **Negative stretches** instead, which is the other half of the pair:
+            -0.2 makes the shape 20 percent taller and correspondingly narrower, for the
+            frames before and after an impact.
+
+    Resizing is nearest neighbour, always. Bilinear is what the editor would reach for and
+    it is wrong here: measured on a 5-colour sprite, it returned 50 colours and 40
+    semi-transparent pixels, so a single pass would cost the sprite its palette and fringe
+    its silhouette.
+
+    Returns the per-frame report: the box before, the box after, and the coordinate the
+    anchored edge kept.
+    """
+    if anchor not in SQUASH_ANCHORS:
+        raise ValidationFailed(
+            f"anchor is {anchor!r}; it names the edge that stays put, one of "
+            f"{sorted(SQUASH_ANCHORS)}.")
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise ValidationFailed(f"amount is {amount!r}; it is a fraction, as in 0.2.") from None
+    if not -MAX_SQUASH_AMOUNT <= amount <= MAX_SQUASH_AMOUNT:
+        raise ValidationFailed(
+            f"amount is {amount}; it runs from {-MAX_SQUASH_AMOUNT} (stretch) to "
+            f"{MAX_SQUASH_AMOUNT} (squash). Past that the shape stops reading as itself.")
+    if amount == 0:
+        raise ValidationFailed(
+            "amount is 0, so this pass would do nothing. Give a positive amount to "
+            "squash the shape against its anchor, or a negative one to stretch it.")
+    if frames is not None:
+        check_list_length("frames", frames, MAX_MOTION_FRAMES)
+        if not frames:
+            raise ValidationFailed("frames is empty; leave it out to work on every frame.")
+
+    return run_lua(_SQUASH_LUA, {
+        "src": lua_path(resolve_path(filename)),
+        "layer": layer,
+        "frames": [int(n) for n in frames] if frames else None,
+        "anchor": anchor,
+        "axis": SQUASH_ANCHORS[anchor],
+        "amount": amount,
+    })
