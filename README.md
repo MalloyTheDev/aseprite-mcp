@@ -1194,6 +1194,11 @@ Run `health_check` to confirm the configuration (Aseprite path, workspace, sandb
 - `get_pixels` is capped at 4096 px (e.g. 64×64) per call; read in tiles for larger areas.
 - Anti-aliasing (`antialias=True`) only applies to RGB sprites; it's ignored on
   indexed/gray. Tilemaps and reference layers require **Aseprite 1.3+**.
+- **Grayscale sprites.** A colour drawn on one becomes the grey Aseprite's own
+  `set_color_mode("gray")` would give it, so drawing and converting agree, and
+  `desaturate` reaches the same grey. Green carries most of the light and blue almost
+  none, so a colour's grey is not the average of its channels: pure red, green and blue
+  are three different tones, not one.
 - **Indexed sprites and the Background.** On an ordinary layer the transparent palette
   index means "no pixel". On a Background Aseprite draws it as a colour, and so do
   `get_pixels`, `assess_sprite`, `diff_sprites`, the palette tools, `trim_sprite`,

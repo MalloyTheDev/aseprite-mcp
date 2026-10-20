@@ -435,6 +435,25 @@ local function ramp_palette_state(spr, ramp)
   return { steps = steps, declared = #ramp, resolved = resolved, exact = exact }
 end
 
+-- What a colour is worth on a grayscale sprite, as Aseprite itself converts it.
+--
+-- Both grayscale paths below used to average the channels, which disagreed with
+-- Aseprite's own conversion for every colour that is not already grey, and collapsed
+-- colours an average cannot tell apart: pure red, green and blue all have the same
+-- channel sum, so all three landed on 85 and became one tone, as did yellow and cyan on
+-- 170. The same art therefore came out differently depending on whether it was drawn
+-- onto a grayscale sprite or drawn in RGB and converted, and a palette of distinct hues
+-- could lose its steps on the way in.
+--
+-- Green carries most of the light and blue almost none, which is what these weights say.
+-- They are Rec.709 luma as integers over 10000, matching `set_color_mode("gray")`
+-- exactly on all 40 colours it was checked against, pure white and pure black included:
+-- the integer form is what makes white come out 255 rather than 254, and the division
+-- truncates rather than rounds, which is where yellow's 236 comes from.
+local function gray_level(r, g, b)
+  return math.floor((r * 2126 + g * 7152 + b * 722) / 10000)
+end
+
 -- Convert a colour spec table (with r,g,b,a and/or index) to a raw pixel value
 -- appropriate for the sprite's colour mode.
 local function to_pixel(spr, c)
@@ -446,8 +465,7 @@ local function to_pixel(spr, c)
   if cm == ColorMode.RGB then
     return app.pixelColor.rgba(col.red, col.green, col.blue, col.alpha)
   elseif cm == ColorMode.GRAY then
-    local v = math.floor((col.red + col.green + col.blue) / 3 + 0.5)
-    return app.pixelColor.graya(v, col.alpha)
+    return app.pixelColor.graya(gray_level(col.red, col.green, col.blue), col.alpha)
   elseif cm == ColorMode.INDEXED then
     if col.alpha == 0 then return spr.transparentColor end
     return nearest_index(spr, col.red, col.green, col.blue)
@@ -483,7 +501,7 @@ local function rgba_to_px(spr, r, g, b, a)
   if cm == ColorMode.RGB then
     return app.pixelColor.rgba(r, g, b, a)
   elseif cm == ColorMode.GRAY then
-    return app.pixelColor.graya(math.floor((r + g + b) / 3 + 0.5), a)
+    return app.pixelColor.graya(gray_level(r, g, b), a)
   else
     if a == 0 then return spr.transparentColor end
     return nearest_index(spr, r, g, b)
