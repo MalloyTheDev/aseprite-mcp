@@ -178,3 +178,20 @@ def test_an_unknown_channel_is_refused_before_launch(monkeypatch):
 
     with pytest.raises(ValidationFailed, match="channel is 'alpha'"):
         effects.apply_color_curve("cc/x.aseprite", LIFT, channel="alpha")
+
+
+def test_a_curve_on_a_grayscale_sprite_maps_through_the_table():
+    """The two halves of this session's work meeting: a grayscale sprite's single value
+    is read as r=g=b, curved, and written back through the luma conversion, which sums to
+    one, so the tone that comes out is exactly the one the table names."""
+    values = [0, 36, 73, 109, 146, 182, 219, 255]
+    name = "cc/grayscale.aseprite"
+    sprite.create_sprite(name, len(values), 1, color_mode="gray", overwrite=True)
+    for i, value in enumerate(values):
+        drawing.draw_pixels(name, [{"x": i, "y": 0}], f"#{value:02x}{value:02x}{value:02x}")
+
+    effects.apply_color_curve(name, LIFT)
+
+    row = inspect.get_pixels(name, 0, 0, len(values), 1)["pixels"][0]
+    table = curve_table(LIFT)
+    assert [int(px[1:3], 16) for px in row] == [table[v] for v in values]
