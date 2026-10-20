@@ -1,6 +1,6 @@
 # Aseprite MCP Tool Reference
 
-Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **163 tools.**
+Auto-generated from the live tool registry by `scripts/gen_tool_docs.py`. **164 tools.**
 
 Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name (black, white, red, green, blue, yellow, cyan, magenta, transparent, …). Frames are 1-based; palette indices are 0-based. Relative paths resolve inside the workspace.
 
@@ -17,7 +17,7 @@ Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, or a name 
 - [Brushes & symmetry](#brushes--symmetry) (4)
 - [Shading & light](#shading--light) (10)
 - [Selections](#selections) (6)
-- [Effects & colour adjustments](#effects--colour-adjustments) (13)
+- [Effects & colour adjustments](#effects--colour-adjustments) (14)
 - [Text](#text) (1)
 - [Tilemaps](#tilemaps) (8)
 - [Image stamping](#image-stamping) (3)
@@ -2637,6 +2637,47 @@ Shift hue (degrees) and scale saturation/lightness (percent, -100..100).
 | `hue` | integer | no | 0 |
 | `saturation` | integer | no | 0 |
 | `lightness` | integer | no | 0 |
+| `layer` | string | no | _none_ |
+| `frame` | integer | no | 1 |
+
+
+### `apply_color_curve`
+
+Remap every tone through a curve: the tonal control brightness and contrast lack.
+
+Brightness moves every tone by the same amount and contrast pivots them all around
+the middle. A curve says what each input tone becomes, so shadows can be lifted
+without touching the highlights, a flat midrange pulled apart while the ends stay
+pinned, or one channel warmed on its own.
+
+**It cannot add a colour.** A curve maps each input tone to exactly one output tone,
+so a sprite drawn in five colours comes out in five colours or fewer, and no pixel
+becomes part transparent. That is what separates this from a convolution kernel
+(blur, sharpen, emboss), which on a clean five-colour orb produced 89 colours and 208
+semi-transparent pixels, measured. Curves are safe on finished pixel art; kernels are
+not, which is why this server exposes the one and not the other.
+
+Args:
+    points: The curve's corners, as `[[input, output], ...]` with every value from 0
+        to 255 and the inputs climbing. `[[0, 0], [128, 192], [255, 255]]` lifts the
+        midtones and pins the ends; `[[0, 255], [255, 0]]` inverts; a single point
+        flattens every tone to its output. Between corners the curve runs straight,
+        and outside the first and last it holds their values, which is what Aseprite's
+        own Color Curve does (measured, and reproduced here rather than called, so the
+        selection, the pixel counters and indexed palettes all behave as they do for
+        every other pass).
+    channel: "rgb" (default) moves all three together, or "red", "green" or "blue"
+        for one. A grayscale sprite takes "rgb", which moves its single value.
+    layer: Target layer (default: the top one). frame: 1-based.
+
+Only drawn pixels are visited, as with every other per-pixel pass here, so a curve
+never fills in transparent canvas.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `filename` | string | yes |  |
+| `points` | array<any> | yes |  |
+| `channel` | string | no | rgb |
 | `layer` | string | no | _none_ |
 | `frame` | integer | no | 1 |
 

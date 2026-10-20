@@ -8,6 +8,31 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`apply_color_curve`: remap every tone through a curve** (#92). The tonal control
+  `adjust_brightness_contrast` lacks: brightness moves every tone by the same amount and
+  contrast pivots them all around the middle, where a curve says what each input tone
+  becomes, so the shadows lift while the highlights stay pinned, or one channel warms on
+  its own. Points are `[[input, output], ...]`; between them the curve runs straight, and
+  outside the first and last it holds their values.
+
+  **A curve cannot add a colour.** It maps each input tone to exactly one output, so a
+  sprite drawn in five colours comes out in five or fewer and no pixel becomes part
+  transparent. That is what decided the other half of the issue, which asked for
+  Aseprite's 36 convolution kernels as well: measured on the showcase orb, `blur-3x3`
+  turned 5 colours into 89 and fringed the silhouette with 208 semi-transparent pixels,
+  `blur-5x5` into 179, and `sharpen-3x3` into 101. Those destroy the palette discipline
+  that makes pixel art pixel art, so the kernels are deliberately not exposed and the
+  issue records the numbers.
+
+  The curve is built in Python, so the arithmetic is tested without an editor, and the
+  pass runs through the shared drawing path, so it is clipped to the selection, counted
+  in `pixels_written` and resolved against an indexed palette like any other write.
+  Aseprite's own `ColorCurve` was measured rather than assumed (linear between corners,
+  truncating, holding the ends) and five tests hold the tool to the command's own output
+  on a real sprite.
+
+### Added
+
 - **`render_preview(views=...)` shows the checks a pixel artist makes by eye.** An agent
   judging its own work can only make the checks it is shown, and it was shown colour
   alone. `views` lays the frame out side by side, labelled, from the same single
