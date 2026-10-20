@@ -1457,7 +1457,11 @@ def desaturate(
         "amount": max(0, min(100, int(amount))),
     }
     inner = """
-    local gray = 0.299 * r + 0.587 * g + 0.114 * b
+    -- The same grey `set_color_mode("gray")` would give this colour, so desaturating all
+    -- the way and converting the sprite agree. This used to be Rec.601 (0.299/0.587/
+    -- 0.114), a third formula beside the two the prelude carried: desaturating a pure
+    -- green gave 150 where converting the sprite gave 182.
+    local gray = gray_level(r, g, b)
     local f = ARG.amount / 100
     nr = r + (gray - r) * f
     ng = g + (gray - g) * f

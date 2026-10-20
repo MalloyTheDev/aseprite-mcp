@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **A colour drawn on a grayscale sprite was not the grey Aseprite converts it to.** Both
+  grayscale paths in the prelude averaged the channels, so the same art came out
+  differently depending on the route: drawn onto a grayscale sprite, or drawn in RGB and
+  converted with `set_color_mode("gray")`. An average also cannot tell apart colours whose
+  channels sum alike, which is the part that loses work rather than merely shifting it:
+  pure red, green and blue each sum to 255, so all three landed on 85 and became one tone,
+  as did yellow and cyan on 170. A shading ramp of distinct hues could therefore arrive
+  with fewer steps than it was given. Both paths now use Rec.709 luma as integers over
+  10000, which reproduces Aseprite's conversion exactly on all 40 colours it was checked
+  against: the integer form is what makes white 255 rather than 254, and the truncation is
+  where yellow's 236 comes from. `desaturate` used Rec.601 (0.299/0.587/0.114), a third
+  formula, and now shares the same one, so desaturating all the way and converting the
+  sprite land on the same tone; a pure green desaturates to 182 where it used to give 150.
+  Grayscale had no tests at all, which is how this went unnoticed; it has twelve now, and
+  the two that pin the fix fail on the previous code.
+
 ### Added
 
 - **`render_preview(views=...)` shows the checks a pixel artist makes by eye.** An agent
