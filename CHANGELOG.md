@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`squash_stretch_pass`: the contact edge stays where it is** (#90). Scaling a shape
+  about its centre shortens it from both ends, so the thing lifts off the surface at the
+  moment it should be pressed into it. Measured on a hand-built squash before this
+  existed, the contact row rose from 56 to 54: the ball went *up* two pixels on impact.
+  This pins the named edge ("bottom" by default, or "top", "left", "right") and preserves
+  volume, so a squash widens by what it loses in height and a negative amount stretches
+  instead.
+
+  It deforms **each frame's own drawing**, which is what separates it from `tween_cels`:
+  that one takes the first listed frame's drawing and resamples it across the rest, which
+  is how an inbetween is made, where this is how an animation that already exists gets
+  its weight. Resizing is nearest neighbour and the tool does not offer bilinear at all:
+  measured on a 5-colour sprite, bilinear returned 50 colours and 40 semi-transparent
+  pixels, so one pass would cost a sprite its palette and fringe its silhouette. A frame
+  with nothing drawn on it is reported as skipped rather than failing the pass, and
+  because widening is exactly what pushes a shape off the canvas and `drawImage` drops
+  what falls outside without a word, the rows and columns lost are counted and reported.
+
 - **`apply_color_curve`: remap every tone through a curve** (#92). The tonal control
   `adjust_brightness_contrast` lacks: brightness moves every tone by the same amount and
   contrast pivots them all around the middle, where a curve says what each input tone

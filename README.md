@@ -35,7 +35,7 @@ It works by generating **Lua scripts** and running them through Aseprite's batch
 real `.aseprite` file, edits it, and saves, so your files stay fully editable in the
 Aseprite GUI.
 
-- **164 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
+- **165 tools** across every part of a sprite: drawing (pixel-perfect and anti-aliased),
   custom brushes and symmetry, ramp-aware shading, selections that scope later edits,
   palettes, layers, frames, cels, animation tags, slices and 9-patch, effects, text,
   tilemaps, transforms, and export (per-layer, per-tag, sprite sheets, GIF, onion-skin,
@@ -123,7 +123,7 @@ Aseprite GUI.
 | [Requirements](#requirements) · [Install](#install) · [Configuration](#configuration) | Getting it running |
 | [Register with an MCP client](#register-with-an-mcp-client) | Claude Code, Claude Desktop, Cursor, Codex, Continue, Zed, Goose ([full guide](docs/CLIENTS.md)) |
 | [High-level workflows](#high-level-workflows) · [Batch operations](#batch-operations) | Whole assets in one call; many edits in one process |
-| [Tool catalogue](#tool-catalogue) | All 164 tools by domain ([full reference](docs/TOOLS.md)) |
+| [Tool catalogue](#tool-catalogue) | All 165 tools by domain ([full reference](docs/TOOLS.md)) |
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
@@ -763,7 +763,7 @@ consistent as it grows. Always present: `ok`, `schema_version`, `kind`, `created
 `selection_applied` and `linked_frames_also_changed`. Top level rather than in a `pixels`
 section of their own, because the sections above each describe the *product* while these
 are a verdict on the *call*, and because every other result in this server reports them
-there: one rule reads them across all 164 tools. They are **absent rather than zero**, so a
+there: one rule reads them across all 165 tools. They are **absent rather than zero**, so a
 key that is present at all means there is something to read, and a tool that writes no
 pixels grows no `0` that reads as a claim about pixels. `apply_operations` used to drop
 them, which let a batch report `status: applied` for an op whose every pixel an active
@@ -884,6 +884,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `offset_cels` | Move a drawn cel along a line or an arc across frames in one launch, spacing distributed so it reads as speed rather than as a limp. |
 | `tween_cels` | Scale, turn and fade one drawn cel across frames in one launch: squash and stretch (the two axes go opposite ways), whole-degree rotation sampled nearest-neighbour so no colour is invented, and a fade that sets cel opacity rather than baking alpha. `anchor="bottom"` squashes onto the ground, which `validate_loop`'s contact check then confirms. |
 | `smear_frame` | Draw one frame's subject along its own movement, so fast motion reads as speed rather than as teleportation. `stretch` elongates it and thins to a point; `echo` draws it several times. The vector comes from the cels themselves, and with a `ramp` every trail pixel is a colour the sprite already had. |
+| `squash_stretch_pass` | Squash or stretch the drawing on each frame while the edge it rests on stays put, preserving volume (what the anchored axis loses, the other gains). Where `tween_cels` resamples one drawing across frames, this deforms every frame's own art, which is how an animation that already exists gets its weight. Nearest neighbour only, and it reports what ran off the canvas. |
 | `apply_timing_curve` | Give a cycle a shape in time (`hold_extremes`, `attack`, `ease_in`, `ease_out`, `flat`), or hold and snap named poses. Sets durations and never duplicates a frame. |
 | `validate_loop` | Measure a cycle instead of playing it: per-frame hashes, spacing, contact rows, durations, and the faults a still frame hides (a wrap frame repeating the first, duplicated poses, placeholder timing, a drifting contact edge). |
 
