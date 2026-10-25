@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "mcp[cli]>=2.0.0",
+    "mcp[cli]>=2.3.0",
     "pillow>=12.3.0",
     # Present already as an mcp dependency; declared because the tool layer imports it
     # directly (BeforeValidator, to normalize an argument before its schema validates).
