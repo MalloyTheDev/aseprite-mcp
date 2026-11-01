@@ -28,7 +28,7 @@ dependencies = [
     "pillow>=12.3.0",
     # Present already as an mcp dependency; declared because the tool layer imports it
     # directly (BeforeValidator, to normalize an argument before its schema validates).
-    "pydantic>=2",
+    "pydantic>=2.14.2",
 ]
 
 [project.urls]
