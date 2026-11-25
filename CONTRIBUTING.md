@@ -62,7 +62,7 @@ em dash characters, and the locked `uv` form of contributor commands are all che
 
 The Python-only tier passes with several hundred tests skipped. Those are the ones that
 need Aseprite, and they are not a problem on a fresh clone. At the time of writing
-(November 2026) it reports about 1786 passed and 837 skipped; the counts grow as tests
+(November 2026) it reports about 1811 passed and 846 skipped; the counts grow as tests
 are added, so compare against a clean checkout of `main`, not against this page.
 
 ### Windows: a client is running the server from your checkout
@@ -118,7 +118,7 @@ uv run --locked pytest --run-aseprite
 
 With no Aseprite found that command stops with an error, so set `ASEPRITE_PATH`. With
 Aseprite 1.3.18.6 on Windows it takes about 19 minutes, and on 2026-11-25 it ended at about
-2621 passed and 2 skipped (counts grow). The 2 skips are fixture skips for an
+2655 passed and 2 skipped (counts grow). The 2 skips are fixture skips for an
 untracked `workspace/` folder: `tests/test_figure.py:770` and `tests/test_ramp_lint.py:118`.
 Any other skip means something is missing.
 
@@ -136,7 +136,7 @@ one to quote:
 release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
 ```
 
-Each step then reports its own result, for example `ok (48.4s): 1786 passed, 837 skipped`,
+Each step then reports its own result, for example `ok (48.4s): 1811 passed, 846 skipped`,
 and the summary at the end lists every step as PASS, FAIL or SKIP. With no editor the gate
 stops before any step, with a message that says to set `ASEPRITE_PATH` or pass
 `--skip-aseprite`. That flag runs only what CI runs, and the summary then says plainly that
