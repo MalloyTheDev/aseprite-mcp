@@ -155,3 +155,70 @@ def test_a_ramp_that_does_not_parse_is_refused_before_anything_launches(monkeypa
     monkeypatch.setattr(inspect, "run_lua", refuse)
     with pytest.raises(ValueError, match="Could not parse colour 'nope'"):
         workflow.export_game_asset_bundle("gate/any.aseprite", ramp=["#000000", "nope"])
+
+
+# --- the subject -------------------------------------------------------------------
+# A vase narrows at the neck and widens again, which the keyline reading takes for a
+# figure of several masses. Drawn without an outline, as a pot often is, it was refused
+# for a keyline between masses it does not have.
+VASE_WIDTHS = [6, 8, 8, 6, 4, 4, 6, 10, 14, 16, 16, 16, 14, 12, 10, 8]
+VASE_RAMP = ["#303030", "#787878", "#c8c8c8"]
+
+
+def _vase(name: str, *, stray: str | None = None) -> str:
+    rows = []
+    for i, width in enumerate(VASE_WIDTHS):
+        tone = "k" if i == len(VASE_WIDTHS) - 1 else "c" if i < 3 else "m"
+        x0 = (32 - width) // 2
+        rows.append("." * x0 + tone * width + "." * (32 - x0 - width))
+    sprite.create_sprite(name, 32, 32, overwrite=True)
+    drawing.draw_pixel_map(name, rows,
+                           {"k": VASE_RAMP[0], "m": VASE_RAMP[1], "c": VASE_RAMP[2]}, y=8)
+    if stray:
+        drawing.draw_pixels(name, [{"x": 16, "y": 20}], stray)
+    return name
+
+
+def test_an_outline_free_vase_is_refused_as_a_character_and_bundled_as_a_prop():
+    name = _vase("gate/vase.aseprite")
+    with pytest.raises(ValidationFailed) as excinfo:
+        workflow.export_game_asset_bundle(name)
+    assert "keyline" in str(excinfo.value)
+    assert not resolve_path("vase_bundle/manifest.json").exists()
+
+    manifest = workflow.export_game_asset_bundle(name, subject="prop")
+    assert manifest["assessment"]["defects"] == [] and manifest["warnings"] == []
+    assert not [o for o in manifest["assessment"]["observations"]
+                if "fused" in o["reading"] or "darkest colour" in o["reading"]]
+    assert resolve_path("vase_bundle/manifest.json").exists()
+
+
+def test_an_off_ramp_prop_is_still_refused():
+    name = _vase("gate/vase_stray.aseprite", stray="#ff0080")
+    with pytest.raises(ValidationFailed) as excinfo:
+        workflow.export_game_asset_bundle(name, ramp=VASE_RAMP, subject="prop")
+    message = str(excinfo.value)
+    assert "frame 1: 1 of" in message and "off the declared ramp" in message
+    assert "keyline" not in message
+    assert not resolve_path("vase_stray_bundle/vase_stray.png").exists()
+
+
+def test_omitting_the_subject_gates_as_a_character():
+    name = _vase("gate/vase_default.aseprite")
+    omitted = inspect.assess_frames(name, frame_count=1, width=32, height=32)
+    character = inspect.assess_frames(name, frame_count=1, width=32, height=32,
+                                      subject="character")
+    assert omitted == character
+    assert [d for d in omitted["defects"] if "keyline" in d["reading"]]
+
+
+@pytest.mark.pure
+def test_an_unknown_subject_is_refused_before_anything_launches_or_is_written(monkeypatch):
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("Aseprite was launched for a subject that is refused")
+    monkeypatch.setattr(inspect, "run_lua", refuse)
+    with pytest.raises(ValidationFailed) as excinfo:
+        workflow.export_game_asset_bundle("gate/any.aseprite", subject="icon")
+    message = str(excinfo.value)
+    assert '"character"' in message and '"prop"' in message, message
+    assert not resolve_path("any_bundle").exists()

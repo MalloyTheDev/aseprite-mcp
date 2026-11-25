@@ -66,6 +66,9 @@ Aseprite GUI.
   whether it is centred, and what fraction of it sits exactly on a declared ramp. An agent
   cannot look at its own sprite, so every fault comes back as a line saying what it is and
   which tool puts it right, and `remove_stray_pixels` is the one that answers for noise.
+  The findings also come back split into `defects` (the faults that score as faults) and
+  `observations` (everything else), and `subject="prop"` withholds the "masses have fused"
+  and keyline findings, which assume a character, for a vase or a lantern.
 - **Edits you can check** - `diff_sprites` compares two frames and says what changed, in
   buckets that mean different things: pixels that entered or left the *silhouette*, pixels
   repainted inside it, and pixels that changed only their alpha. An edit that silently went
@@ -714,7 +717,7 @@ deterministic scaffolding, no AI generation.
 | `create_icon_set` | Grid sheet of icon cells, each a placeholder inside a named slice (`icon_0`, …). |
 | `create_rpg_item_sheet` | Grid sheet with a named slice per item (sword/shield/potion/…). |
 | `make_8_direction_walk_template` | 8-direction walk template: frames + one tag per direction (N/NE/E/…). |
-| `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. Assesses every frame first and refuses on a measured defect (an absent keyline, or with `ramp`, a pixel off it) unless `allow_defects=True`; every other reading is listed in the manifest's `assessment`. |
+| `export_game_asset_bundle` | PNG + animated GIF + sprite sheet (+ JSON) + per-tag GIFs + `manifest.json`. Assesses every frame first and refuses on a measured defect (an absent keyline, or with `ramp`, a pixel off it) unless `allow_defects=True`; every other reading is listed in the manifest's `assessment`. `subject` is `"character"` (default) or `"prop"`, which withholds both the limb-separation ("masses have fused") finding and the character keyline findings. |
 | `export_godot_spriteframes` | Godot 4 `SpriteFrames` resource (.tres) + packed sheet; one animation per tag, timed from frame durations. |
 | `export_slice_metadata` | Engine-agnostic `<sprite>_slices.json`: hitbox/hurtbox/collision/attach/9-slice/pivot from slice names or JSON data. |
 | `validate_sprite_for_game_export` | Check a sprite is game-ready (dimensions/tile multiple, colour mode, frames, required tags, transparency, palette budget, exports exist) → pass/fail report. |
@@ -843,7 +846,7 @@ indices. Colours accept `#RRGGBB`, `#RRGGBBAA`, `r,g,b`, `r,g,b,a`, `index:N`, o
 | `get_sprite_info` | Full structured state: size, mode, frames, layer tree, tags, palette. |
 | `render_preview` | Render a frame to a PNG image you can view, scaled up for small sprites; a large one is fitted to 2048 px on its longer side. A frame the sprite does not have is refused. `views` shows it several ways side by side from the same render: `color`, `value` (greys of each colour's own lightness, for whether the forms read without hue), `silhouette` (black on white, for whether the shape reads and its parts have air between them) and `actual` (1x). |
 | `get_pixels` | Read the pixel colours of a region, composited or from one named layer, as rows or as a compact symbol map (≤ 64×64 per call). |
-| `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why. |
+| `assess_sprite` | Measure the drawing: colours and ramps, noise, jagged diagonals, how much of the canvas is used, centring, symmetry, palette conformance against a declared ramp, and tile seams. Each measurement worth acting on comes back with a line saying why, in `readings` and again split into `defects` and `observations`. `subject` is `"character"` (default) or `"prop"`, which withholds the "masses have fused" reading and the keyline readings, which assume a character. |
 | `diff_sprites` | Compare two frames pixel for pixel: pixels added to or removed from the silhouette, repainted inside it, or changed in alpha alone, plus the colours involved and the box they sit in. Says so loudly when nothing changed, and takes `expect=` to turn the measurement into a pass or a fail. |
 | `list_sprites` | List sprite/image files in the workspace. |
 
@@ -966,7 +969,7 @@ satisfied by a tool that wrote the right number of pixels in the wrong places.
 | `cast_shadow` | A shadow on the ground, away from the light and foreshortened by its height, built of ramp steps and clipped to the surface it falls on. |
 | `glow` | A halo of several rings, each a step further down a ramp, optionally dithered at the outer edge. Its own layer, so deleting it removes the effect, and one cel a frame, so one layer carries an animated one. |
 | `replace_color` | Swap a colour (with per-channel tolerance). |
-| `remove_stray_pixels` | Replace pixels with no neighbour of their own colour by the colour around them: the dirt a shading pass leaves, without touching a dither or introducing a colour. |
+| `remove_stray_pixels` | Replace pixels with no neighbour of their own colour in any of the eight directions by the colour around them: the dirt a shading pass leaves, without touching a dither or introducing a colour. |
 | `normalize_edge_runs` | Even out the run lengths along a silhouette's diagonals, which is the wander that reads as programmer art. Merges a stray one-row run into its neighbour and reports the jagged-corner count before and after; it only ever adds a pixel, so the extent cannot move, and it declines a 1:1 diagonal, a spike, a notch or a hairline by name. |
 | `invert_colors` | Invert RGB (alpha preserved). |
 | `adjust_brightness_contrast` · `adjust_hue_saturation` · `desaturate` | Colour grading. |

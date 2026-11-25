@@ -292,3 +292,26 @@ def test_an_indexed_sprite_needs_no_colour_resolution_at_all(request):
     assert after["colors"] == before["colors"], (
         f"the merge introduced a palette entry: {before['colors']} became "
         f"{after['colors']}")
+
+
+def test_a_sawtooth_fires_the_jagged_reading_and_the_pass_declines_it(request):
+    """Both flanks step out and back a pixel on alternate rows. That is all jagged corner
+    and no lone stumble: every one-pixel run sits next to another, which the pass reads
+    as a 1:1 diagonal and declines. The reading fires anyway, so it must not promise the
+    tool will act."""
+    name = f"runs_{request.node.name}.aseprite"
+    size = 24
+    rows = ["".join("a" if 6 - y % 2 <= x <= 17 + y % 2 else "." for x in range(size))
+            for y in range(20)]
+    sprite.create_sprite(name, size, size, overwrite=True)
+    drawing.draw_pixel_map(name, rows, {"a": STONE}, y=2)
+    report = inspect.assess_sprite(name)
+    hits = [r for r in report["readings"] if "jagged corners" in r]
+    assert len(hits) == 1, (report["metrics"]["jaggy_corners"], report["readings"])
+    assert "declines consecutive one-pixel runs, a sawtooth included" in hits[0]
+
+    with pytest.raises(ValidationFailed) as caught:
+        effects.normalize_edge_runs(name)
+    message = str(caught.value)
+    assert "no edge run qualified" in message and "1:1 diagonal" in message, message
+    assert _measured(name) == report["metrics"], "a declined pass changed the sprite"
