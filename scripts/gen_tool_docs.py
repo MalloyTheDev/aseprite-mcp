@@ -1,13 +1,20 @@
 """Generate docs/TOOLS.md: a complete reference of every MCP tool.
 
-Introspects the live FastMCP registry so the docs always match the code.
+Introspects the live tool registry (the `MCPServer` in `aseprite_mcp.app`, populated by
+importing `aseprite_mcp.server`) so the docs always match the code.
 
-Usage:  uv run python scripts/gen_tool_docs.py
+Usage:
+    uv run --locked python scripts/gen_tool_docs.py           # rewrite docs/TOOLS.md
+    uv run --locked python scripts/gen_tool_docs.py --check   # exit 1 if it is stale
+
+`--check` names the tools whose sections differ and prints the start of a unified diff,
+so a docstring edit points at the tool it changed rather than at the whole file.
 """
 
 from __future__ import annotations
 
 import asyncio
+import difflib
 import importlib
 import inspect
 import re
@@ -96,6 +103,56 @@ def _params_table(schema: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+REGENERATE = "uv run --locked python scripts/gen_tool_docs.py"
+
+# How much of the unified diff --check prints. The tool names above it are the useful
+# part; the diff is there to show what kind of change it was.
+DIFF_LINES = 40
+
+
+def _tool_sections(text: str) -> dict[str, str]:
+    """Tool name -> the lines of its `### `name`` section, up to the next heading."""
+    sections: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in text.splitlines():
+        m = re.match(r"^### `([^`]+)`", line)
+        if m:
+            current = sections.setdefault(m.group(1), [])
+        elif line.startswith("## "):
+            current = None  # a group heading belongs to no tool
+        elif current is not None:
+            current.append(line)
+    return {name: "\n".join(lines) for name, lines in sections.items()}
+
+
+def _describe_drift(current: str, generated: str) -> str:
+    """Which tools differ between the committed reference and the registry, and how."""
+    old, new = _tool_sections(current), _tool_sections(generated)
+    changed = sorted(n for n in old.keys() & new.keys() if old[n] != new[n])
+    added = sorted(new.keys() - old.keys())
+    removed = sorted(old.keys() - new.keys())
+    lines = ["docs/TOOLS.md is OUT OF DATE."]
+    if changed:
+        lines.append(f"  changed ({len(changed)}): {', '.join(changed)}")
+    if added:
+        lines.append(f"  not yet documented ({len(added)}): {', '.join(added)}")
+    if removed:
+        lines.append(f"  documented but no longer registered ({len(removed)}): "
+                     f"{', '.join(removed)}")
+    if not (changed or added or removed):
+        lines.append("  no tool section differs; the header, contents or a group heading "
+                     "does")
+    diff = list(difflib.unified_diff(
+        current.splitlines(), generated.splitlines(),
+        "docs/TOOLS.md (on disk)", "docs/TOOLS.md (generated)", n=1, lineterm=""))
+    lines.append("")
+    lines += diff[:DIFF_LINES]
+    if len(diff) > DIFF_LINES:
+        lines.append(f"... ({len(diff) - DIFF_LINES} more diff lines)")
+    lines += ["", f"Regenerate it with: {REGENERATE}"]
+    return "\n".join(lines)
+
+
 async def main(check: bool = False) -> int:
     name_to_mod = _build_name_to_module()
     tools = await mcp.list_tools()
@@ -163,10 +220,7 @@ async def main(check: bool = False) -> int:
         if current == content:
             print(f"docs/TOOLS.md is up to date ({len(tools)} tools).")
             return 0
-        print(
-            "docs/TOOLS.md is OUT OF DATE. Run `uv run python scripts/gen_tool_docs.py` "
-            "to regenerate it."
-        )
+        print(_describe_drift(current, content))
         return 1
 
     path.parent.mkdir(parents=True, exist_ok=True)
