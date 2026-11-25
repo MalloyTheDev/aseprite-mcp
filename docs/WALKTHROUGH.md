@@ -143,7 +143,7 @@ test say so.
 
 1. Open [`src/aseprite_mcp/tools/palette.py`](../src/aseprite_mcp/tools/palette.py) and find
    `ramp_between`. In its `check_count(` call, change `minimum=2` to `minimum=1`. (The file
-   has three such calls; edit the one inside `ramp_between`, right after `steps = int(steps)`.)
+   has several such calls; edit the one inside `ramp_between`, right after `steps = int(steps)`.)
 2. Run the file again:
 
    ```bash
@@ -279,7 +279,8 @@ uv run --locked python /path/to/flip_demo.py
 ```
 
 This is what it printed here (Aseprite 1.3.18.6). Your 16 hex digits will differ, because
-they are new for every run:
+they are new for every run, and the keys of the JSON object come in a different order each
+time:
 
 ```text
 before: [["#ff0000ff", "#00000000", "#00000000", "#00000000"], ["#00000000", "#00000000", "#00000000", "#00000000"]]
@@ -343,5 +344,6 @@ editor-tier test to write; look for it among the
 | --- | --- | --- |
 | The Python side of a tool works: argument checks, arithmetic, refusals | `uv run --locked pytest` (the pure tier), or one file | No |
 | A tool really edits a sprite the way it says | `uv run --locked pytest --run-aseprite -rs path/to/test.py::test_name` | Yes |
-| The docs, links and counts are still right | `python scripts/check_docs.py` | No |
+| The links, anchors and a few checked claims in the docs still hold | `python scripts/check_docs.py` | No |
+| The README's tool counts and tables match the server, and no em dash crept in | `uv run --locked pytest tests/test_tool_docs.py tests/test_style.py` | No |
 | Everything, as CI and the maintainers run it | [The release gate](DEVELOPMENT.md#local-release-gate) | Yes |

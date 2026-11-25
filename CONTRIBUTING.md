@@ -17,8 +17,10 @@ Pick the route that matches what you have. Each one ends with something you can 
 3. If the result is wrong, or setup is stuck, open a
    [bug report](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=bug_report.yml).
    The form asks for what you asked for, what you got, a preview image, and your Aseprite
-   version. Run `aseprite --version` for that (on Windows use the full path to
-   `Aseprite.exe`), or read `aseprite_version` in the `health_check` result.
+   version. Read it from Help > About in Aseprite, or from `aseprite_version` in the
+   `health_check` result. `aseprite --version` also prints it on macOS and Linux; on
+   Windows, PowerShell shows nothing unless the output is piped:
+   `& "C:/path/to/Aseprite.exe" --version | Write-Output`.
 4. Missing a tool? Describe what you are trying to make in a
    [feature request](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=feature_request.yml).
 

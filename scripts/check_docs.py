@@ -459,12 +459,21 @@ def check(root: Path) -> tuple[list[Problem], list[tuple[str, int, str]]]:
     return problems, checker.externals
 
 
+def _keep_output_printable() -> None:
+    """A redirected Windows stream is cp1252, and a path or heading outside it would
+    raise instead of being reported. Escape what the stream cannot encode."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check the Markdown docs for drift (no network).")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="repository root to check")
     parser.add_argument("--external", action="store_true",
                         help="also list the external http(s) links, which are never fetched")
     args = parser.parse_args(argv)
+    _keep_output_printable()
 
     problems, externals = check(args.root)
     for problem in problems:

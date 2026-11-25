@@ -660,6 +660,7 @@ tools described here and `main` has 165. The 13 that exist only on `main` are
 
 ```bash
 git clone --branch v0.10.0 https://github.com/MalloyTheDev/aseprite-mcp.git
+cd aseprite-mcp && uv sync --frozen   # at this tag --locked refuses: its lock predates the version bump
 # or, with no clone (uv fetches and caches that tag):
 uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp@v0.10.0 aseprite-mcp
 ```

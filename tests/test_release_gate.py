@@ -128,6 +128,21 @@ def test_no_step_runs_when_the_editor_is_missing(gate, tmp_path, monkeypatch, ca
     assert "FAIL  editor preflight" in out
 
 
+def test_a_failed_probe_is_not_reported_as_a_missing_editor(gate, monkeypatch, capsys):
+    """The lock on the console script is an environment problem; telling the reader to
+    set ASEPRITE_PATH would send them after the wrong thing."""
+    ran = []
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "uv")
+    monkeypatch.setattr(gate, "_probe_target", lambda no_sync: {"probe_error": "os error 32"})
+    monkeypatch.setattr(gate, "_run_step", lambda name, cmd: ran.append(name))
+    assert gate.main([]) == 1
+    out = capsys.readouterr().out
+    assert not ran
+    assert "os error 32" in out and "Re-run with --no-sync" in out
+    assert "none was found" not in out
+    assert "FAIL  environment probe" in out
+
+
 def test_skip_aseprite_says_the_editor_tier_was_not_run(gate, monkeypatch, capsys):
     def fake_run_step(name, cmd):
         return 0, gate.StepResult(name, True, 0.0, counts="1 passed" if "pytest" in cmd else "")

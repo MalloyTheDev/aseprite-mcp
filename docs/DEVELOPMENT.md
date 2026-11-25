@@ -261,7 +261,7 @@ editor tier that never ran.
 The header looks like this (paths shortened):
 
 ```text
-release-gate: 4 steps (cwd=...)
+release-gate: 5 steps (cwd=...)
 release-gate: python 3.12.13 | <package version> | ...\src\aseprite_mcp
 release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
 ```
@@ -311,7 +311,8 @@ External links are not fetched; `--external` lists them.
    the test counts in the pull request.
 2. Regenerate the published [showcase outputs](../scripts/showcase/README.md) and
    compare them with the tracked files by running
-   [`scripts/verify_showcase.py`](../scripts/verify_showcase.py).
+   [`scripts/verify_showcase.py`](../scripts/verify_showcase.py)
+   (`uv run --locked python scripts/verify_showcase.py`).
    It takes about 3.5 minutes, needs a real Aseprite, and runs the 13 generators into a
    temporary workspace that is deleted afterwards, then compares the SHA-256 of each of the
    18 published images with its copy at `HEAD`. It exits 0 when all are identical, 1 on

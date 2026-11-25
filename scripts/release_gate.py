@@ -272,6 +272,18 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     results: list[StepResult] = []
+    if "probe_error" in info:
+        # Not an editor problem: the environment itself could not be asked. Saying
+        # "set ASEPRITE_PATH" here would send the reader after the wrong thing.
+        print("release-gate: FAILED before any step: the environment could not be probed "
+              f"({info['probe_error']}).")
+        if not args.no_sync:
+            print("release-gate: if that was a 'file is being used by another process' "
+                  "error from uv, a live MCP server is holding the venv's console script "
+                  "open. Re-run with --no-sync.")
+        results.append(StepResult("environment probe", False, 0.0))
+        _summary(results, steps, args, editor)
+        return 1
     if not args.skip_aseprite and "editor" not in info:
         print("release-gate: FAILED before any step: the integration step needs a real "
               "Aseprite and none was found. Set ASEPRITE_PATH to the Aseprite executable, "

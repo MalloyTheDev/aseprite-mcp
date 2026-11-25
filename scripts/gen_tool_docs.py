@@ -231,6 +231,13 @@ async def main(check: bool = False) -> int:
 
 if __name__ == "__main__":
     import argparse
+    import sys
+
+    # A redirected Windows stream is cp1252; escape what it cannot encode rather than
+    # lose the report to a UnicodeEncodeError.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="backslashreplace")
 
     parser = argparse.ArgumentParser(description="Generate or verify docs/TOOLS.md.")
     parser.add_argument(
