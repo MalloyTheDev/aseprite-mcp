@@ -12,12 +12,14 @@ left without a dark keyline, then assesses the same file twice, once with the de
 `observations` of each. The drawing is deterministic (no randomness, no clock), so the
 output is the same on every run against the same Aseprite.
 
-What to look for: a vase has a narrow neck between a rim and a belly, so the character
-reading takes its masses for limbs and its bare edge for a missing keyline, and reports
-them. A prop has neither, so `subject="prop"` withholds the limb-separation reading and the
-character keyline finding. General findings (art touching the canvas border, pixels off the
-declared ramp) are not subject-dependent and appear in both. An unknown `subject` is refused
-before anything is launched or written.
+What this vase demonstrates: it is an outline-free, non-convex single object. Its narrow
+neck between a rim and a belly reads as a waist, so under the default subject it draws the
+keyline defect (the darkest colour is almost none of the drawing) and the "masses have
+fused" observation. Under `subject="prop"` both are withheld, because a prop has no limbs to
+separate and no figure for a keyline to outline. This vase touches no canvas border and
+has no pixel off its ramp, so neither of those two checks fires here; they are not
+subject-dependent and still apply to a prop whenever the condition is present. An unknown
+`subject` is refused before anything is launched or written.
 
 This is a reproducible example, not a showcase generator: it publishes nothing, and it is
 not listed in `scripts/showcase/README.md` or covered by its byte-for-byte comparison.

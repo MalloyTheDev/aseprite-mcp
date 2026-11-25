@@ -25,11 +25,14 @@ All notable changes to this project are documented here. The format is based on
   outline to be missing, and a vase, a lantern or a bottle has neither: its narrow neck
   counted as a waist, so it was told to "separate the limbs". For a `"prop"` that reading
   and all three keyline readings (too thin, which is the defect, too heavy, and too
-  little contrast) are withheld; the general findings, such as art touching the canvas border or pixels
-  off a declared ramp, are not about the subject and still apply. Any other value is
-  refused before Aseprite is launched or anything is written, and the refusal names both
-  accepted values, and the response does not echo the subject. With the default subject nothing else moves: the metrics, the order of
-  the findings and every gate decision are as before.
+  little contrast) are withheld; the general findings, such as art touching the canvas
+  border or pixels off a declared ramp, are not about the subject and still apply. Any
+  other value is refused before Aseprite is launched or anything is written, and the
+  refusal names both accepted values. A successful `assess_sprite` response carries `ok`,
+  `frame`, `layer`, `width`, `height`, `metrics`, `readings`, `defects` and
+  `observations`, and has no `subject` field; the bundle manifest's `assessment` section
+  keeps its existing shape. With the default subject nothing else moves: the metrics, the
+  order of the findings and every gate decision are as before.
 
   **Only `"prop"` is added, so #253 is addressed in part and stays open.** It asked for a
   hint with `tile`, `icon` and `portrait` as well, and for the other readings that carry a

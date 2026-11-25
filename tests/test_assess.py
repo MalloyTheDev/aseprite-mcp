@@ -8,6 +8,8 @@ faults they describe.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
 from aseprite_mcp.core import quality
@@ -281,14 +283,59 @@ def test_the_response_splits_its_readings_into_defects_and_observations(request)
                 "gradient_map put pixels back on it; a brightness or hue filter is what "
                 "usually takes them off.")
     assert result["metrics"]["drawn_pixels"] == 158
-    keyline = [r for r in result["readings"] if r.startswith("The darkest colour")]
-    assert len(keyline) == 1, result["readings"]
-    assert result["defects"] == [keyline[0], off_ramp]
-    assert result["observations"] == [r for r in result["readings"]
-                                      if r not in result["defects"]]
+    # Each tier is checked against its own expectation, written down here, and never
+    # derived from `readings`: a reading that moved tier has to fail this.
+    _assert_starts(result["defects"], [
+        "The darkest colour #303030 is 5% of the drawing",
+        off_ramp,
+    ])
+    assert result["defects"][1] == off_ramp
+    _assert_starts(result["observations"], [
+        "The art fills 25% of the canvas (16x16 of 32x32)",
+        "6 of 16 drawn rows are a single unbroken run",
+        "The declared ramp rotates 0 degrees of hue",
+        "22 jagged corners across a 16x16 shape",
+    ])
+    assert (Counter(result["defects"]) + Counter(result["observations"])
+            == Counter(result["readings"]))
     assert result["readings"] == quality.readings(
         result["metrics"], width=32, height=32), "the tiers must not change the readings"
-    assert [r for r in result["observations"] if "masses have fused" in r]
+
+
+def _assert_starts(found: list[str], expected: list[str]) -> None:
+    """`found` is exactly one line per expected opening, in that order."""
+    assert len(found) == len(expected), found
+    for line, opening in zip(found, expected, strict=True):
+        assert line.startswith(opening), (opening, found)
+
+
+def test_the_indexed_palette_note_is_an_observation_and_off_ramp_a_defect(request):
+    """The palette note is appended after the core readings and has no tier of its own,
+    so it is easy to lose or to promote. An indexed palette that holds three of the five
+    ramp steps draws it; a pixel in a colour off the ramp draws the one defect beside it."""
+    name = f"as/{request.node.name}.aseprite"
+    sprite.create_sprite(name, 16, 16, color_mode="indexed")
+    palette.set_palette(name, ["#00000000", RAMP[0], RAMP[2], RAMP[4], "#ff0080"])
+    drawing.draw_rectangle(name, 3, 3, 10, 10, RAMP[2], filled=True)
+    drawing.draw_rectangle(name, 3, 3, 10, 10, RAMP[0])
+    drawing.draw_pixels(name, [{"x": 6, "y": 6}], RAMP[4])
+    drawing.draw_pixels(name, [{"x": 9, "y": 9}], "#ff0080")
+
+    result = inspect.assess_sprite(name, ramp=RAMP)
+
+    assert result["defects"] == [
+        "1 of 100 drawn pixels are off the declared ramp. shift_along_ramp and "
+        "gradient_map put pixels back on it; a brightness or hue filter is what "
+        "usually takes them off."]
+    _assert_starts(result["observations"], [
+        "This sprite is indexed and its palette holds 3 of the 5 declared ramp steps",
+        "Only 60% of the ramp survives as distinct colours here",
+    ])
+    note = result["observations"][0]
+    assert result["readings"].count(note) == 1, result["readings"]
+    assert note not in result["defects"]
+    assert (Counter(result["defects"]) + Counter(result["observations"])
+            == Counter(result["readings"]))
 
 
 def test_a_prop_keeps_the_off_ramp_defect_and_drops_the_limb_readings(request):
