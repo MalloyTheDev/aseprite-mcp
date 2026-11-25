@@ -6,6 +6,43 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Docs
+
+- **Contributor docs by audience, a hands-on walkthrough, and a documentation checker.**
+  The README opens with a three-way route (install, try a real workflow, contribute).
+  `CONTRIBUTING.md` is three short routes: test a workflow and report it without code, make a
+  first Python change that is checked locally without Aseprite, and go deeper. The detail
+  moved to `docs/DEVELOPMENT.md`, which now lists what each kind of tool call launches and
+  how the result sentinel is framed. `docs/WALKTHROUGH.md` is new: it calls `ramp_between`
+  (no Aseprite) and `flip_sprite` (a real editor run) by hand and names the command that
+  proves each. `scripts/check_docs.py` is new: it checks relative links, anchors,
+  reference-style link definitions and a few claims that went stale, with no network, and
+  `tests/test_check_docs.py` covers it.
+- **Claims corrected.** Not every operation opens, edits and saves a sprite: some never start
+  Aseprite, some only read, the exports write other files. The sentinels the runner frames
+  with carry a per-run nonce (`@@ASEMCP:<nonce>@@`), and the un-nonced names are legacy.
+  Lua errors come back with the script location removed, not verbatim. The HTTP transports
+  have no host or port setting and listen on `127.0.0.1` port 8000. The install is `main`,
+  which is ahead of the latest release; the README says which tools are only on `main`.
+  `uvx aseprite-mcp` without `--from` runs an unrelated PyPI project of the same name, not
+  this server. Contributor commands use `--locked`. The Aseprite search order replaces a
+  note about one machine. The client guide's Cline CLI path, Windsurf (now Devin) path and
+  Continue file format follow each client's current documentation, and redirected links are
+  updated. Aseprite is described as developed and tested on 1.3.18.6, not as "1.3+".
+- **The test tiers and the release gate say what ran.** `pytest --run-aseprite` with no
+  Aseprite found is now an error rather than a run that skips every editor test and exits 0.
+  A test file that declares no tier fails at setup with the list to add it to, instead of
+  being skipped in silence, and a `pure` test that launches the editor fails locally as it
+  does on CI. `scripts/release_gate.py` checks for the editor before it starts, prints the
+  Aseprite version and each tier's passed and skipped counts, runs from the lock, and fails
+  the editor step if tests were skipped for want of an editor; `--showcase` adds
+  `scripts/verify_showcase.py`, which regenerates the showcase and compares it with the
+  committed images. CI prints its summary line and runs `scripts/check_docs.py`.
+  `gen_tool_docs.py --check` names the tool whose entry is out of date.
+- **The bug report form** asks for the release tag or commit rather than the version
+  `health_check` reports, which still says 0.9.0, and has a field for what the reporter
+  asked for and what came back.
+
 ### Added
 
 - **`assess_sprite` says which findings are defects, and can be told the subject is a
@@ -2128,6 +2165,8 @@ and the Aseprite CLI.
 - **GUI companion mode**: `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
+[Unreleased]: https://github.com/MalloyTheDev/aseprite-mcp/compare/v0.10.0...main
+[0.10.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.10.0
 [0.9.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.9.0
 [0.8.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.1
 [0.8.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.0

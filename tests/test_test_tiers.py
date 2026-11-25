@@ -158,3 +158,9 @@ def test_ci_does_not_stack_a_q_on_the_configured_one():
         args = run.split()
         quiet = configured.count("-q") + args.count("-q") + 2 * args.count("-qq")
         assert quiet <= 1, f"CI's pytest is -{'q' * quiet}, which hides the summary: {run}"
+
+
+def test_ci_checks_the_documentation():
+    runs = [r for r in _workflow_run_lines() if "scripts/check_docs.py" in r]
+    assert runs, "CI does not run scripts/check_docs.py"
+    assert (REPO / "scripts" / "check_docs.py").is_file()

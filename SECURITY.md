@@ -7,6 +7,10 @@ patched; upgrade to the newest release. This line is part of the policy rather t
 changelog entry, so it moves with each minor release: it still said `0.9.x` after
 v0.10.0 shipped, which left a reader unable to tell which line was actually patched.
 
+`main` is ahead of the latest release (v0.10.0 has 152 tools and `main` has 165), and a
+fix lands on `main` first. To have a fix before the next release, run `main`; to stay on
+the release, pin it. [README: Release versus main](README.md#release-versus-main)
+
 ## Threat model
 
 `aseprite-mcp` hands an AI agent (or any MCP client) two capabilities:
@@ -77,7 +81,9 @@ a file you do not trust into the workspace as handing it to that parser.
     and `config.resolve` accepts the resulting name as contained, which it is.
 - **Workspace default (v0.8.0).** With `ASEPRITE_MCP_WORKSPACE` unset, the default is a
   sibling `workspace/` directory *only* when the package runs from a source checkout.
-  Installed (`uvx aseprite-mcp`), it is a per-user data directory
+  Installed (`uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp aseprite-mcp`;
+  the bare `uvx aseprite-mcp` would fetch an unrelated project of the same name from PyPI),
+  it is a per-user data directory
   (`%LOCALAPPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME`); through v0.7.0 the
   same path arithmetic aimed it inside the Python installation. An unusable workspace
   raises `WorkspaceError` naming `ASEPRITE_MCP_WORKSPACE`, never a raw `PermissionError`.

@@ -71,5 +71,9 @@ jobs:
       - name: Check generated tool docs are in sync
         run: uv run --python ${{ matrix.python-version }} python scripts/gen_tool_docs.py --check
 
+      # Local links, anchors and reference definitions in the Markdown. No network.
+      - name: Check documentation links
+        run: uv run --python ${{ matrix.python-version }} python scripts/check_docs.py
+
       - name: Build wheel + sdist
         run: uv build
