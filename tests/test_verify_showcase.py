@@ -4,12 +4,17 @@ Its table of generators and published files is the one thing a regeneration run 
 check about itself: a generator or an image missing from it is never compared, and the
 run reports a pass. So the table is held to the scripts that exist, the images that are
 committed, and the README that documents both.
+
+"Exist" and "committed" mean what git tracks, not what is on disk. A generator someone
+is still drawing, or an image they have not added yet, is their work in progress and is
+not this table's business until `git add` makes it part of the tree.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +26,21 @@ SCRIPT = REPO / "scripts" / "verify_showcase.py"
 README = REPO / "scripts" / "showcase" / "README.md"
 
 
+def _tracked(root: Path, directory: str, pattern: str = "*") -> set[Path]:
+    """The files directly inside `directory` that git tracks, staged ones included.
+
+    Outside a git checkout (an unpacked sdist), or with no git on PATH, there is no
+    notion of tracked, so every file on disk counts, as it did before."""
+    on_disk = {p for p in (root / directory).glob(pattern) if p.is_file()}
+    if shutil.which("git") is None:
+        return on_disk
+    proc = subprocess.run(["git", "ls-files", "-z", "--", directory], cwd=root,
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    if proc.returncode != 0:
+        return on_disk
+    return on_disk & {root / name for name in proc.stdout.split("\0") if name}
+
+
 @pytest.fixture(scope="module")
 def verify():
     spec = importlib.util.spec_from_file_location("verify_showcase", SCRIPT)
@@ -30,7 +50,7 @@ def verify():
 
 
 def test_every_generator_script_is_run(verify):
-    scripts = {p.stem for p in (REPO / "scripts" / "showcase").glob("*.py")}
+    scripts = {p.stem for p in _tracked(REPO, "scripts/showcase", "*.py")}
     unlisted = scripts - set(verify.GENERATORS) - set(verify.HELPERS)
     assert not unlisted, (
         f"scripts/showcase has generators verify_showcase.py does not run: {sorted(unlisted)}."
@@ -44,11 +64,38 @@ def test_every_published_file_is_committed_and_compared(verify):
     assert len(published) == len(set(published)), "a committed path is listed twice"
     absent = [p for p in published if not (REPO / p).is_file()]
     assert not absent, f"listed as published but not in the repository: {absent}"
-    on_disk = {f"docs/assets/showcase/{p.name}"
-               for p in (REPO / "docs" / "assets" / "showcase").iterdir() if p.is_file()}
-    uncompared = sorted(on_disk - set(published))
+    tracked = {f"docs/assets/showcase/{p.name}"
+               for p in _tracked(REPO, "docs/assets/showcase")}
+    uncompared = sorted(tracked - set(published))
     assert not uncompared, (
         f"showcase images no generator in verify_showcase.py accounts for: {uncompared}")
+
+
+def test_work_in_progress_is_not_held_to_the_table(tmp_path):
+    """A generator or an image that is on disk but not added to git must not fail a
+    contributor's checks; once it is added, it has to be accounted for."""
+    if shutil.which("git") is None:
+        pytest.skip("needs git on PATH to build a repository to look at")
+    showcase = tmp_path / "scripts" / "showcase"
+    showcase.mkdir(parents=True)
+    for name in ("listed.py", "staged.py", "drawing_it_now.py", "notes.txt"):
+        (showcase / name).write_text("", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=60)
+    subprocess.run(["git", "add", "scripts/showcase/listed.py", "scripts/showcase/staged.py"],
+                   cwd=tmp_path, check=True, timeout=60)
+
+    found = {p.name for p in _tracked(tmp_path, "scripts/showcase", "*.py")}
+
+    assert found == {"listed.py", "staged.py"}
+
+
+def test_outside_a_checkout_every_file_on_disk_counts(tmp_path, monkeypatch):
+    """An unpacked sdist has no index to ask, and silence there would hide a real gap."""
+    (tmp_path / "showcase").mkdir()
+    (tmp_path / "showcase" / "one.py").write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+
+    assert {p.name for p in _tracked(tmp_path, "showcase", "*.py")} == {"one.py"}
 
 
 def test_the_table_matches_the_showcase_readme(verify):
