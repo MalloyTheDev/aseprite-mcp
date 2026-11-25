@@ -75,7 +75,6 @@ class Problem(NamedTuple):
 # --------------------------------------------------------------------------- #
 
 _FENCE_OPEN = re.compile(r"^\s*(`{3,}|~{3,})")
-_COMMENT = re.compile(r"<!--.*?-->")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 _ATX = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 _SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
@@ -111,18 +110,25 @@ def _prose_lines(text: str) -> Iterator[tuple[int, str]]:
             if marker[0] != "`" or "`" not in line[opened.end():]:
                 fence = (marker[0], len(marker))
                 continue
-        if in_comment:
-            end = line.find("-->")
-            if end < 0:
-                continue
-            line = " " * (end + 3) + line[end + 3:]
-            in_comment = False
-        line = _COMMENT.sub(lambda m: " " * len(m.group(0)), line)
-        start = line.find("<!--")
-        if start >= 0:
-            in_comment = True
-            line = line[:start]
-        yield number, line
+        # Comments are blanked by position rather than with a pattern, because one can
+        # open on this line and close many lines later, and several can share a line.
+        kept, at = [], 0
+        while at < len(line):
+            if in_comment:
+                end = line.find("-->", at)
+                if end < 0:
+                    kept.append(" " * (len(line) - at))
+                    break
+                kept.append(" " * (end + 3 - at))
+                at, in_comment = end + 3, False
+            else:
+                start = line.find("<!--", at)
+                if start < 0:
+                    kept.append(line[at:])
+                    break
+                kept.append(line[at:start] + " " * 4)
+                at, in_comment = start + 4, True
+        yield number, "".join(kept)
 
 
 def _blank_code_spans(line: str) -> str:

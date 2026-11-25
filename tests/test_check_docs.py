@@ -112,6 +112,22 @@ def test_exactly_the_planted_defects_are_reported(tree: Path):
     assert set(_found(tree)) == expected
 
 
+def test_a_comment_hides_its_links_however_many_lines_it_spans(tmp_path: Path):
+    """One comment closed on a later line, two on one line, and text between them that
+    is not commented out and so is still checked."""
+    _write(tmp_path, "README.md", "\n".join([
+        "# T",
+        "",
+        "<!-- [a](gone-1.md)",
+        "[b](gone-2.md)",
+        "[c](gone-3.md) --> [seen](really-gone.md) <!-- [d](gone-4.md) --> <!-- [e](gone-5.md)",
+        "[f](gone-6.md) -->",
+        "",
+    ]))
+    problems = [str(p) for p in check_docs.check(tmp_path)[0]]
+    assert len(problems) == 1 and "really-gone.md" in problems[0], problems
+
+
 def test_a_clean_tree_passes(tmp_path: Path):
     _write(tmp_path, "README.md", "# Title\n\n[self](#title) [other](docs/a.md#a)\n")
     _write(tmp_path, "docs/a.md", "# A\n")
