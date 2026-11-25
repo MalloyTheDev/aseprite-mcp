@@ -1,30 +1,40 @@
 name: Bug report
-description: Something the server did that it should not have, or did not do that it should
+description: Report an unexpected result or a problem getting the server to run
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Please include the tool call and what came back. A sprite that reproduces it is
-        worth more than a description of one.
+        Check existing issues first. If you have a small sprite or image that shows the
+        problem and can be shared publicly, attach it below.
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact tool call and arguments, or the setup steps that led to the error.
+    validations:
+      required: true
   - type: textarea
     id: what-happened
     attributes:
       label: What happened
-      description: The tool call, the result you got, and the result you expected.
-      placeholder: |
-        draw_ellipse_in_box("orb.aseprite", 0, 0, 16, 16, "#fff", filled=True)
-        -> the disc is off by one pixel on the right
+      description: Paste the error or describe the result, then tell us what you expected.
     validations:
       required: true
+  - type: input
+    id: server-version
+    attributes:
+      label: Aseprite MCP version or commit
+      description: The release tag, checkout commit, or version reported by health_check.
+    validations:
+      required: false
   - type: textarea
     id: health-check
     attributes:
       label: health_check output
       description: >
-        Run the `health_check` tool and paste the JSON. It reports this server's
-        version, the Aseprite version, the resolved workspace and the tool count,
-        which is most of what triage needs.
+        If the server starts, run `health_check` and paste the JSON. Remove private
+        paths and other personal details before posting.
       render: json
     validations:
       required: false
@@ -32,9 +42,7 @@ body:
     id: aseprite-version
     attributes:
       label: Aseprite version
-      description: >
-        The `health_check` output above already carries this; fill it in here if you
-        could not run it. Aseprite's Lua API differs between 1.2 and 1.3.
+      description: Include the editor version if it is missing from health_check.
       placeholder: "1.3.7"
     validations:
       required: false
@@ -42,7 +50,7 @@ body:
     id: client
     attributes:
       label: MCP client
-      placeholder: Claude Desktop 1.x, Claude Code, Cursor, Codex CLI, ...
+      description: Include the client name and version if you used one.
     validations:
       required: false
   - type: input

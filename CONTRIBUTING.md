@@ -1,14 +1,25 @@
 # Contributing to Aseprite MCP
 
-Thanks for your interest! This document covers local setup, the architecture, and
-how to add or change tools.
+## Find something to work on
+
+- For a small first pull request, browse [good first issues](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+- For changes that may involve several tools or a local Aseprite install, browse [help wanted issues](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+- If you use Aseprite, try a tool on a sprite or follow the [client setup guide](docs/CLIENTS.md). A small sprite and the steps that show what went wrong make a useful [bug report](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=bug_report.yml).
+
+If you pick up an issue, leave a short comment so others know someone is working on it.
+Small fixes to the docs are welcome as pull requests. For a new tool or a change to
+the MCP interface, open an issue with the workflow you want to support.
 
 ## Local setup
 
+Fork the repository on GitHub and clone your fork. Replace `YOUR_USERNAME` with your
+GitHub username. You'll need [uv](https://docs.astral.sh/uv/) to run the commands below.
+
 ```bash
-git clone https://github.com/MalloyTheDev/aseprite-mcp.git
+git clone https://github.com/YOUR_USERNAME/aseprite-mcp.git
 cd aseprite-mcp
-uv sync                     # creates .venv and installs deps (incl. dev)
+git switch -c my-change
+uv sync --locked
 ```
 
 The package targets **Python 3.10+** (`requires-python = ">=3.10"`), and CI runs the whole
@@ -20,13 +31,26 @@ syntax.
 > a "file in use" error: it has to replace `.venv\Scripts\aseprite-mcp.exe`, which the
 > live server holds open. Stop the client first.
 
-You'll also need **Aseprite 1.3+**. Point the server at it if it isn't auto-detected:
+The unit tests run without Aseprite. To run the editor-backed tests or try
+a tool that opens a sprite, use **Aseprite 1.3+**. If auto-detection misses your
+installation, set `ASEPRITE_PATH` to the executable for your system.
+
+Windows example for Steam in PowerShell
+
+```powershell
+$env:ASEPRITE_PATH = "C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe"
+```
+
+macOS example for an application in `/Applications`
 
 ```bash
-# Windows (PowerShell)
-$env:ASEPRITE_PATH = "C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe"
-# macOS / Linux
 export ASEPRITE_PATH="/Applications/Aseprite.app/Contents/MacOS/aseprite"
+```
+
+On Linux, use the full path to your installed binary.
+
+```bash
+export ASEPRITE_PATH="/path/to/aseprite"
 ```
 
 ## Running the tests
@@ -266,16 +290,17 @@ one importing the other. And a helper that needs a `@mcp.tool()` decorator belon
 
 ## Pull requests
 
-- Keep changes focused and include tests where practical.
-- Before submitting, run what CI runs, so a lint or docs failure costs you a minute rather
-  than a round trip:
+- Open the pull request from your fork against `main`. Link the issue if there is
+  one, explain the change, and describe how you checked it.
+- For changes to tool behavior, include a focused test where practical. If you ran
+  the editor-backed tests, include the Aseprite version and the command you used.
+- Run these checks for code changes.
 
   ```bash
   uv run ruff check src tests scripts
   uv run pytest
-  uv run python scripts/gen_tool_docs.py --check   # or drop --check to regenerate
+  uv run python scripts/gen_tool_docs.py --check
   ```
 
-- Never hand-edit `docs/TOOLS.md`; it is generated from the tool docstrings by
-  `scripts/gen_tool_docs.py`, and the `--check` step above fails if it has drifted.
-- Describe what you changed and why.
+- Changes to tool signatures or docstrings may change `docs/TOOLS.md`. Generate the
+  reference with `uv run python scripts/gen_tool_docs.py` and include the resulting diff.

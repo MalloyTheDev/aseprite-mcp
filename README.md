@@ -5,6 +5,8 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-server-purple.svg)](https://modelcontextprotocol.io)
 
+**Want to help?** Pick a [good first issue](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or see [how to contribute](#contributing).
+
 <p align="center">
   <img src="docs/assets/showcase/dungeon.gif" width="560" alt="A torch-lit dungeon wall with a chest on the flagstones, the flame flickering and its light falling off across the room">
 </p>
@@ -127,6 +129,7 @@ Aseprite GUI.
 | [Live viewing](#live-viewing-gui-companion-mode) · [Example agent workflow](#example-agent-workflow) | Watching edits land; an end-to-end run |
 | [How it works](#how-it-works) · [Security](#security) | Architecture, the sandbox, and what is enforced |
 | [Notes & limitations](#notes--limitations) · [Troubleshooting](#troubleshooting) | Honest edges, and what to do when something breaks |
+| [Contributing](#contributing) | Starter issues, testing and pull requests |
 
 ---
 
@@ -1244,8 +1247,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture and how to add a too
 
 ## Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md), add a test for
-your change, and regenerate the tool reference before opening a PR.
+If you use Aseprite for pixel art or game assets, try the server on a sprite from your
+own workflow. If a tool gives you the wrong result or setup gets stuck, include the
+steps and expected result in a [bug report](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=bug_report.yml).
+
+Documentation fixes and Python tests are good places to start. You can run the unit
+tests without Aseprite. For setup and what to include in a pull request, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
