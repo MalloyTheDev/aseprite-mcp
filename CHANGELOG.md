@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`assess_sprite` says which findings are defects, and can be told the subject is a
+  prop** (#256, #257, #255; #253 in part). The server already split its readings into
+  defects (the ones that scored as faults against sprites known to be good and bad) and
+  observations (everything else), because `export_game_asset_bundle` refuses a bundle on
+  the first kind and only lists the second. `assess_sprite` computed that split and
+  returned a flat `readings` list, so anyone gating on it had to treat every observation
+  as a failure. It now also returns `defects` and `observations`, each a list of strings.
+  Together they hold every entry of `readings` exactly once (the indexed-palette, ramp,
+  colour-vision and seam notes included), each in its `readings` order, and `readings`
+  itself is unchanged, so a caller that reads it keeps working.
+
+  `assess_sprite` and `export_game_asset_bundle` take a new `subject` argument:
+  `"character"` (the default, and what an omitted argument means) or `"prop"`. The
+  "masses have fused" reading and the keyline readings assume a figure with limbs and an
+  outline to be missing, and a vase, a lantern or a bottle has neither: its narrow neck
+  counted as a waist, so it was told to "separate the limbs". For a `"prop"` that reading
+  and all three keyline readings (too thin, which is the defect, too heavy, and too
+  little contrast) are withheld; the general findings, such as art touching the canvas border or pixels
+  off a declared ramp, are not about the subject and still apply. Any other value is
+  refused before Aseprite is launched or anything is written, and the refusal names both
+  accepted values, and the response does not echo the subject. With the default subject nothing else moves: the metrics, the order of
+  the findings and every gate decision are as before.
+
+  **Only `"prop"` is added, so #253 is addressed in part and stays open.** It asked for a
+  hint with `tile`, `icon` and `portrait` as well, and for the other readings that carry a
+  subject assumption to follow it; none of that is done here.
+
+  Two reading sentences are reworded, and the numbers in them are unchanged. The
+  isolated-pixel reading now says the metric looks only above, below and to either side,
+  so a diagonal dither counts as isolated, and that `remove_stray_pixels` leaves it alone
+  because it replaces a pixel only when none of its eight neighbours shares its colour,
+  which is why running the tool after that reading can replace nothing (#255). The
+  jagged-edge reading now says `normalize_edge_runs` only merges a lone one-pixel run
+  between longer ones and declines consecutive one-pixel runs, a sawtooth included, so it
+  may have nothing to change.
+
+  `scripts/assess_prop_example.py` draws an outline-free vase and prints the `defects` and
+  `observations` of both subjects side by side; it is a reproducible example, not a
+  showcase generator. `tests/test_stdio_refusals.py` checks the refusal from the far side
+  of the wire, through the real stdio client, and runs without Aseprite.
+
 ### Fixed
 
 - **A colour drawn on a grayscale sprite was not the grey Aseprite converts it to.** Both

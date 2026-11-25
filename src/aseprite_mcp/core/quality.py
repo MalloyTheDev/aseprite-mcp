@@ -27,6 +27,8 @@ import colorsys
 import itertools
 from typing import NamedTuple
 
+from .errors import ValidationFailed
+
 Grid = list[list[str]]
 # A silhouette: one boolean per pixel, True where something is drawn.
 Mask = list[list[bool]]
@@ -112,6 +114,11 @@ def isolated_pixels(grid: Grid) -> int:
     else, so counting diagonals would score a dithered band as clean. `remove_stray_pixels`
     takes the opposite view for the same reason, replacing only pixels with no neighbour
     of their colour in any of the eight directions, so it cannot eat a dither.
+
+    The two therefore do not pair up. A dithered band raises this count and gives
+    `remove_stray_pixels` nothing to replace, which is the dither being a dither and not
+    the tool failing; what that tool clears is the subset of these with no same-colour
+    neighbour diagonally either.
     """
     lookup = {(x, y): px for x, y, px in _opaque_cells(grid)}
     count = 0
@@ -685,6 +692,25 @@ NEARLY_SYMMETRIC = 0.12
 DEFECT = "defect"
 OBSERVATION = "observation"
 
+# What the drawing depicts, as far as the readings need to know. The limb and keyline
+# readings ask whether several masses are told apart, and they decide there are several
+# from a waist: a narrowing with more shape below it. On a figure that is a neck or a
+# waist. On a vase, a lantern or a bottle it is the shape of the object, which has no
+# limbs to separate and no masses for a keyline to divide, so a "prop" is spared those
+# readings and judged on everything else. "character" is the default because it is what
+# the readings were calibrated against, and it must behave exactly as no subject did.
+SUBJECTS = ("character", "prop")
+
+
+def check_subject(subject: str) -> str:
+    """`subject` if it is one the readings know, refused by name otherwise."""
+    if subject not in SUBJECTS:
+        raise ValidationFailed(
+            f'subject must be "character" or "prop", not {subject!r}. "prop" is a single '
+            "object such as a vase or a lantern, whose narrowings are its shape rather "
+            "than separated limbs.")
+    return subject
+
 
 class _Tiered:
     """Collects reading lines with the tier each one earned.
@@ -704,18 +730,41 @@ class _Tiered:
 
 
 def readings(metrics: dict, *, width: int, height: int,
-             tier: str | None = None) -> list[str]:
+             tier: str | None = None, subject: str = "character") -> list[str]:
     """One line per measurement worth acting on, and nothing for the ones that are fine.
 
     `tier` selects what comes back: `None` for everything, which is what callers got
     before this was split; `DEFECT` for the findings that earned the right to be called
-    faults; `OBSERVATION` for the rest.
+    faults; `OBSERVATION` for the rest. `subject` is one of `SUBJECTS`; a "prop" is not
+    given the limb or keyline readings.
     """
+    return [text for got, text in tiered_readings(metrics, width=width, height=height,
+                                                  subject=subject)
+            if tier is None or got == tier]
+
+
+def by_tier(found: list[tuple[str, str]]) -> dict:
+    """`readings`, `defects` and `observations` from `(tier, text)` pairs, each in order.
+
+    Every text lands in `readings` and in exactly one of the other two, so a caller can
+    gate on `defects` and show `readings` without the two ever disagreeing.
+    """
+    return {
+        "readings": [text for _tier, text in found],
+        "defects": [text for tier, text in found if tier == DEFECT],
+        "observations": [text for tier, text in found if tier == OBSERVATION],
+    }
+
+
+def tiered_readings(metrics: dict, *, width: int, height: int,
+                    subject: str = "character") -> list[tuple[str, str]]:
+    """`readings` with the tier each line earned, as `(tier, text)` in reading order."""
+    check_subject(subject)
     out = _Tiered()
     box = metrics.get("bbox")
     if box is None:
         out.append("Nothing is drawn on this frame.")
-        return [text for got, text in out.found if tier is None or got == tier]
+        return out.found
 
     usage = metrics.get("canvas_usage", 0.0)
     if usage < SPARSE_CANVAS:
@@ -749,7 +798,8 @@ def readings(metrics: dict, *, width: int, height: int,
     # A sheet is excluded outright rather than having its panels judged, because every
     # reading behind this gate asks a question about one figure, and the answer for a row
     # of panels is not a worse answer but a meaningless one.
-    articulated = (rows.get("gutters", 0) == 0
+    # A prop is never articulated, whatever its outline does: see `SUBJECTS`.
+    articulated = (subject == "character" and rows.get("gutters", 0) == 0
                    and (rows.get("rows_with_air", 0) > 0 or rows.get("waists", 0) > 0))
     if has_silhouette and articulated and drawn_rows:
         air = rows.get("rows_with_air", 0) / drawn_rows
@@ -825,8 +875,14 @@ def readings(metrics: dict, *, width: int, height: int,
 
     isolated = metrics.get("isolated_pixels", 0)
     if isolated > NOISY_ISOLATED:
-        out.append(f"{isolated} pixels have no neighbour of their own colour, which reads "
-                   "as noise rather than as texture.")
+        # Worded for what is counted. The count is orthogonal, so a diagonal dither is in
+        # it, while remove_stray_pixels looks in all eight directions and leaves that
+        # dither alone, so the reading must not promise that tool will lower it.
+        out.append(f"{isolated} pixels have no neighbour of their own colour above, below "
+                   "or to either side, which reads as noise rather than as texture unless "
+                   "it is a dither. A diagonal dither counts here, and remove_stray_pixels "
+                   "leaves it alone: that tool only replaces a pixel with no neighbour of "
+                   "its colour in any of the eight directions.")
     jaggies = metrics.get("jaggy_corners", 0)
     drawn_w, drawn_h = box[2] - box[0] + 1, box[3] - box[1] + 1
     if jaggies > JAGGY_SHARE * (drawn_w + drawn_h):
@@ -837,7 +893,10 @@ def readings(metrics: dict, *, width: int, height: int,
         # fires on is a silhouette with meaningfully more corner than a circle of the
         # same size, and lowering the share at all would start accusing circles.
         out.append(f"{jaggies} jagged corners across a {drawn_w}x{drawn_h} shape: the "
-                   "diagonals are stepping rather than running evenly.")
+                   "diagonals are stepping rather than running evenly. normalize_edge_runs "
+                   "only merges a lone one-pixel run between longer ones and declines "
+                   "consecutive one-pixel runs, a sawtooth included, so it may have nothing "
+                   "to change here.")
     conformance = metrics.get("palette_conformance")
     if conformance is not None and conformance < 1.0:
         # DEFECT: AUC 1.000, zero discordant pairs. Also the only reading here that is
@@ -862,13 +921,11 @@ def readings(metrics: dict, *, width: int, height: int,
     if 0 < asymmetry <= NEARLY_SYMMETRIC * drawn:
         out.append(f"Nearly symmetric, but {asymmetry} pixels differ from their horizontal "
                    "mirror. If that was meant to be symmetric, mirror_layer fixes it.")
-    if tier is None:
-        return [text for _got, text in out.found]
-    return [text for got, text in out.found if got == tier]
+    return out.found
 
 
 def frame_findings(per_frame: list[tuple[int, dict]], *, width: int,
-                   height: int) -> dict:
+                   height: int, subject: str = "character") -> dict:
     """The readings of several frames, split by tier, each reported once with its frames.
 
     An animation repeats most of what is true of one frame on every other: a cycle that
@@ -878,14 +935,16 @@ def frame_findings(per_frame: list[tuple[int, dict]], *, width: int,
     differ from frame to frame and are reported separately, because they are different
     findings.
 
-    `per_frame` pairs a frame number with that frame's `score`. Returns `defects` and
-    `observations`, each a list of `{"reading", "frames"}`.
+    `per_frame` pairs a frame number with that frame's `score`, and `subject` is passed to
+    `readings` so a gate built on this applies the same rule `assess_sprite` does. Returns
+    `defects` and `observations`, each a list of `{"reading", "frames"}`.
     """
+    check_subject(subject)
     grouped: dict[str, dict[str, list[int]]] = {DEFECT: {}, OBSERVATION: {}}
     for number, metrics in per_frame:
-        for tier, found in grouped.items():
-            for text in readings(metrics, width=width, height=height, tier=tier):
-                found.setdefault(text, []).append(number)
+        for tier, text in tiered_readings(metrics, width=width, height=height,
+                                          subject=subject):
+            grouped[tier].setdefault(text, []).append(number)
     return {
         "defects": [{"reading": text, "frames": frames}
                     for text, frames in grouped[DEFECT].items()],

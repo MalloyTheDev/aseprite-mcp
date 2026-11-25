@@ -523,6 +523,7 @@ def assess_sprite(
     check_tiling: bool = False,
     standing: bool = False,
     check_cvd: bool = False,
+    subject: str = "character",
 ) -> dict:
     """Measure the drawing itself and say what is worth fixing.
 
@@ -531,9 +532,11 @@ def assess_sprite(
     good, in the ways that can be counted.
 
     Reports how many colours are in use and roughly how many ramps they form, pixels with
-    no neighbour of their own colour (noise), jagged corners on diagonals, the drawn
-    bounding box, how much of the canvas it fills, whether it sits centred, and how far
-    the silhouette is from its own mirror.
+    no neighbour of their own colour above, below or to either side (noise, though a
+    diagonal dither counts too and `remove_stray_pixels` rightly leaves it alone), jagged
+    corners on diagonals (which `normalize_edge_runs` may decline, as it does a sawtooth
+    of consecutive one-pixel runs), the drawn bounding box, how much of the canvas it
+    fills, whether it sits centred, and how far the silhouette is from its own mirror.
 
     It also reports five things about whether the drawing has *form*, which were added
     because every measurement above passed on a figure that read as one grey slab:
@@ -561,7 +564,13 @@ def assess_sprite(
     surface without form), because a reading that cannot be acted on is noise.
 
     Each measurement that is worth acting on comes back with a line saying why, so the
-    numbers do not have to be interpreted.
+    numbers do not have to be interpreted. Every line is in `readings`, and each is also
+    in exactly one of `defects` or `observations`, in the same order. A *defect* is a
+    reading that scored as a fault against sprites known to be good and bad (an absent
+    keyline on a figure of several masses, or a pixel off a declared ramp), and it is
+    what `export_game_asset_bundle` refuses on. Everything else, including the palette,
+    ramp, colour-vision and tiling notes, is an *observation*: worth a look, not a
+    verdict. Neither tier says the art is good.
 
     Args:
         ramp: Declare the ramp the art should be on and the report adds palette
@@ -583,10 +592,17 @@ def assess_sprite(
             vision deficiency, and report where two colours that are distinct to most
             viewers collapse into one. Off by default because it is the one measurement
             here that costs about half again as much as everything else at the size cap.
+        subject: "character" (the default) or "prop". The limb and keyline readings
+            find several masses in a waist, which on a vase, a lantern or a bottle is the
+            object's shape; "prop" drops those readings, so an object is not told to
+            separate limbs it does not have or refused for a keyline between masses it
+            does not have. Everything else is judged the same, off-ramp pixels and
+            canvas-border contact included. Anything else is refused before launch.
 
     Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
     the measurements, so this is cheap to call after every pass.
     """
+    quality.check_subject(subject)
     if ramp:
         # The cap its seven siblings apply, and the only route to a palette that was
         # missing it. The cost here is linear in the ramp rather than quadratic
@@ -668,7 +684,11 @@ def assess_sprite(
         metrics["tile_seam"] = {"horizontal": round(horizontal, 3),
                                 "vertical": round(vertical, 3)}
 
-    notes = quality.readings(metrics, width=measured["width"], height=measured["height"])
+    found = quality.tiered_readings(metrics, width=measured["width"],
+                                    height=measured["height"], subject=subject)
+    # Everything appended below is an observation: none of it has been scored against a
+    # corpus, and the bundle gate refuses only on what has.
+    notes: list[str] = []
     # Before the tiling note, because it changes how palette_conformance above should be
     # read: on an indexed sprite whose palette does not hold the declared ramp, the
     # conformance number is measuring the palette rather than the shading.
@@ -688,6 +708,7 @@ def assess_sprite(
                     f"The {axis} wrap is {seam[axis]:.1f}x as different as the interior, "
                     "so this tile shows a seam on that axis."
                 )
+    found.extend((quality.OBSERVATION, note) for note in notes)
     return {
         "ok": True,
         "frame": measured["frame"],
@@ -695,7 +716,7 @@ def assess_sprite(
         "width": measured["width"],
         "height": measured["height"],
         "metrics": metrics,
-        "readings": notes,
+        **quality.by_tier(found),
     }
 
 
@@ -742,7 +763,7 @@ def _spread(count: int, budget: int) -> list[int]:
 
 
 def assess_frames(filename: str, *, frame_count: int, width: int, height: int,
-                  ramp: list[str] | None = None) -> dict:
+                  ramp: list[str] | None = None, subject: str = "character") -> dict:
     """Judge the frames of a sprite the way `assess_sprite` judges one, in one launch.
 
     For a finishing step, which has to look at the whole animation and cannot afford a
@@ -758,7 +779,9 @@ def assess_frames(filename: str, *, frame_count: int, width: int, height: int,
 
     With a `ramp` on an indexed sprite, `ramp_on_palette` carries the harness's
     measurement of what the ramp became on the palette, for `indexed.ramp_readings`.
+    `subject` is `assess_sprite`'s, refused before anything is launched.
     """
+    quality.check_subject(subject)
     if ramp:
         check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
         ramp = ramp_as_hex(ramp)
@@ -790,7 +813,7 @@ def assess_frames(filename: str, *, frame_count: int, width: int, height: int,
         per_frame.append((entry["frame"], scored[key]))
     result["frames_assessed"] = [number for number, _ in per_frame]
     result.update(quality.frame_findings(per_frame, width=measured["width"],
-                                         height=measured["height"]))
+                                         height=measured["height"], subject=subject))
     return result
 
 
