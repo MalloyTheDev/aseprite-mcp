@@ -37,7 +37,8 @@ All notable changes to this project are documented here. The format is based on
   Aseprite version and each tier's passed and skipped counts, runs from the lock, and fails
   the editor step if tests were skipped for want of an editor; `--showcase` adds
   `scripts/verify_showcase.py`, which regenerates the showcase and compares it with the
-  committed images. CI prints its summary line and runs `scripts/check_docs.py`.
+  committed images. CI prints its summary line and runs `scripts/check_docs.py`, and so
+  does the gate, so a gate that passes covers every check CI makes.
   `gen_tool_docs.py --check` names the tool whose entry is out of date.
 - **The bug report form** asks for the release tag or commit rather than the version
   `health_check` reports, which still says 0.9.0, and has a field for what the reporter

@@ -261,16 +261,16 @@ editor tier that never ran.
 The header looks like this (paths shortened):
 
 ```text
-release-gate: 5 steps (cwd=...)
+release-gate: 6 steps (cwd=...)
 release-gate: python 3.12.13 | <package version> | ...\src\aseprite_mcp
 release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
 ```
 
-Each step prints a line such as `ok (48.4s): 1811 passed, 846 skipped` (counts grow, so do
+Each step prints a line such as `ok (48.4s): 1814 passed, 846 skipped` (counts grow, so do
 not compare against this page), and the closing summary has one row per step:
 
 ```text
-  PASS  pure tests (pytest) (48.4s): 1811 passed, 846 skipped
+  PASS  pure tests (pytest) (48.4s): 1814 passed, 846 skipped
 ```
 
 The editor step also fails if any test was skipped for want of an editor, or if nothing
@@ -292,8 +292,8 @@ runs `scripts/verify_showcase.py`; it cannot be combined with `--skip-aseprite`.
 under `uv run --locked`, or `uv run --no-sync` when you pass `--no-sync`.
 [Release gate script](../scripts/release_gate.py)
 
-The gate does not run the documentation check as a step; CI does. Check the documentation
-on its own with:
+The gate runs the documentation check as a step, as CI does. It also runs on its own in a
+second:
 
 ```bash
 python scripts/check_docs.py

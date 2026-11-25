@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -43,6 +44,16 @@ def test_no_step_stacks_a_q_on_the_configured_one(gate, skip_aseprite):
     for name, cmd in gate._steps(skip_aseprite):
         assert "-q" not in cmd and "-qq" not in cmd, (
             f"{name}: pyproject's addopts already has -q, and -qq hides the summary line")
+
+
+def test_the_gate_runs_every_script_ci_runs(gate):
+    """`--skip-aseprite` is documented as everything CI runs. A check CI has and the gate
+    lacks means a gate that passes and a pull request that fails."""
+    workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    in_ci = set(re.findall(r"scripts/\w+\.py", workflow))
+    assert in_ci, "CI runs no script, so this test is reading the wrong file"
+    in_gate = {arg for _, cmd in gate._steps(skip_aseprite=True) for arg in cmd}
+    assert in_ci <= in_gate, f"CI runs these and the gate does not: {sorted(in_ci - in_gate)}"
 
 
 def test_synced_steps_run_from_the_committed_lock(gate):

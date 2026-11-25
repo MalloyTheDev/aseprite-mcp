@@ -8,8 +8,9 @@ step in order and stops at the first failure:
   2. pytest                             (the pure tier, which is what CI runs)
   3. pytest --run-aseprite -rs          (pure + editor tier; needs a real Aseprite)
   4. gen_tool_docs.py --check           (docs/TOOLS.md is in sync with the registry)
-  5. uv build                           (wheel + sdist build)
-  6. verify_showcase.py                 (only with --showcase; regenerates the README art)
+  5. check_docs.py                      (links, anchors and stale claims in the Markdown)
+  6. uv build                           (wheel + sdist build)
+  7. verify_showcase.py                 (only with --showcase; regenerates the README art)
 
 Usage:
     uv run --locked python scripts/release_gate.py                 # everything
@@ -110,6 +111,8 @@ def _steps(skip_aseprite: bool, no_sync: bool = False,
     steps += [
         ("docs sync (gen_tool_docs --check)",
          [*run, "python", "scripts/gen_tool_docs.py", "--check"]),
+        # CI runs this too. Without it here a gate could pass and the pull request fail.
+        ("docs links (check_docs)", [*run, "python", "scripts/check_docs.py"]),
         ("build (uv build)", ["uv", "build"]),
     ]
     if showcase:

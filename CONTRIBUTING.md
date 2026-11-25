@@ -62,7 +62,7 @@ em dash characters, and the locked `uv` form of contributor commands are all che
 
 The Python-only tier passes with several hundred tests skipped. Those are the ones that
 need Aseprite, and they are not a problem on a fresh clone. At the time of writing
-(November 2026) it reports about 1811 passed and 846 skipped; the counts grow as tests
+(November 2026) it reports about 1814 passed and 846 skipped; the counts grow as tests
 are added, so compare against a clean checkout of `main`, not against this page.
 
 ### Windows: a client is running the server from your checkout
@@ -118,7 +118,7 @@ uv run --locked pytest --run-aseprite
 
 With no Aseprite found that command stops with an error, so set `ASEPRITE_PATH`. With
 Aseprite 1.3.18.6 on Windows it takes about 19 minutes, and on 2026-11-25 it ended at about
-2655 passed and 2 skipped (counts grow). The 2 skips are fixture skips for an
+2658 passed and 2 skipped (counts grow). The 2 skips are fixture skips for an
 untracked `workspace/` folder: `tests/test_figure.py:770` and `tests/test_ramp_lint.py:118`.
 Any other skip means something is missing.
 
@@ -136,12 +136,12 @@ one to quote:
 release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
 ```
 
-Each step then reports its own result, for example `ok (48.4s): 1811 passed, 846 skipped`,
+Each step then reports its own result, for example `ok (48.4s): 1814 passed, 846 skipped`,
 and the summary at the end lists every step as PASS, FAIL or SKIP. With no editor the gate
 stops before any step, with a message that says to set `ASEPRITE_PATH` or pass
 `--skip-aseprite`. That flag runs only what CI runs, and the summary then says plainly that
-the editor tier was not run. Check the Markdown with `python scripts/check_docs.py`, which
-CI runs on its own and the gate does not.
+the editor tier was not run. The gate includes `scripts/check_docs.py`, the Markdown check
+CI runs, which also runs on its own in a second.
 
 Other places to start: [client setup](docs/CLIENTS.md), [Headless Aseprite](docs/HEADLESS.md),
 the [showcase generators](scripts/showcase/README.md), and the
