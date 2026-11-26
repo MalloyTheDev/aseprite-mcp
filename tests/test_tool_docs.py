@@ -234,3 +234,27 @@ def test_generation_refuses_to_drop_a_tool(monkeypatch):
     monkeypatch.setattr(gen, "GROUPS", [g for g in gen.GROUPS if g[0] != "shading"])
     with pytest.raises(SystemExit, match="shift_along_ramp"):
         asyncio.run(gen.main(check=True))
+
+
+def test_check_names_the_tool_that_drifted(monkeypatch, capsys):
+    """After a docstring edit, --check has to say which tool's section is stale and how
+    to regenerate it; "OUT OF DATE" alone sent people diffing a 165-tool file by hand."""
+    gen = _generator()
+    real = asyncio.run(mcp.list_tools())
+    edited = [
+        t.model_copy(update={"description": f"{t.description}\n\nA sentence the committed "
+                                            "reference does not have."})
+        if t.name == "draw_line" else t
+        for t in real
+    ]
+
+    class Registry:
+        async def list_tools(self):
+            return edited
+
+    monkeypatch.setattr(gen, "mcp", Registry())
+    assert asyncio.run(gen.main(check=True)) == 1
+    out = capsys.readouterr().out
+    assert "changed (1): draw_line" in out, out
+    assert "+A sentence the committed reference does not have." in out, out
+    assert "uv run --locked python scripts/gen_tool_docs.py" in out, out

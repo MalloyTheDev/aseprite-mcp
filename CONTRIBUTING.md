@@ -1,62 +1,86 @@
 # Contributing to Aseprite MCP
 
-## Find something to work on
+Pick the route that matches what you have. Each one ends with something you can check.
 
-- Pick a small task from the [good first issues](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). For larger tasks, browse [help wanted issues](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
-- Try the server on a sprite from your own workflow. Include the exact tool call, what you expected, and a small sprite you can share in a [bug report](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=bug_report.yml).
-- Have a workflow that needs a new tool or a change to the MCP interface? Describe what you are trying to make and where you get stuck in a [feature request](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=feature_request.yml).
+| You are | Start with | You need |
+| --- | --- | --- |
+| A pixel artist, or anyone who uses Aseprite | [Test a workflow and report it](#route-1-test-a-workflow-and-report-it) | Aseprite and an MCP client. No code. |
+| New to the code and want a first change | [Make a first Python change](#route-2-make-a-first-python-change) | Python, Git and uv. No Aseprite. |
+| Ready to work on the engine, the tooling or client integrations | [Go deeper](#route-3-go-deeper) | Aseprite for most of it. |
 
-If you pick up an issue, leave a short comment so others know someone is working on it.
-Small fixes to the docs are welcome as pull requests.
+## Route 1: test a workflow and report it
 
-## Make a documentation fix
+1. Set the server up with the [README](README.md#install) and your client's
+   [setup page](docs/CLIENTS.md). `health_check` should say `ok: true`.
+2. Ask your agent for something you would really make, or follow the
+   [walkthrough](docs/WALKTHROUGH.md) to call a tool yourself and check what it does.
+3. If the result is wrong, or setup is stuck, open a
+   [bug report](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=bug_report.yml).
+   The form asks for what you asked for, what you got, a preview image, and your Aseprite
+   version. Read it from Help > About in Aseprite, or from `aseprite_version` in the
+   `health_check` result. `aseprite --version` also prints it on macOS and Linux; on
+   Windows, PowerShell shows nothing unless the output is piped:
+   `& "C:/path/to/Aseprite.exe" --version | Write-Output`.
+4. Missing a tool? Describe what you are trying to make in a
+   [feature request](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=feature_request.yml).
 
-For a small Markdown change, open the file on GitHub and use the pencil icon. Preview
-the edit, then propose it from your fork. Check the changed links and try any commands
-you edited. In the pull request, mention what you checked. This path works entirely in
-the browser. [GitHub's file editing guide](https://docs.github.com/en/repositories/working-with-files/managing-files/editing-files#editing-files-in-another-users-repository)
+## Route 2: make a first Python change
 
-For a tool description or argument, edit the Python docstring where the tool is defined
-and regenerate the reference locally. [Tool authoring guide](docs/DEVELOPMENT.md#adding-or-changing-a-tool)
+Look for a [good first issue](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22),
+or a [help wanted](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+issue for something larger. Leave a short comment so others know you are on it. Docs fixes
+need no issue: edit the file on GitHub with the pencil icon and propose it from your fork.
 
-## Local setup
-
-Fork the repository. Install [Git](https://git-scm.com/downloads) and [uv](https://docs.astral.sh/uv/getting-started/installation/)
-if needed. Replace `YOUR_USERNAME` with the owner of your fork.
+Fork the repository, then install [Git](https://git-scm.com/downloads) and
+[uv](https://docs.astral.sh/uv/getting-started/installation/). Replace `YOUR_USERNAME`
+with your GitHub name.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/aseprite-mcp.git
 cd aseprite-mcp
+git remote add upstream https://github.com/MalloyTheDev/aseprite-mcp.git
 git switch -c my-change
 uv sync --locked
 uv run --locked pytest tests/test_unit.py
 ```
 
-The last command checks your setup using Python only. The project supports Python 3.10
-and up. For tests that open or export sprites, use Aseprite 1.3+ and point
-`ASEPRITE_PATH` at your executable if needed. [Editor setup](docs/DEVELOPMENT.md#local-editor-setup)
+The last command uses Python only. It proves your setup works. Aseprite is not needed
+until you change what ends up in a sprite.
 
-## Running the tests
-
-For code changes, start with the tests for the module you changed. Run these checks
-before opening the pull request.
+### Check your change
 
 ```bash
 uv run --locked ruff check src tests scripts
 uv run --locked pytest
 uv run --locked python scripts/gen_tool_docs.py --check
+python scripts/check_docs.py
 ```
 
-These commands cover lint, the Python-only test tier, and the generated reference check.
-CI runs its Python jobs on pull requests into `main` and on pushes to `main`. For a change
-to sprite pixels, files, or exports, run the relevant editor-backed tests with
-`--run-aseprite -rs` and report the Aseprite version. See how to target a single test,
-read the skip summary, or register a new Python-only test. [Test guide](docs/DEVELOPMENT.md#running-the-tests)
+That is lint, the Python-only tests, the generated tool reference, and a check of the
+Markdown. Docs are tested like code: the tool counts in the README, links and anchors, no
+em dash characters, and the locked `uv` form of contributor commands are all checked.
 
-## Pull requests
+The Python-only run skips tests that need Aseprite. Some tests also skip based on
+platform or fixture availability. Run `uv run --locked pytest -rs` to see the reasons.
+Compare results with a clean checkout of `main` on the same OS and Python version.
 
-For a local change, stage the files you edited, check the staged diff, and push your
-branch to your fork. Replace the example file path and use the branch name you created.
+### Windows: a client is running the server from your checkout
+
+If an MCP client has the server running from this same folder, `uv sync --locked`,
+`uv run --locked pytest` and the release gate can fail with "os error 32" (the file is in
+use) once `pyproject.toml` or `uv.lock` has changed, because Windows keeps
+`.venv\Scripts\aseprite-mcp.exe` locked. Either close the client, or run commands
+without a sync:
+
+```bash
+uv run --no-sync pytest
+```
+
+To stop it happening again, launch the server from your client as
+`uv --directory /path/to/aseprite-mcp run python -m aseprite_mcp`; that does not lock the
+`.exe`. See [Choosing a launch form](docs/CLIENTS.md#2-choosing-a-launch-form).
+
+### Open the pull request
 
 ```bash
 git add path/to/changed-file
@@ -65,18 +89,61 @@ git commit -m "Describe the change"
 git push -u origin my-change
 ```
 
-Open the pull request into `MalloyTheDev/aseprite-mcp:main`. Link the issue if there is
-one, explain what changes for users, and include the checks you ran. For a tool fix, a
-failing case and a focused test make the expected behaviour clear. For a docs fix, name
-the page, link, or example you verified.
+Open it into `MalloyTheDev/aseprite-mcp:main`. Link the issue, say what changes for
+users, and paste the checks you ran. For a docs fix, name the page or link you verified.
 
-## Find the right guide
+To pick up new work from upstream, before you start or when a pull request needs it:
 
-| If you want to | Start here |
-| --- | --- |
-| Find the module for a tool or add a test | [Development guide](docs/DEVELOPMENT.md) |
-| Check what Aseprite supports in batch mode | [Headless Aseprite](docs/HEADLESS.md) |
-| Find tool arguments and results | [Tool reference](docs/TOOLS.md) |
-| Set up an MCP client or check a connection | [Client setup](docs/CLIENTS.md) |
-| Reproduce the art shown in the README | [Showcase generators](scripts/showcase/README.md) |
-| Report a security issue privately | [Security policy](SECURITY.md) |
+```bash
+git fetch upstream
+git switch main
+git merge --ff-only upstream/main
+git switch my-change
+git rebase main
+```
+
+(GitHub's "Sync fork" button on your fork's page does the `main` part.) If the rebase
+stops on a conflict, fix the files it names, then `git add` them and `git rebase --continue`.
+
+## Route 3: go deeper
+
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) covers the architecture, adding a tool, the two
+test tiers, the release gate and cutting a release. Work that changes sprite pixels,
+files or exports needs the editor tier:
+
+```bash
+uv run --locked pytest --run-aseprite
+```
+
+With no Aseprite found that command stops with an error, so set `ASEPRITE_PATH`. With
+Aseprite 1.3.18.6 on Windows it takes about 19 minutes, and on 2026-11-25 it ended at about
+2658 passed and 2 skipped (counts grow). The 2 skips are fixture skips for an
+untracked `workspace/` folder: `tests/test_figure.py:770` and `tests/test_ramp_lint.py:118`.
+Any other skip means something is missing.
+
+For the full local check, which runs lint, both tiers, the generated reference and a build,
+and prints the Aseprite version it used, run the gate. Quote that line in your pull request:
+
+```bash
+uv run --locked python scripts/release_gate.py
+```
+
+It starts by printing what it is about to test, and the line that names the editor is the
+one to quote:
+
+```text
+release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
+```
+
+Each step then reports its own result, for example
+`ok (48.4s): <passed> passed, <skipped> skipped`, and the summary at the end lists every
+step as PASS, FAIL or SKIP. With no editor the gate
+stops before any step, with a message that says to set `ASEPRITE_PATH` or pass
+`--skip-aseprite`. That flag runs only what CI runs, and the summary then says plainly that
+the editor tier was not run. The gate includes `scripts/check_docs.py`, the Markdown check
+CI runs, which also runs on its own in a second.
+
+Other places to start: [client setup](docs/CLIENTS.md), [Headless Aseprite](docs/HEADLESS.md),
+the [showcase generators](scripts/showcase/README.md), and the
+[tool reference](docs/TOOLS.md). Report a security issue privately, as the
+[security policy](SECURITY.md) describes.

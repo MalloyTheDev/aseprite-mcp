@@ -5,27 +5,60 @@ body:
   - type: markdown
     attributes:
       value: |
-        Check existing issues first. If you have a small sprite or image that shows the
-        problem and can be shared publicly, attach it below.
+        You do not need to read any code to file a good report. Tell us what you asked for,
+        what you got instead, and show it with a picture. Check existing issues first.
+
+        A preview image is the most useful thing you can add. Ask your agent to call
+        `render_preview` and attach the PNG, or drag in a screenshot or a small `.aseprite`
+        file. Only share files you are happy to make public.
   - type: textarea
-    id: steps-to-reproduce
+    id: what-you-asked-for
     attributes:
-      label: Steps to reproduce
-      description: Include the exact tool call and arguments, or the setup steps that led to the error.
+      label: What did you ask for?
+      description: >
+        What you wanted made or changed, in your own words, or the exact tool call and
+        arguments if you have them. Setup problems: say what you were trying to do when it
+        got stuck.
     validations:
       required: true
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened
-      description: Paste the error or describe the result, then tell us what you expected.
+      label: What came out, and what did you expect?
+      description: >
+        Describe the result, or paste the error message, then say what you expected instead.
+        Attach the preview image or sprite here.
     validations:
       required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >
+        The steps in order, so someone else can see it too. Skip this if "what did you ask
+        for" already says it.
+    validations:
+      required: false
+  - type: input
+    id: aseprite-version
+    attributes:
+      label: Aseprite version
+      description: >
+        Run `aseprite --version` (on Windows, give the full path to `Aseprite.exe`, or look at
+        Help > About in the editor), or read `aseprite_version` in the `health_check` result.
+      placeholder: "Aseprite 1.3.18.6"
+    validations:
+      required: false
   - type: input
     id: server-version
     attributes:
-      label: Aseprite MCP version or commit
-      description: The release tag, checkout commit, or version reported by health_check.
+      label: Aseprite MCP release tag or commit
+      description: >
+        The release you installed, such as v0.10.0. If you cloned the repository, run
+        `git rev-parse --short HEAD` in the folder and paste the result. Do not copy the
+        version from `health_check`: it does not follow the release (it reports 0.9.0 for
+        0.10.0).
+      placeholder: "v0.10.0, or a short commit hash"
     validations:
       required: false
   - type: textarea
@@ -33,17 +66,9 @@ body:
     attributes:
       label: health_check output
       description: >
-        If the server starts, run `health_check` and paste the JSON. Remove private
-        paths and other personal details before posting.
+        If the server starts, ask your agent to run `health_check` and paste the JSON.
+        Remove private paths and other personal details before posting.
       render: json
-    validations:
-      required: false
-  - type: input
-    id: aseprite-version
-    attributes:
-      label: Aseprite version
-      description: Include the editor version if it is missing from health_check.
-      placeholder: "1.3.7"
     validations:
       required: false
   - type: input

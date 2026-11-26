@@ -19,7 +19,8 @@ whose format could not be confirmed is listed under
 
 ## 1. Prerequisites
 
-- **Aseprite 1.3+**, and a licensed copy. The Steam and standalone builds both work.
+- **Aseprite** and a licensed copy. Developed and tested on 1.3.18.6; the Steam and
+  standalone builds both work.
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/)**.
 - A clone of this repository (see [Install](../README.md#install)).
 
@@ -27,7 +28,7 @@ Two environment variables matter for every client:
 
 | Variable | Why you want it set |
 | --- | --- |
-| `ASEPRITE_PATH` | Full path to `Aseprite.exe` / `aseprite`. Auto-detection covers the usual Steam and standalone locations, but naming it explicitly is the only way to be sure which install the server drives. |
+| `ASEPRITE_PATH` | Full path to `Aseprite.exe` / `aseprite`. If it is unset the server tries `aseprite` on `PATH`, then the usual Steam, standalone and system locations; naming it explicitly is the only way to be sure which install the server drives. A value that is set but wrong is an error, never a fallback. |
 | `ASEPRITE_MCP_WORKSPACE` | The folder relative sprite filenames resolve inside. **Always set this explicitly.** |
 
 `ASEPRITE_MCP_WORKSPACE` deserves the emphasis. Relative paths are the normal way to
@@ -56,7 +57,14 @@ client wants.
 | --- | --- |
 | `uv --directory /path/to/aseprite-mcp run aseprite-mcp` | You have a source checkout. This is the form the README and the example config use. |
 | `uv --directory /path/to/aseprite-mcp run python -m aseprite_mcp` | Same, but it does not hold the console script open. See the note below. |
-| `uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp aseprite-mcp` | You would rather not clone. uv fetches and caches the repo itself. |
+| `uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp aseprite-mcp` | You would rather not clone. uv fetches and caches the repo itself, at the head of `main`. |
+| `uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp@v0.10.0 aseprite-mcp` | The same, pinned to the latest release. |
+
+**Release versus main.** The unpinned forms track `main`, which is ahead of the latest
+release (v0.10.0): it has 152 tools against the 165 on `main`.
+Ask for `health_check` and read `tools_registered` to see which you are running; its
+`version` field still reads 0.9.0 on both. The list of the 13 is in the
+[README](../README.md#release-versus-main).
 
 **The console-script lock (Windows).** `uv run aseprite-mcp` executes
 `.venv\Scripts\aseprite-mcp.exe`, and Windows keeps that file locked for as long as the
@@ -67,8 +75,11 @@ the `.exe` untouched, and lets you re-sync the environment without stopping your
 That is the only difference between the two; pick the second if you develop against the
 server while using it.
 
-`uvx aseprite-mcp` without `--from` is not available: the package is not published to
-PyPI at the time of writing, so there is nothing for `uvx` to resolve by name.
+**Do not run `uvx aseprite-mcp` without `--from`.** This project is not published to
+PyPI. The name `aseprite-mcp` there (checked November 2026) belongs to a different,
+unrelated project, so `uvx` would download and run someone else's code instead of this
+server. Always give `--from git+https://github.com/MalloyTheDev/aseprite-mcp`, as in the
+table above.
 
 ---
 
@@ -106,12 +117,16 @@ Where that file lives:
 
 | Client | Config file |
 | --- | --- |
-| Claude Desktop | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`; Windows: `%APPDATA%\Claude\claude_desktop_config.json`. Reachable from Settings > Developer > Edit Config. |
+| Claude Desktop | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`; Windows: `%APPDATA%\Claude\claude_desktop_config.json`. Linux: `~/.config/Claude/claude_desktop_config.json`. Reachable from Settings > Developer > Edit Config. |
 | Cursor | `~/.cursor/mcp.json` for every project, or `.cursor/mcp.json` in one project's root. |
-| Cline | CLI: `~/.cline/mcp.json`. In the editor extension: the MCP Servers panel, Configure tab, "Configure MCP Servers". |
+| Cline | CLI: `~/.cline/data/settings/cline_mcp_settings.json`, which the `CLINE_MCP_SETTINGS_PATH` environment variable overrides. In the editor extension: the MCP Servers panel, Configure tab, "Configure MCP Servers". |
 | Roo Code | Global: `mcp_settings.json`, opened from the MCP settings panel. Per project: `.roo/mcp.json`. |
-| Windsurf | `~/.config/devin/mcp_config.json` (macOS and Linux) or `%APPDATA%\devin\mcp_config.json` (Windows), per the current docs. Older Windsurf builds used `~/.codeium/windsurf/mcp_config.json`; if the path above does not exist, use whichever one your install already has. |
+| Windsurf | The Windsurf docs now redirect to Devin's "Local Customizations" page, which lists `~/.config/devin/mcp_config.json` for the user and `.devin/mcp_config.json` in a project. It names no operating system and gives no Windows path, so on Windows the location is unverified: look in the app's MCP settings. Older Windsurf builds used `~/.codeium/windsurf/mcp_config.json`; if the path above does not exist, use whichever one your install already has. |
 | LM Studio | Edited in the app: Program tab, Install, "Edit mcp.json". LM Studio follows Cursor's `mcp.json` notation. |
+
+Cursor's field table marks `"type": "stdio"` as required, although its own examples leave
+it out. This block omits it. If Cursor shows the server as invalid, add `"type": "stdio"`
+to the `aseprite` entry.
 
 Cline and Roo Code both keep a per-server allowlist of tools they will call without
 asking (`autoApprove` in Cline, `alwaysAllow` in Roo Code). Every tool on this server
@@ -179,7 +194,9 @@ mcpServers:
       ASEPRITE_MCP_WORKSPACE: /path/to/your/art-project
 ```
 
-This goes in your Continue config, or in its own file under `.continue/mcpServers/`.
+This goes in your Continue config. As its own file under `.continue/mcpServers/` (in the
+workspace root) it needs three extra top-level lines above `mcpServers`: `name`, `version`
+and `schema: v1`. Continue uses MCP servers only in agent mode.
 
 ### Zed (`settings.json`)
 
@@ -229,9 +246,11 @@ instead of stdio. It still needs Aseprite on the same machine.
 only by the process that started it. This server's file access is scoped by a workspace
 directory, not by an identity, so binding it to a reachable port gives every caller that
 can reach that port the same filesystem access the local user has. There is no
-authentication in front of it. Bind it to loopback, or put an authenticating proxy in
-front of it, and treat turning it on as a deliberate exposure decision rather than a
-configuration convenience.
+authentication in front of it. There is also no host or port setting: the HTTP transports
+listen on `127.0.0.1` port 8000 and nowhere else, so only the same machine can reach them
+unless you forward that port. If you put a proxy or tunnel in front of it, make it
+authenticate, and treat turning the transport on as a deliberate exposure decision rather
+than a configuration convenience.
 
 ### OpenAI and Grok style function-calling bridges
 
@@ -292,7 +311,10 @@ startup. It should match the count stated at the top of [`docs/TOOLS.md`](TOOLS.
 is generated from the same registry; a lower number means a tool module failed to import.
 The count is not repeated here because it changes every time a tool is added.
 
-If `aseprite_found` is false, the `reason` field says where it looked.
+If `aseprite_found` is false, the `reason` field carries the error from the search. For an
+unset `ASEPRITE_PATH` it only says to set it; it does not list the places that were tried
+(those are `PATH`, then the usual install folders). If `ASEPRITE_PATH` is set but wrong, the
+`reason` names the value that failed.
 
 ---
 
@@ -330,9 +352,10 @@ come back re-spaced by that round trip; the data does not change. Elsewhere, an 
 declared as a string wants a string: every parameter advertises one concrete type, which
 is what makes the schemas usable by strict function-calling clients.
 
-**`uv sync` fails with a permission or "file in use" error on Windows.** A client is
-holding `.venv\Scripts\aseprite-mcp.exe` open. Close the client (or stop the server it
-started), then re-run `uv sync`. To avoid hitting it again, switch that client's launch
+**`uv sync` fails with a permission or "file in use" error on Windows.** The same happens
+as `os error 32` from `uv run`. A client is holding `.venv\Scripts\aseprite-mcp.exe` open.
+Close the client (or stop the server it started), then re-run `uv sync`, or run
+`uv run --no-sync ...` meanwhile. To avoid hitting it again, switch that client's launch
 form to `uv --directory ... run python -m aseprite_mcp`, which never touches the
 console script (see [Choosing a launch form](#2-choosing-a-launch-form)).
 
@@ -357,12 +380,12 @@ its own documentation for the file path rather than assuming one from this list.
 
 Each block above was checked against the client's current documentation:
 
-- Claude Desktop: [Connect to local MCP servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers)
-- Cursor: [Model Context Protocol](https://cursor.com/docs/context/mcp)
-- Cline: [Configuring MCP Servers](https://docs.cline.bot/mcp/configuring-mcp-servers)
+- Claude Desktop: [Connect to local MCP servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers) (the address redirects to a dated copy of the same page)
+- Cursor: [Model Context Protocol](https://cursor.com/docs/mcp)
+- Cline: [MCP overview](https://docs.cline.bot/mcp/mcp-overview)
 - Roo Code: [Using MCP in Roo Code](https://roocodeinc.github.io/Roo-Code/features/mcp/using-mcp-in-roo)
-- Windsurf: [Cascade MCP](https://docs.windsurf.com/windsurf/cascade/mcp)
-- LM Studio: [Use MCP Servers](https://lmstudio.ai/docs/app/plugins/mcp)
+- Windsurf: [Cascade MCP](https://docs.devin.ai/desktop/cascade/mcp) (the old Windsurf address redirects to Devin's "Local Customizations" page)
+- LM Studio: [Use MCP Servers](https://lmstudio.ai/docs/app/mcp)
 - Codex CLI: [Extend with MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 - Continue: [MCP](https://docs.continue.dev/customize/deep-dives/mcp)
 - Zed: [Model Context Protocol](https://zed.dev/docs/ai/mcp)

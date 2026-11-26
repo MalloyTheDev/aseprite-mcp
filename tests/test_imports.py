@@ -340,18 +340,17 @@ def test_no_allowlisted_module_marks_a_test_pure():
     which mechanism applies, and the next person may copy it into a file where the
     distinction matters.
     """
-    import re
     from pathlib import Path
 
-    from conftest import PURE_PYTHON_TESTS
+    from conftest import PURE_PYTHON_TESTS, pure_marker_count
 
     offenders = []
     for name in PURE_PYTHON_TESTS:
         path = Path(__file__).resolve().parent / f"{name}.py"
         if not path.is_file():
             continue
-        if re.search(r"^\s*@pytest\.mark\.pure\b", path.read_text(encoding="utf-8"),
-                     re.M):
+        # Counts the decorator and a module-level `pytestmark = pytest.mark.pure` alike.
+        if pure_marker_count(path):
             offenders.append(name)
     assert not offenders, (
         f"these modules are already on the always-run allowlist, so the `pure` marker "
@@ -366,15 +365,13 @@ def test_pure_marked_tests_exist_and_are_outside_the_allowlist():
     test's module joined the allowlist, and in the second case the vacuous-pass problem
     the marker exists to avoid has been reintroduced. Either way it is worth noticing.
     """
-    import re
     from pathlib import Path
 
-    from conftest import PURE_PYTHON_TESTS
+    from conftest import PURE_PYTHON_TESTS, pure_marker_count
 
     marked = {}
     for path in sorted((Path(__file__).resolve().parent).glob("test_*.py")):
-        hits = len(re.findall(r"^\s*@pytest\.mark\.pure\b",
-                              path.read_text(encoding="utf-8"), re.M))
+        hits = pure_marker_count(path)
         if hits:
             marked[path.stem] = hits
 

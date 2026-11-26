@@ -24,7 +24,7 @@ jobs:
       matrix:
         # `requires-python = ">=3.10"` has no upper bound, so every minor it
         # admits has to be tested or the claim is not one. 3.14 was added after
-        # the suite was run against it locally: 956 passed, 499 skipped.
+        # the suite had passed on it locally.
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       # Actions are pinned to commit SHAs (supply-chain hardening); Dependabot keeps
@@ -62,12 +62,18 @@ jobs:
 
       - name: Run unit tests (pure tier only; runners have no Aseprite)
         # CI runners have no Aseprite, so the integration/golden suites are gated
-        # behind --run-aseprite (not passed here). The pure-Python unit tests
-        # (colour parsing, Lua serialization, path sandbox) always run for real.
-        run: uv run --python ${{ matrix.python-version }} pytest -q
+        # behind --run-aseprite (not passed here) and show as skips. The pure-Python
+        # unit tests (colour parsing, Lua serialization, path sandbox) always run for
+        # real. No -q here: pyproject's addopts already sets it, and a second one
+        # hides the "N passed, M skipped" line, which is the only count in the log.
+        run: uv run --python ${{ matrix.python-version }} pytest
 
       - name: Check generated tool docs are in sync
         run: uv run --python ${{ matrix.python-version }} python scripts/gen_tool_docs.py --check
+
+      # Local links, anchors and reference definitions in the Markdown. No network.
+      - name: Check documentation links
+        run: uv run --python ${{ matrix.python-version }} python scripts/check_docs.py
 
       - name: Build wheel + sdist
         run: uv build
