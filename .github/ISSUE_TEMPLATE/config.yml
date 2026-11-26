@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Client setup and troubleshooting
+    url: https://github.com/MalloyTheDev/aseprite-mcp/blob/main/docs/CLIENTS.md
+    about: Find setup steps for your MCP client and check common startup problems.
+  - name: Security reports
+    url: https://github.com/MalloyTheDev/aseprite-mcp/security/policy
+    about: Follow the security policy to report a vulnerability privately.

@@ -1,14 +1,15 @@
 # Designing a tool against headless Aseprite
 
-Every tool in this server is one run of `aseprite -b --script`. There is no window, no
-canvas, no mouse and no plugin host, and the Aseprite scripting API does not say so: parts
-of it are missing, parts return success and do nothing, two calls take the process down,
-and one writes to the real user's configuration.
+Lua-backed tools run Aseprite in a batch process with `aseprite -b --script`.
+Native CLI operations also use batch mode. Some tools calculate their results in
+Python, and some launch Aseprite more than once to read and write a sprite.
 
-This file exists so that a constraint is discovered while an idea is being sketched rather
-than three hours into implementing it. Read the table, then the section your idea lands
-in. Every claim here is marked with how it was established; see
-[What was re-verified](#what-was-re-verified-and-what-was-not) at the end.
+This page covers the scripting API in batch mode, where interactive editor APIs
+have limited support. Some calls return successfully without changing the sprite,
+some can crash the process, and preferences can persist to the user's editor
+configuration. Start with the table below and check how the relevant behaviour
+was [verified](#what-was-re-verified-and-what-was-not). For test commands and
+tool registration, see the [development guide](DEVELOPMENT.md).
 
 ## Check your idea in one pass
 

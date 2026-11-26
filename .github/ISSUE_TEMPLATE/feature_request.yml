@@ -15,7 +15,9 @@ body:
     id: shape
     attributes:
       label: What would the tool look like?
-      description: A signature and an example call, if you have one in mind.
+      description: >
+        Optional. A signature and an example call, if you have one in mind. If you do not,
+        describing the result you want is enough.
       render: python
     validations:
       required: false

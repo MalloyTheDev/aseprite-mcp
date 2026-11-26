@@ -1,281 +1,149 @@
 # Contributing to Aseprite MCP
 
-Thanks for your interest! This document covers local setup, the architecture, and
-how to add or change tools.
+Pick the route that matches what you have. Each one ends with something you can check.
 
-## Local setup
+| You are | Start with | You need |
+| --- | --- | --- |
+| A pixel artist, or anyone who uses Aseprite | [Test a workflow and report it](#route-1-test-a-workflow-and-report-it) | Aseprite and an MCP client. No code. |
+| New to the code and want a first change | [Make a first Python change](#route-2-make-a-first-python-change) | Python, Git and uv. No Aseprite. |
+| Ready to work on the engine, the tooling or client integrations | [Go deeper](#route-3-go-deeper) | Aseprite for most of it. |
+
+## Route 1: test a workflow and report it
+
+1. Set the server up with the [README](README.md#install) and your client's
+   [setup page](docs/CLIENTS.md). `health_check` should say `ok: true`.
+2. Ask your agent for something you would really make, or follow the
+   [walkthrough](docs/WALKTHROUGH.md) to call a tool yourself and check what it does.
+3. If the result is wrong, or setup is stuck, open a
+   [bug report](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=bug_report.yml).
+   The form asks for what you asked for, what you got, a preview image, and your Aseprite
+   version. Read it from Help > About in Aseprite, or from `aseprite_version` in the
+   `health_check` result. `aseprite --version` also prints it on macOS and Linux; on
+   Windows, PowerShell shows nothing unless the output is piped:
+   `& "C:/path/to/Aseprite.exe" --version | Write-Output`.
+4. Missing a tool? Describe what you are trying to make in a
+   [feature request](https://github.com/MalloyTheDev/aseprite-mcp/issues/new?template=feature_request.yml).
+
+## Route 2: make a first Python change
+
+Look for a [good first issue](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22),
+or a [help wanted](https://github.com/MalloyTheDev/aseprite-mcp/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+issue for something larger. Leave a short comment so others know you are on it. Docs fixes
+need no issue: edit the file on GitHub with the pencil icon and propose it from your fork.
+
+Fork the repository, then install [Git](https://git-scm.com/downloads) and
+[uv](https://docs.astral.sh/uv/getting-started/installation/). Replace `YOUR_USERNAME`
+with your GitHub name.
 
 ```bash
-git clone https://github.com/MalloyTheDev/aseprite-mcp.git
+git clone https://github.com/YOUR_USERNAME/aseprite-mcp.git
 cd aseprite-mcp
-uv sync                     # creates .venv and installs deps (incl. dev)
+git remote add upstream https://github.com/MalloyTheDev/aseprite-mcp.git
+git switch -c my-change
+uv sync --locked
+uv run --locked pytest tests/test_unit.py
 ```
 
-The package targets **Python 3.10+** (`requires-python = ">=3.10"`), and CI runs the whole
-headless tier on 3.10, 3.11, 3.12, 3.13 and 3.14. Anything that only works on a newer
-interpreter will fail the 3.10 job, so check the version floor before reaching for recent
-syntax.
+The last command uses Python only. It proves your setup works. Aseprite is not needed
+until you change what ends up in a sprite.
 
-> If a client is running the server out of this checkout, `uv sync` fails on Windows with
-> a "file in use" error: it has to replace `.venv\Scripts\aseprite-mcp.exe`, which the
-> live server holds open. Stop the client first.
-
-You'll also need **Aseprite 1.3+**. Point the server at it if it isn't auto-detected:
+### Check your change
 
 ```bash
-# Windows (PowerShell)
-$env:ASEPRITE_PATH = "C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe"
-# macOS / Linux
-export ASEPRITE_PATH="/Applications/Aseprite.app/Contents/MacOS/aseprite"
+uv run --locked ruff check src tests scripts
+uv run --locked pytest
+uv run --locked python scripts/gen_tool_docs.py --check
+python scripts/check_docs.py
 ```
 
-## Running the tests
+That is lint, the Python-only tests, the generated tool reference, and a check of the
+Markdown. Docs are tested like code: the tool counts in the README, links and anchors, no
+em dash characters, and the locked `uv` form of contributor commands are all checked.
 
-There are two tiers:
+The Python-only run skips tests that need Aseprite. Some tests also skip based on
+platform or fixture availability. Run `uv run --locked pytest -rs` to see the reasons.
+Compare results with a clean checkout of `main` on the same OS and Python version.
+
+### Windows: a client is running the server from your checkout
+
+If an MCP client has the server running from this same folder, `uv sync --locked`,
+`uv run --locked pytest` and the release gate can fail with "os error 32" (the file is in
+use) once `pyproject.toml` or `uv.lock` has changed, because Windows keeps
+`.venv\Scripts\aseprite-mcp.exe` locked. Either close the client, or run commands
+without a sync:
 
 ```bash
-uv run pytest                 # fast: pure-Python unit tests only (no Aseprite needed)
-uv run pytest --run-aseprite  # full: unit + Aseprite integration + golden-output tests
+uv run --no-sync pytest
 ```
 
-- **Pure-Python tests** (`tests/test_unit.py`, plus `test_properties.py`,
-  `test_limits.py`, `test_output_paths.py`, `test_oplib.py`, `test_manifest.py`, …) cover
-  colour parsing, Python→Lua serialization, the path sandbox, size limits, and the batch
-  registry, including Hypothesis property tests. They always run; this is what CI
-  exercises on every push.
-- **Integration & golden tests** drive a real Aseprite install and run only with
-  `--run-aseprite` (and require Aseprite to be found). Golden tests assert exact
-  dimensions, pixel colours, frame/layer counts, tag metadata, and exported geometry.
+To stop it happening again, launch the server from your client as
+`uv --directory /path/to/aseprite-mcp run python -m aseprite_mcp`; that does not lock the
+`.exe`. See [Choosing a launch form](docs/CLIENTS.md#2-choosing-a-launch-form).
 
-> **Adding a pure-Python test file? Add it to `PURE_PYTHON_TESTS` too.** That tuple in
-> [`tests/conftest.py`](tests/conftest.py) is an **allowlist of module names**, so a new
-> test file that needs no Aseprite is **skipped** by default, on your machine and on CI.
-> A skipped file is reported as `s` in a dot line and folded into the "N skipped" count,
-> which is indistinguishable from passing unless you go looking. Entries are whole module
-> names: `test_timing` means `tests/test_timing.py` and nothing else. The matching has
-> been got wrong in both directions before (see the comments in that file), and a test
-> that never runs is worse than no test, because it reads as coverage.
-
-> **A pure test inside an integration file? Mark it `@pytest.mark.pure`.** The allowlist
-> can only speak about whole files, and most integration files hold a few tests that need
-> no editor, typically the pre-flight refusals that assert a bad argument is rejected in
-> Python *before* Aseprite is launched. Fifty-five of those were being skipped on CI.
->
-> **Do not add a mixed file to `PURE_PYTHON_TESTS` to fix that.** It would be worse than
-> the gap: the Aseprite-backed tests in the same file would then run with no editor and
-> pass vacuously, which looks like coverage and is not. Mark the individual test instead.
->
-> Marking is safe in the direction that matters: a test marked `pure` that actually needs
-> Aseprite fails on CI immediately, because CI is precisely the environment with no
-> Aseprite in it. Check your own marking the same way before you push, by pointing
-> `ASEPRITE_PATH` at a path that does not exist and running the pure tier:
->
-> ```bash
-> ASEPRITE_PATH=/no/such/aseprite uv run --no-sync pytest
-> ```
->
-> Point it at a path that does not **exist**, not at some other file: `find_aseprite()`
-> only checks `is_file()`, so any real file makes detection *succeed* and a test asserting
-> `aseprite_found is True` then passes for a reason that will not hold on a runner.
-
-> On Windows, pytest may print a harmless `PermissionError` from an `atexit` temp-dir
-> cleanup handler *after* the run finishes. It does not affect results.
-
-## Local release gate
-
-Run the whole gate with one command:
+### Open the pull request
 
 ```bash
-uv run python scripts/release_gate.py            # runs every step below, fail-fast
+git add path/to/changed-file
+git diff --cached --check
+git commit -m "Describe the change"
+git push -u origin my-change
 ```
 
-It runs each of these in order and stops at the first failure:
+Open it into `MalloyTheDev/aseprite-mcp:main`. Link the issue, say what changes for
+users, and paste the checks you ran. For a docs fix, name the page or link you verified.
+
+To pick up new work from upstream, before you start or when a pull request needs it:
 
 ```bash
-uv run ruff check src tests scripts             # lint (the same invocation and rules as CI)
-uv run pytest                                   # pure-Python tests
-uv run pytest --run-aseprite                    # full integration + golden tests
-uv run python scripts/gen_tool_docs.py --check  # docs/TOOLS.md is in sync with the registry
-uv build                                        # wheel + sdist build
+git fetch upstream
+git switch main
+git merge --ff-only upstream/main
+git switch my-change
+git rebase main
 ```
 
-> **The gate's lint step is exactly CI's.** It runs `ruff check src tests scripts` under
-> the configured `[tool.ruff.lint]` set in `pyproject.toml` (`E`, `W`, `F`, `I`, `B`,
-> `UP`, `C4`, `SIM`, `RUF`), which is the same invocation and the same rules CI uses. The
-> gate used to pass `--select F,E9`, which *overrides* that selection and checks pyflakes
-> and syntax errors only, so an import-order or bugbear finding could clear the local gate
-> and fail CI. It no longer can.
+(GitHub's "Sync fork" button on your fork's page does the `main` part.) If the rebase
+stops on a conflict, fix the files it names, then `git add` them and `git rebase --continue`.
 
-> CI runs the pure/headless steps on every push (it has no Aseprite). The
-> `--run-aseprite` step is local-only. Pass `--skip-aseprite` to `release_gate.py` to
-> mirror CI when Aseprite isn't installed.
+## Route 3: go deeper
 
-## Cutting a release
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) covers the architecture, adding a tool, the two
+test tiers, the release gate and cutting a release. Work that changes sprite pixels,
+files or exports needs the editor tier:
 
-Written down because it had been improvised. Three of the eleven releases before 0.10.0
-carry no build artifacts while the eight before them do, for no recorded reason, and the
-whole point of a release here is that it is the only way to install a pinned version: this
-project is not published to PyPI.
-
-1. **Pass the gate on the release branch**, including `--run-aseprite`. Record the counts
-   in the pull request; CI cannot run that tier.
-2. **Regenerate and verify the showcase.** All thirteen generators in `scripts/showcase/` must
-   reproduce their committed images byte for byte. A mismatch means a tool's output moved,
-   and the cause goes in the changelog before the release, not after.
-3. **Consolidate `[Unreleased]`** in `CHANGELOG.md` into a dated `## [x.y.z]` section with
-   one `### Added` / `### Changed` / `### Fixed` each. The Unreleased block repeats those
-   headings per batch of work, which is deliberate while work is in flight and wrong in a
-   released section. Leave a fresh empty `[Unreleased]` behind.
-4. **Bump `version` in `pyproject.toml`** and say in the changelog's lead paragraph why the
-   bump is minor rather than patch, naming the observable changes that justify it.
-5. **Merge, then tag.** `main` is protected, so the bump goes through a pull request like
-   anything else. Tag the merge commit with an annotated tag whose message is a few
-   sentences on what the release is *for*, in the same voice as the changelog, with the
-   gate's numbers at the end.
-6. **Create the GitHub release from the tag, and attach the wheel and the sdist** that
-   `uv build` produced during the gate. Both, every time. Notes-only releases leave anyone
-   pinning an old version to build it themselves from a tag, which is the inconsistency
-   this step exists to end.
-
-A release page can be deleted without deleting its tag, and the changelog holds every
-version's entry regardless, so pruning the releases list costs nothing but the attached
-artifacts and their download links. Check `gh release view <tag> --json assets` before
-deleting one.
-
-## Architecture (how a tool works)
-
-```
-client → FastMCP tool (Python)  →  luagen.assemble_script  →  temp .lua
-                                        │  (ARG table + shared PRELUDE)
-                                        ▼
-                              Aseprite.exe -b --script …
-                                        │  prints @@ASEMCP:<nonce>@@<json>
-                                        ▼
-                              runner parses sentinel → dict
+```bash
+uv run --locked pytest --run-aseprite
 ```
 
-- [`src/aseprite_mcp/core/luagen.py`](src/aseprite_mcp/core/luagen.py): the Python→Lua
-  value serializer (`to_lua`) and the shared Lua **PRELUDE** (JSON encoder, colour/pixel
-  helpers, deterministic drawing primitives, AA/pixel-perfect helpers, `sprite_info`).
-- [`src/aseprite_mcp/core/runner.py`](src/aseprite_mcp/core/runner.py): `run_lua()` and
-  `run_cli()`; parses the result/error sentinels.
-- [`src/aseprite_mcp/core/config.py`](src/aseprite_mcp/core/config.py): locating Aseprite,
-  the workspace, path resolution.
-- [`src/aseprite_mcp/core/`](src/aseprite_mcp/core/): reusable, Aseprite-/MCP-free logic
-  (also `errors`, `models`, `manifest`, `oplib`, `validation`, `limits`, `paths`); importable
-  without the FastMCP app. Backwards-compatible top-level shims (`luagen`/`runner`/`config`/
-  `errors`) are preserved.
-- [`src/aseprite_mcp/tools/`](src/aseprite_mcp/tools/): one module per domain (the
-  `@mcp.tool()` layer).
+With no Aseprite found that command stops with an error, so set `ASEPRITE_PATH`. With
+Aseprite 1.3.18.6 on Windows it takes about 19 minutes, and on 2026-11-25 it ended at about
+2658 passed and 2 skipped (counts grow). The 2 skips are fixture skips for an
+untracked `workspace/` folder: `tests/test_figure.py:770` and `tests/test_ramp_lint.py:118`.
+Any other skip means something is missing.
 
-### The dependency direction is a rule, not a preference
+For the full local check, which runs lint, both tiers, the generated reference and a build,
+and prints the Aseprite version it used, run the gate. Quote that line in your pull request:
 
-**`tools/` may depend on `core/`. `core/` may depend on neither `tools/` nor the MCP SDK,
-and must not know MCP exists.**
+```bash
+uv run --locked python scripts/release_gate.py
+```
 
-`core/` is the engine: sprite operations, drawing, the pixel-art algorithms, animation
-logic, palette work, quantization, analysis, asset-export logic, Lua generation, Aseprite
-process execution, path safety, limits and typed errors. None of that is inherently about
-MCP. `tools/` is an adapter: it validates what arrived on the wire, calls `core/`, and
-serializes the result back.
+It starts by printing what it is about to test, and the line that names the editor is the
+one to quote:
 
-The point is that the engine is not trapped behind one interface. The same logic should be
-reachable from a CLI, a Python API or another integration later without the sprite code
-being rewritten, and that only stays true while the arrow points one way. The moment a
-`core/` module reaches for a tool or for the SDK, MCP stops being an interface to the
-engine and becomes the place the engine lives.
+```text
+release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
+```
 
-Enforced, not just stated, by
-`tests/test_imports.py::test_core_does_not_import_mcp_app_or_tools`. It imports every
-module under `core/` in a **clean interpreter** and asserts that `aseprite_mcp.app`,
-`mcp.server` and every `aseprite_mcp.tools.*` are absent from `sys.modules` afterwards, so
-an *indirect* import by way of some module that itself pulls in the SDK fails too, which a
-scan of the source text would miss. The module list is **discovered from the filesystem**
-rather than written down: it used to be a hand-written nine against a `core/` of
-twenty-eight, and the nineteen it missed were the ones added after the list, because a list
-leaves every later module outside the guard by default.
+Each step then reports its own result, for example
+`ok (48.4s): <passed> passed, <skipped> skipped`, and the summary at the end lists every
+step as PASS, FAIL or SKIP. With no editor the gate
+stops before any step, with a message that says to set `ASEPRITE_PATH` or pass
+`--skip-aseprite`. That flag runs only what CI runs, and the summary then says plainly that
+the editor tier was not run. The gate includes `scripts/check_docs.py`, the Markdown check
+CI runs, which also runs on its own in a second.
 
-Two consequences worth knowing before they surprise you. `core/` may not import `tools/`
-even to share a constant, which is why `core/manifest.py` repeats the harness key set that
-`tools/common.py` also holds, with a test pinning the two against each other rather than
-one importing the other. And a helper that needs a `@mcp.tool()` decorator belongs in
-`tools/`, however algorithmic it looks.
-
-## Adding a tool
-
-> **Check the idea against [`docs/HEADLESS.md`](docs/HEADLESS.md) first.** Every tool is
-> one `aseprite -b --script` run, and the scripting API does not advertise what that
-> costs: `Dialog` is a constructor that builds `nil`, `app.transform` does not exist,
-> `Rotate{target="mask"}` and the UI commands return success and do nothing, two
-> `app.useTool` calls take the process down with no file written, and `app.preferences`
-> writes land in the GUI configuration of the person running the server. That file has
-> the full list, which workaround each constraint forced, and the code that implements it,
-> so a tool that cannot work is ruled out in one pass rather than after it is written.
-
-1. Pick (or create) the right module in `src/aseprite_mcp/tools/`.
-2. Write the function, decorate with `@mcp.tool()`, and add a clear docstring (it
-   becomes the tool description the model sees, so document every argument).
-3. Build a Lua **body** that uses the prelude helpers (`open_sprite`, `find_layer`,
-   `to_pixel`, `get_draw_image`/`commit_image`, `sprite_info`, …), set the `RESULT`
-   table, and call `run_lua(body, args)`. For drawing-style edits, reuse the
-   `_OPEN`/`_CLOSE` harness in `tools/drawing.py`. For exports/preview, use `run_cli`.
-4. If you created a new module, import it in
-   [`src/aseprite_mcp/server.py`](src/aseprite_mcp/server.py) so its tools register.
-5. Add a test in `tests/`. If it needs no Aseprite, add its module name to
-   `PURE_PYTHON_TESTS` in `tests/conftest.py` or it will be silently skipped
-   (see [Running the tests](#running-the-tests)).
-6. Regenerate the tool reference:
-
-   ```bash
-   uv run python scripts/gen_tool_docs.py
-   ```
-
-### Conventions
-
-- Frames are **1-based**; palette indices are **0-based**.
-- **Put the judgement in `core/`, keep the Lua thin.** Anything that decides something
-  (geometry, ramps, timing, validation, path policy) belongs in a `core/` module that
-  imports neither Aseprite nor MCP, so CI can test it on a runner with no editor
-  installed. `tools/` should be the `@mcp.tool()` wrapper plus the Lua body that applies
-  the decision. A rule that only exists inside a Lua string can only be tested by
-  launching Aseprite, which puts it in the `--run-aseprite` tier that CI never reaches.
-- **Every parameter must advertise one concrete wire type.** A bare `x: int | None = None`
-  serializes as a nullable `anyOf` with pydantic `title` noise, which strict
-  function-calling clients mishandle, so the registration pass collapses it to a single
-  `type` and restates the default in the parameter's `description`. If a tool needs to
-  accept two shapes (an object or a JSON-looking string, say), widen the *behaviour* with
-  a `BeforeValidator` and keep the declared type concrete. `tests/test_schema_portability.py`
-  asserts this across the whole registry, so adding a tool is what reintroduces the
-  problem and what catches it.
-- Accept colours as flexible strings and parse with `tools/common.parse_color`.
-- Resolve user paths with `tools/common.resolve_path` (relative → workspace).
-- Pass paths to Lua via `tools/common.lua_path` (forward slashes).
-- Keep operations deterministic and headless: no GUI/persistent-state assumptions. What
-  is actually unavailable, silently inert or outright fatal under `-b`, and what each
-  constraint forced instead, is in [`docs/HEADLESS.md`](docs/HEADLESS.md).
-- Raise **typed errors** from `errors.py` at boundaries: `AsepriteNotFoundError` /
-  `WorkspaceError` (config & path sandbox), `LuaToolError` (a Lua body failed),
-  `AsepriteCLIError` / `ExportError` (CLI/export), `AsepriteTimeoutError` (timeout).
-  All subclass `AsepriteMCPError`, aliased as `AsepriteError` for backwards
-  compatibility (`from aseprite_mcp.runner import AsepriteError` still works and still
-  catches every aseprite-mcp error).
-- **Workflow tools** (high-level scaffolding in `tools/workflow.py`) must return a
-  `workflow_manifest.v1` object built with the helpers in `core/manifest.py`
-  (`workflow_manifest`, `file_entry`, `export_entry`, `sprite_summary`); don't hand-roll
-  a bespoke result dict. Add the `kind`/roles to `core/manifest.py` if you need new ones.
-
-## Pull requests
-
-- Keep changes focused and include tests where practical.
-- Before submitting, run what CI runs, so a lint or docs failure costs you a minute rather
-  than a round trip:
-
-  ```bash
-  uv run ruff check src tests scripts
-  uv run pytest
-  uv run python scripts/gen_tool_docs.py --check   # or drop --check to regenerate
-  ```
-
-- Never hand-edit `docs/TOOLS.md`; it is generated from the tool docstrings by
-  `scripts/gen_tool_docs.py`, and the `--check` step above fails if it has drifted.
-- Describe what you changed and why.
+Other places to start: [client setup](docs/CLIENTS.md), [Headless Aseprite](docs/HEADLESS.md),
+the [showcase generators](scripts/showcase/README.md), and the
+[tool reference](docs/TOOLS.md). Report a security issue privately, as the
+[security policy](SECURITY.md) describes.
