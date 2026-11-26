@@ -32,6 +32,41 @@ uv run --no-sync python scripts/showcase/smear.py      # smear_stages.png, smear
 uv run --no-sync python scripts/showcase/golem.py      # golem.png             -> docs/assets/showcase/
 ```
 
+**Before you run them.** `uv run --no-sync` installs nothing, so build the environment once
+first with `uv sync --locked` from the repository root. The scripts need a real Aseprite
+(set `ASEPRITE_PATH` if it is not found). The `export` line above is for bash and zsh. In
+Windows PowerShell, set the workspace like this and run the same `uv run --no-sync python
+scripts/showcase/<name>.py` lines:
+
+```powershell
+$env:ASEPRITE_MCP_WORKSPACE = "$env:TEMP\showcase"
+```
+
+`golem_figure.py` is not a generator. It holds the golem's figure, hand-placed one
+character per pixel, and `golem.py` imports it; run `golem.py` to produce the image.
+
+To check that every committed image still reproduces, run
+[`scripts/verify_showcase.py`](../verify_showcase.py). It runs the generators into an empty
+workspace and compares each published file with the committed one, instead of making you
+hash them by hand.
+
+```bash
+uv run --locked python scripts/verify_showcase.py
+uv run --locked python scripts/verify_showcase.py --only items walk
+```
+
+It takes about 3.5 minutes and runs all 13 generators into a temporary workspace that is
+deleted afterwards (`--workspace DIR` keeps the output in an empty directory you name,
+`--only` limits the run to the generators you list). It compares the SHA-256 of each of the
+18 published images with the copy at `HEAD`. It exits 0 when all are identical, 1 on any
+difference, missing output or generator failure, and 2 when no editor is found or the
+workspace is not empty. A match ends with:
+
+```text
+verify-showcase: 18 identical, 0 different, 0 missing of 18 published files; 0 generator(s) failed. Aseprite: Aseprite 1.3.18.6-x64
+verify-showcase: PASS
+```
+
 Note that two of them are renamed on the way in, and that `skeleton.py` lands in
 `assets/` at the repository root rather than in `docs/assets/showcase/`. `tiles.py`
 publishes nothing: its scene was four tiles with no transition pieces, which makes the

@@ -110,6 +110,10 @@ def _articulated(s: Sample) -> bool:
     # containing no figure. Keeping this in step with that one is what the consistency
     # test in test_metric_validation exists to enforce, and it is how the gutter clause
     # was found to be missing from this copy.
+    #
+    # The corpus is scored as `quality.readings` scores by default, with subject
+    # "character". Under "prop" that gate is never open, so a prop has no articulation
+    # to mirror; the consistency test pins this copy against the default only.
     rows = s.metrics.get("row_structure") or {}
     if rows.get("gutters", 0):
         return False

@@ -243,9 +243,11 @@ a text-only model cannot read. This answers the question in between: is the art 
 good, in the ways that can be counted.
 
 Reports how many colours are in use and roughly how many ramps they form, pixels with
-no neighbour of their own colour (noise), jagged corners on diagonals, the drawn
-bounding box, how much of the canvas it fills, whether it sits centred, and how far
-the silhouette is from its own mirror.
+no neighbour of their own colour above, below or to either side (noise, though a
+diagonal dither counts too and `remove_stray_pixels` rightly leaves it alone), jagged
+corners on diagonals (which `normalize_edge_runs` may decline, as it does a sawtooth
+of consecutive one-pixel runs), the drawn bounding box, how much of the canvas it
+fills, whether it sits centred, and how far the silhouette is from its own mirror.
 
 It also reports five things about whether the drawing has *form*, which were added
 because every measurement above passed on a figure that read as one grey slab:
@@ -273,7 +275,13 @@ has no silhouette) and for art using fewer than three colours (a flat shape is n
 surface without form), because a reading that cannot be acted on is noise.
 
 Each measurement that is worth acting on comes back with a line saying why, so the
-numbers do not have to be interpreted.
+numbers do not have to be interpreted. Every line is in `readings`, and each is also
+in exactly one of `defects` or `observations`, in the same order. A *defect* is a
+reading that scored as a fault against sprites known to be good and bad (an absent
+keyline on a figure of several masses, or a pixel off a declared ramp), and it is
+what `export_game_asset_bundle` refuses on. Everything else, including the palette,
+ramp, colour-vision and tiling notes, is an *observation*: worth a look, not a
+verdict. Neither tier says the art is good.
 
 Args:
     ramp: Declare the ramp the art should be on and the report adds palette
@@ -295,6 +303,12 @@ Args:
         vision deficiency, and report where two colours that are distinct to most
         viewers collapse into one. Off by default because it is the one measurement
         here that costs about half again as much as everything else at the size cap.
+    subject: "character" (the default) or "prop". The limb and keyline readings
+        find several masses in a waist, which on a vase, a lantern or a bottle is the
+        object's shape; "prop" drops those readings, so an object is not told to
+        separate limbs it does not have or refused for a keyline between masses it
+        does not have. Everything else is judged the same, off-ramp pixels and
+        canvas-border contact included. Anything else is refused before launch.
 
 Reads the whole frame in one Aseprite launch. None of the pixels are returned, only
 the measurements, so this is cheap to call after every pass.
@@ -308,6 +322,7 @@ the measurements, so this is cheap to call after every pass.
 | `check_tiling` | boolean | no | False |
 | `standing` | boolean | no | False |
 | `check_cvd` | boolean | no | False |
+| `subject` | string | no | character |
 
 
 ### `diff_sprites`
@@ -2981,7 +2996,10 @@ pixels, two pixels, two pixels, held steady, and broken only on purpose. A gener
 one wanders, runs of 3, 1, 2, 1, 4 where a person would have drawn 2, 2, 2, 2, and
 that wander is the most recognisable tell in generated pixel art, ahead of both colour
 and shading. `assess_sprite` already counts it as `jaggy_corners`, which on a boundary
-stepping one way is exactly the number of steps; this is what to do about the count.
+stepping one way is exactly the number of steps; this is what to do about the count
+when the wander is a lone short run. It is not a fix for every jagged-corner reading:
+consecutive one-pixel runs are declined, so a sawtooth edge that steps out and back a
+pixel at a time can fire that reading and leave this with nothing to merge.
 
 What it changes is narrow on purpose: a run of **exactly one**, with a run of at least
 two on either side, stepping the same way on both sides, by exactly one pixel each
@@ -3039,8 +3057,13 @@ Replace pixels that have no neighbour of their own colour with the colour around
 
 A stray pixel is one whose eight neighbours are all a different colour. They are what
 a shading pass leaves behind at a band boundary, and at any zoom they read as dirt
-rather than as texture. `assess_sprite` counts them as `isolated_pixels`; this is what
-to do about the count.
+rather than as texture.
+
+This is not the inverse of `assess_sprite`'s `isolated_pixels`, which counts a pixel
+with no same-colour neighbour above, below or to either side and so counts every
+pixel of a diagonal dither. The strays here are the subset of those with no
+same-colour neighbour diagonally either, so on dithered art this can report nothing
+replaced while that count stays high, and that is the dither being left alone.
 
 Each stray takes the most common colour among its opaque neighbours, so **no new
 colour can appear**: the result uses a subset of the colours already there, and art on
@@ -4459,6 +4482,11 @@ Args:
     allow_defects: Bundle even when the assessment finds a defect (default False).
         The defects are then the manifest's `warnings`, and `assessment.waived` is
         true.
+    subject: "character" (the default) or "prop", as `assess_sprite` takes it. A
+        prop is not given the limb or keyline readings, so a vase or a lantern whose
+        narrowings are its shape is not refused for a missing keyline between masses
+        it does not have; a pixel off `ramp` still refuses it. Anything else is
+        refused before anything is launched or written.
 
 Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
 disk as manifest.json inside the bundle).
@@ -4471,6 +4499,7 @@ disk as manifest.json inside the bundle).
 | `overwrite` | boolean | no | False |
 | `ramp` | array<string> | no | _none_ |
 | `allow_defects` | boolean | no | False |
+| `subject` | string | no | character |
 
 
 ### `make_4_frame_idle_animation`

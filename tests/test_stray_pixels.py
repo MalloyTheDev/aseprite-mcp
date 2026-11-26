@@ -163,3 +163,24 @@ def test_a_stray_next_to_real_art_is_still_replaced(request):
     assert result["replaced"] == 1
     rows = inspect.get_pixels(name, 0, 0, 16, 16)["pixels"]
     assert rows[5][5] != "#ff00ffff", "the stray inside the art was not cleaned"
+
+
+def test_a_dither_band_is_counted_isolated_and_left_alone(request):
+    """The pairing the readings used to imply and the tools do not have. `isolated_pixels`
+    counts orthogonally, so every pixel of a diagonal dither is in it; this tool looks in
+    all eight directions, so it replaces none of them. The reading has to say both."""
+    name = _block(request)
+    drawing.draw_pixels(name, [{"x": x, "y": y} for y in range(6, 10) for x in range(2, 14)
+                               if (x + y) % 2 == 0], RAMP[3])
+    report = inspect.assess_sprite(name)
+    assert report["metrics"]["isolated_pixels"] > 0
+    hits = [r for r in report["readings"] if "neighbour of their own colour" in r]
+    assert len(hits) == 1, report["readings"]
+    assert "diagonal dither counts here" in hits[0]
+    assert "remove_stray_pixels leaves it alone" in hits[0]
+    assert hits[0] in report["observations"]
+
+    result = effects.remove_stray_pixels(name)
+
+    assert result["replaced"] == 0
+    assert _metrics(name)["isolated_pixels"] == report["metrics"]["isolated_pixels"]

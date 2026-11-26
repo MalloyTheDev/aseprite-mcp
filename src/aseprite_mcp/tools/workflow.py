@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ..app import mcp
-from ..core import indexed, validation
+from ..core import indexed, quality, validation
 from ..core.errors import ExportError, ValidationFailed
 from ..core.limits import (
     MAX_BATCH_OPERATIONS,
@@ -247,6 +247,7 @@ def export_game_asset_bundle(
     overwrite: bool = False,
     ramp: list[str] | None = None,
     allow_defects: bool = False,
+    subject: str = "character",
 ) -> dict:
     """Export a sprite into a game-ready bundle directory: a flattened PNG, an animated
     GIF, a packed sprite sheet (+ JSON data), a GIF per animation tag, and a
@@ -275,10 +276,16 @@ def export_game_asset_bundle(
         allow_defects: Bundle even when the assessment finds a defect (default False).
             The defects are then the manifest's `warnings`, and `assessment.waived` is
             true.
+        subject: "character" (the default) or "prop", as `assess_sprite` takes it. A
+            prop is not given the limb or keyline readings, so a vase or a lantern whose
+            narrowings are its shape is not refused for a missing keyline between masses
+            it does not have; a pixel off `ramp` still refuses it. Anything else is
+            refused before anything is launched or written.
 
     Returns a ``workflow_manifest.v1`` manifest (the same object is also written to
     disk as manifest.json inside the bundle).
     """
+    quality.check_subject(subject)
     if ramp:
         # Refused before anything is launched, as every tool that takes a ramp refuses one.
         check_list_length("ramp", ramp, MAX_COLOR_LIST_LENGTH)
@@ -305,7 +312,7 @@ def export_game_asset_bundle(
 
     assessment = inspect.assess_frames(filename, frame_count=info["frameCount"],
                                        width=info["width"], height=info["height"],
-                                       ramp=ramp)
+                                       ramp=ramp, subject=subject)
     # On an indexed sprite whose palette cannot hold the ramp exactly, pixels off it are
     # the palette's doing rather than the shading's, so that reading travels with them.
     palette_notes = indexed.ramp_readings(assessment.pop("ramp_on_palette", None) or {})

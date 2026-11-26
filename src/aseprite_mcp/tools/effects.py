@@ -1592,8 +1592,13 @@ def remove_stray_pixels(
 
     A stray pixel is one whose eight neighbours are all a different colour. They are what
     a shading pass leaves behind at a band boundary, and at any zoom they read as dirt
-    rather than as texture. `assess_sprite` counts them as `isolated_pixels`; this is what
-    to do about the count.
+    rather than as texture.
+
+    This is not the inverse of `assess_sprite`'s `isolated_pixels`, which counts a pixel
+    with no same-colour neighbour above, below or to either side and so counts every
+    pixel of a diagonal dither. The strays here are the subset of those with no
+    same-colour neighbour diagonally either, so on dithered art this can report nothing
+    replaced while that count stays high, and that is the dither being left alone.
 
     Each stray takes the most common colour among its opaque neighbours, so **no new
     colour can appear**: the result uses a subset of the colours already there, and art on
@@ -1938,7 +1943,10 @@ def normalize_edge_runs(
     one wanders, runs of 3, 1, 2, 1, 4 where a person would have drawn 2, 2, 2, 2, and
     that wander is the most recognisable tell in generated pixel art, ahead of both colour
     and shading. `assess_sprite` already counts it as `jaggy_corners`, which on a boundary
-    stepping one way is exactly the number of steps; this is what to do about the count.
+    stepping one way is exactly the number of steps; this is what to do about the count
+    when the wander is a lone short run. It is not a fix for every jagged-corner reading:
+    consecutive one-pixel runs are declined, so a sawtooth edge that steps out and back a
+    pixel at a time can fire that reading and leave this with nothing to merge.
 
     What it changes is narrow on purpose: a run of **exactly one**, with a run of at least
     two on either side, stepping the same way on both sides, by exactly one pixel each

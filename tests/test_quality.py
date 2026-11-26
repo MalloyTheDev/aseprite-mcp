@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pytest
 
+import corpus
 from aseprite_mcp.core import quality
+from aseprite_mcp.core.errors import ValidationFailed
 
 T = "#00000000"
 
@@ -574,3 +576,207 @@ def test_frame_findings_splits_the_tiers_exactly_as_readings_does() -> None:
         fused, **size, tier=quality.DEFECT)
     assert [o["reading"] for o in found["observations"]] == quality.readings(
         fused, **size, tier=quality.OBSERVATION)
+
+
+# --- defects and observations, and what the subject is ------------------------------
+# `assess_sprite` returns `defects` and `observations` beside `readings`, so a caller can
+# gate on one and show the other. They are only safe to gate on if they are the same
+# lines: every reading in exactly one tier, each tier in reading order.
+
+
+def _is_partition(lines: list[str], defects: list[str], observations: list[str]) -> bool:
+    """True when `lines` is exactly `defects` and `observations` interleaved, in order."""
+    d = o = 0
+    for line in lines:
+        if d < len(defects) and defects[d] == line:
+            d += 1
+        elif o < len(observations) and observations[o] == line:
+            o += 1
+        else:
+            return False
+    return d == len(defects) and o == len(observations)
+
+
+_LIT, _MID, _FOOT = "#c8c8c8", "#787878", "#303030"
+
+
+def _turned(widths: list[int], *, top: int = 8, size: int = 32) -> quality.Grid:
+    """A lathe-turned object, one centred row per width: lit on top, a dark foot, and no
+    keyline, which is how a pot or a lantern is often drawn and is not a fault in one."""
+    g = [[T] * size for _ in range(size)]
+    for i, width in enumerate(widths):
+        colour = _FOOT if i == len(widths) - 1 else _LIT if i < 3 else _MID
+        x0 = (size - width) // 2
+        for x in range(x0, x0 + width):
+            g[top + i][x] = colour
+    return g
+
+
+# Single objects whose outline goes in and out again. Each has a waist and no row with
+# background in it, which is exactly what the limb and keyline readings take for a figure.
+PROPS = {
+    "vase": [6, 8, 8, 6, 4, 4, 6, 10, 14, 16, 16, 16, 14, 12, 10, 8],
+    "lantern": [4, 10, 10, 6, 12, 14, 14, 14, 14, 12, 6, 10, 10, 8],
+    "peanut": [6, 10, 12, 12, 10, 6, 4, 6, 10, 14, 16, 16, 14, 10, 6],
+}
+# Convex, or narrowing only once: never articulated, so the subject changes nothing.
+CONTROLS = {
+    "disc": [6, 10, 12, 14, 14, 16, 16, 16, 16, 14, 14, 12, 10, 6],
+    "bottle": [4, 4, 4, 4, 6, 10, 12, 12, 12, 12, 12, 12, 12, 12, 10],
+}
+
+
+def _constructed() -> list[tuple[str, quality.Grid, list[str] | None]]:
+    off_ramp = _turned(PROPS["vase"])
+    off_ramp[16][16] = "#ff0080"
+    return [
+        *((name, _turned(w), None) for name, w in {**PROPS, **CONTROLS}.items()),
+        ("joined_thin_keyline", _joined_figure(1), None),
+        ("joined_banded_keyline", _joined_figure(6), None),
+        ("vase_off_ramp", off_ramp, [_LIT, _MID, _FOOT]),
+        ("vase_on_border", _turned(PROPS["vase"], top=0), [_LIT, _MID, _FOOT]),
+        ("empty", [[T] * 32 for _ in range(32)], None),
+    ]
+
+
+@pytest.mark.parametrize("subject", ["character", "prop"])
+def test_defects_and_observations_partition_the_readings(subject) -> None:
+    """Over the whole corpus and the constructed cases, under both subjects."""
+    c = corpus.build()
+    cases = [(s.name, s.metrics, s.width, s.height)
+             for s in list(c.good) + list(c.known_bad) + list(c.mutants)]
+    cases += [(name, quality.score(g, ramp), len(g[0]), len(g))
+              for name, g, ramp in _constructed()]
+    both_tiers = False
+    for name, metrics, width, height in cases:
+        size = {"width": width, "height": height, "subject": subject}
+        split = quality.by_tier(quality.tiered_readings(metrics, **size))
+        assert split["readings"] == quality.readings(metrics, **size), name
+        assert split["defects"] == quality.readings(metrics, **size, tier=quality.DEFECT)
+        assert split["observations"] == quality.readings(metrics, **size,
+                                                         tier=quality.OBSERVATION)
+        assert _is_partition(split["readings"], split["defects"], split["observations"]), (
+            name, split)
+        both_tiers |= bool(split["defects"]) and bool(split["observations"])
+    assert both_tiers, "no case had a reading in each tier, so the interleaving is untested"
+
+
+def test_the_partition_check_rejects_a_reordered_or_duplicated_split() -> None:
+    lines = ["a", "b", "c"]
+    assert _is_partition(lines, ["b"], ["a", "c"])
+    assert not _is_partition(lines, ["b"], ["c", "a"])
+    assert not _is_partition(lines, ["b", "b"], ["a", "c"])
+    assert not _is_partition(lines, [], ["a", "c"])
+
+
+@pytest.mark.parametrize("name", sorted(PROPS))
+def test_a_prop_is_not_told_to_separate_limbs_or_given_a_keyline_defect(name) -> None:
+    metrics = quality.score(_turned(PROPS[name]))
+    rows = metrics["row_structure"]
+    assert rows["waists"] >= 1 and rows["rows_with_air"] == 0, rows
+    size = {"width": 32, "height": 32}
+
+    as_character = quality.readings(metrics, **size)
+    assert [r for r in as_character if "masses have fused" in r], as_character
+    assert [r for r in quality.readings(metrics, **size, tier=quality.DEFECT)
+            if "keyline" in r], "the fixture no longer draws the keyline defect"
+
+    as_prop = quality.readings(metrics, **size, subject="prop")
+    assert not [r for r in as_prop if "fused" in r or "darkest colour" in r], as_prop
+    assert quality.readings(metrics, **size, tier=quality.DEFECT, subject="prop") == []
+    # Nothing else moved: the prop's readings are the character's minus those two.
+    assert as_prop == [r for r in as_character
+                       if "masses have fused" not in r and "darkest colour" not in r]
+
+
+@pytest.mark.parametrize("name", sorted(CONTROLS))
+def test_a_convex_object_reads_the_same_under_either_subject(name) -> None:
+    metrics = quality.score(_turned(CONTROLS[name]))
+    assert metrics["row_structure"]["waists"] == 0, metrics["row_structure"]
+    size = {"width": 32, "height": 32}
+    assert (quality.tiered_readings(metrics, **size, subject="prop")
+            == quality.tiered_readings(metrics, **size, subject="character"))
+
+
+def test_omitting_the_subject_is_the_character_subject() -> None:
+    c = corpus.build()
+    grids = [(s.metrics, s.width, s.height) for s in list(c.good) + list(c.known_bad)]
+    grids += [(quality.score(g, ramp), 32, 32) for _name, g, ramp in _constructed()]
+    for metrics, width, height in grids:
+        size = {"width": width, "height": height}
+        assert (quality.tiered_readings(metrics, **size)
+                == quality.tiered_readings(metrics, **size, subject="character"))
+        for tier in (None, quality.DEFECT, quality.OBSERVATION):
+            assert (quality.readings(metrics, **size, tier=tier)
+                    == quality.readings(metrics, **size, tier=tier, subject="character"))
+    per_frame = [(1, quality.score(_joined_figure(1))), (2, quality.score(_turned(PROPS["vase"])))]
+    assert (quality.frame_findings(per_frame, width=32, height=32)
+            == quality.frame_findings(per_frame, width=32, height=32, subject="character"))
+
+
+def test_a_prop_still_reports_border_contact_and_off_ramp_pixels() -> None:
+    ramp = [_LIT, _MID, _FOOT]
+    clipped = quality.score(_turned(PROPS["vase"], top=0), ramp)
+    assert clipped["edge_contact"] > 0
+    lines = quality.readings(clipped, width=32, height=32, subject="prop")
+    assert [r for r in lines if "canvas border" in r], lines
+
+    stray = _turned(PROPS["vase"])
+    stray[16][16] = "#ff0080"
+    metrics = quality.score(stray, ramp)
+    defects = quality.readings(metrics, width=32, height=32, tier=quality.DEFECT,
+                               subject="prop")
+    assert defects == [r for r in defects if "off the declared ramp" in r] and defects, defects
+
+
+def test_the_frame_findings_gate_uses_the_subject() -> None:
+    per_frame = [(1, quality.score(_turned(PROPS["lantern"])))]
+    character = quality.frame_findings(per_frame, width=32, height=32)
+    prop = quality.frame_findings(per_frame, width=32, height=32, subject="prop")
+    assert [d for d in character["defects"] if "keyline" in d["reading"]]
+    assert prop["defects"] == []
+
+
+@pytest.mark.parametrize("subject", ["tile", "Character", "", "props"])
+def test_an_unknown_subject_is_refused_by_name(subject) -> None:
+    metrics = quality.score(_turned(PROPS["vase"]))
+    for call in (
+        lambda: quality.readings(metrics, width=32, height=32, subject=subject),
+        lambda: quality.frame_findings([(1, metrics)], width=32, height=32, subject=subject),
+        lambda: quality.check_subject(subject),
+    ):
+        with pytest.raises(ValidationFailed) as excinfo:
+            call()
+        assert '"character"' in str(excinfo.value) and '"prop"' in str(excinfo.value)
+
+
+def test_the_isolated_pixel_reading_says_what_it_counts() -> None:
+    """A diagonal dither is isolated by this count and is not dirt, and the reading has to
+    say so: it named the count as noise, and the tool it pointed at leaves a dither alone."""
+    g = [[T] * 32 for _ in range(32)]
+    for y in range(8, 24):
+        for x in range(8, 24):
+            g[y][x] = "#787878" if (x + y) % 2 else "#c8c8c8"
+    metrics = quality.score(g)
+    assert metrics["isolated_pixels"] > quality.NOISY_ISOLATED
+    hits = [r for r in quality.readings(metrics, width=32, height=32)
+            if "neighbour of their own colour" in r]
+    assert len(hits) == 1, hits
+    assert "above, below or to either side" in hits[0]
+    assert "diagonal dither counts here" in hits[0]
+    assert "remove_stray_pixels leaves it alone" in hits[0]
+    assert "eight directions" in hits[0]
+
+
+def test_the_jagged_reading_does_not_promise_normalize_edge_runs_will_act() -> None:
+    g = [[T] * 24 for _ in range(24)]
+    for y in range(2, 22):
+        out = y % 2
+        for x in range(6 - out, 18 + out):
+            g[y][x] = "#787878" if y > 4 else "#c8c8c8"
+    metrics = quality.score(g)
+    hits = [r for r in quality.readings(metrics, width=24, height=24)
+            if "jagged corners" in r]
+    assert len(hits) == 1, (metrics["jaggy_corners"], hits)
+    assert "normalize_edge_runs" in hits[0] and "sawtooth" in hits[0]
+    assert "declines consecutive one-pixel runs" in hits[0]
