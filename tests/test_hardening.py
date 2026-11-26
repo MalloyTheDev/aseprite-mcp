@@ -792,6 +792,32 @@ def test_uv_lock_records_the_version_in_pyproject():
     )
 
 
+def test_the_package_reports_the_version_in_pyproject():
+    """`__version__` is a literal, and `health_check` and the release gate header both
+    print it. v0.10.0 shipped with it still saying 0.9.0, so a bug report that quoted
+    `health_check` named a release the reporter was not on.
+    """
+    import re
+
+    import aseprite_mcp
+
+    pyproject = (_repo_root() / "pyproject.toml").read_text(encoding="utf-8")
+    declared = re.search(r'(?m)^version = "([^"]+)"', pyproject)
+    assert declared, "could not find the project version in pyproject.toml"
+    assert aseprite_mcp.__version__ == declared.group(1), (
+        f"pyproject.toml says {declared.group(1)} and src/aseprite_mcp/__init__.py says "
+        f"{aseprite_mcp.__version__}; they are bumped together"
+    )
+
+
+def test_the_server_tells_clients_the_same_version():
+    """The handshake carries a server version too. Left unset it reaches a client as an
+    empty string, which is a third answer to "which version is this"."""
+    import aseprite_mcp
+
+    assert mcp.version == aseprite_mcp.__version__
+
+
 def test_ci_installs_from_the_committed_lock():
     """Without `--locked`, `uv sync` updates the lock when pyproject has moved on, so a
     PR that loosens a constraint is tested against versions nobody reviewed and the
