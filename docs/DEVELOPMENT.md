@@ -266,11 +266,11 @@ release-gate: python 3.12.13 | <package version> | ...\src\aseprite_mcp
 release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
 ```
 
-Each step prints a line such as `ok (48.4s): 1814 passed, 846 skipped` (counts grow, so do
-not compare against this page), and the closing summary has one row per step:
+Each step prints a line such as `ok (48.4s): <passed> passed, <skipped> skipped`, with the
+counts for your OS and Python version, and the closing summary has one row per step:
 
 ```text
-  PASS  pure tests (pytest) (48.4s): 1814 passed, 846 skipped
+  PASS  pure tests (pytest) (48.4s): <passed> passed, <skipped> skipped
 ```
 
 The editor step also fails if any test was skipped for want of an editor, or if nothing

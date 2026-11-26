@@ -60,10 +60,9 @@ That is lint, the Python-only tests, the generated tool reference, and a check o
 Markdown. Docs are tested like code: the tool counts in the README, links and anchors, no
 em dash characters, and the locked `uv` form of contributor commands are all checked.
 
-The Python-only tier passes with several hundred tests skipped. Those are the ones that
-need Aseprite, and they are not a problem on a fresh clone. At the time of writing
-(November 2026) it reports about 1814 passed and 846 skipped; the counts grow as tests
-are added, so compare against a clean checkout of `main`, not against this page.
+The Python-only run skips tests that need Aseprite. Some tests also skip based on
+platform or fixture availability. Run `uv run --locked pytest -rs` to see the reasons.
+Compare results with a clean checkout of `main` on the same OS and Python version.
 
 ### Windows: a client is running the server from your checkout
 
@@ -136,8 +135,9 @@ one to quote:
 release-gate: aseprite C:\Program Files (x86)\Steam\steamapps\common\Aseprite\Aseprite.exe (Aseprite 1.3.18.6-x64)
 ```
 
-Each step then reports its own result, for example `ok (48.4s): 1814 passed, 846 skipped`,
-and the summary at the end lists every step as PASS, FAIL or SKIP. With no editor the gate
+Each step then reports its own result, for example
+`ok (48.4s): <passed> passed, <skipped> skipped`, and the summary at the end lists every
+step as PASS, FAIL or SKIP. With no editor the gate
 stops before any step, with a message that says to set `ASEPRITE_PATH` or pass
 `--skip-aseprite`. That flag runs only what CI runs, and the summary then says plainly that
 the editor tier was not run. The gate includes `scripts/check_docs.py`, the Markdown check
