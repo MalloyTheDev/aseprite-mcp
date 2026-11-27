@@ -65,8 +65,9 @@ def validate_asset_spec(spec: dict) -> dict:
     would produce fits one build. `name` may already carry a `.aseprite`/`.ase`
     extension: it is normalised, not doubled, so `hero` and `hero.aseprite` name the same
     file. Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
-    `{passed, checks, errors, warnings}`. This does **not** check a finished sprite against
-    the spec - that's a separate future tool.
+    `{passed, checks, errors, warnings}`. `validation.passed` is the verdict;
+    `ok` just means the check ran. To check a finished sprite against the spec, use
+    `validate_asset_against_spec`.
     """
     report = validate_spec(spec)
     actions = (
@@ -89,7 +90,8 @@ def plan_asset_spec(spec: dict) -> dict:
     The pure dry-run: each step is ``{tool, args, purpose}`` naming the existing tool that
     `build_asset_from_spec` would call. Returns a ``workflow_manifest.v1`` (kind
     ``asset_spec``) with the steps under `plan` and `dry_run=true`. If the spec is invalid,
-    returns the validation report instead.
+    returns the validation report instead. In that report, `validation.passed` is the
+    verdict; `ok` just means the check ran.
     """
     report = validate_spec(spec)
     if not report["passed"]:
