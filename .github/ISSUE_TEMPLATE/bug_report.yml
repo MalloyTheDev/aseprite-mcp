@@ -54,11 +54,11 @@ body:
     attributes:
       label: Aseprite MCP release tag or commit
       description: >
-        The release you installed, such as v0.10.0. If you cloned the repository, run
-        `git rev-parse --short HEAD` in the folder and paste the result. Do not copy the
-        version from `health_check`: it does not follow the release (it reports 0.9.0 for
-        0.10.0).
-      placeholder: "v0.10.0, or a short commit hash"
+        The release you installed, such as v0.11.0. If you cloned the repository, run
+        `git rev-parse --short HEAD` in the folder and paste the result. The version from
+        `health_check` is not enough for a clone: `main` reports the latest release's
+        version until the next one is cut (and v0.10.0 reported 0.9.0).
+      placeholder: "v0.11.0, or a short commit hash"
     validations:
       required: false
   - type: textarea
