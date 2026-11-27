@@ -4156,8 +4156,10 @@ Produces three files: a packed PNG sprite sheet, its JSON frame/tag metadata, an
 Godot animation per Aseprite tag (or a single ``default`` animation if untagged), with
 per-frame timing taken from Aseprite frame durations.
 
-v1 emits ``SpriteFrames`` only (no pivot/origin/hitbox/9-slice). Aseprite tag direction
-isn't represented (Godot animations only loop or not); ``default_loop`` is applied to all.
+Emits ``SpriteFrames`` only (no pivot/origin/hitbox/9-slice). Tag direction determines
+frame order; ping-pong visits each endpoint once and reuses frame durations on return.
+Finite repeats play once. Counts above one add a warning naming the tag, since Godot
+SpriteFrames cannot store repeat counts.
 
 Args:
     output: Destination .tres path (workspace-relative).
@@ -4165,7 +4167,8 @@ Args:
     scale: Integer upscaling factor for the sheet.
     texture_res_path: The ``res://`` path of the sheet inside your Godot project (the
         AtlasTexture atlas). Defaults to ``res://<sheet filename>`` (same-folder import).
-    default_loop: ``loop`` flag for every generated animation (default True).
+    default_loop: ``loop`` flag for untagged sprites and tags without finite repeats
+        (default True). Finite repeats always disable looping.
     overwrite: Replace existing outputs (default False = no-clobber). All three targets
         are validated up front, so nothing is written if any already exists.
 

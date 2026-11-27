@@ -37,8 +37,10 @@ def export_godot_spriteframes(
     Godot animation per Aseprite tag (or a single ``default`` animation if untagged), with
     per-frame timing taken from Aseprite frame durations.
 
-    v1 emits ``SpriteFrames`` only (no pivot/origin/hitbox/9-slice). Aseprite tag direction
-    isn't represented (Godot animations only loop or not); ``default_loop`` is applied to all.
+    Emits ``SpriteFrames`` only (no pivot/origin/hitbox/9-slice). Tag direction determines
+    frame order; ping-pong visits each endpoint once and reuses frame durations on return.
+    Finite repeats play once. Counts above one add a warning naming the tag, since Godot
+    SpriteFrames cannot store repeat counts.
 
     Args:
         output: Destination .tres path (workspace-relative).
@@ -46,7 +48,8 @@ def export_godot_spriteframes(
         scale: Integer upscaling factor for the sheet.
         texture_res_path: The ``res://`` path of the sheet inside your Godot project (the
             AtlasTexture atlas). Defaults to ``res://<sheet filename>`` (same-folder import).
-        default_loop: ``loop`` flag for every generated animation (default True).
+        default_loop: ``loop`` flag for untagged sprites and tags without finite repeats
+            (default True). Finite repeats always disable looping.
         overwrite: Replace existing outputs (default False = no-clobber). All three targets
             are validated up front, so nothing is written if any already exists.
 
@@ -68,8 +71,9 @@ def export_godot_spriteframes(
     )
     sheet_data = json.loads(Path(sheet["data_output"]).read_text(encoding="utf-8"))
 
+    warnings: list[str] = []
     tres_text = godot.build_spriteframes(
-        sheet_data, texture_res_path=res_path, default_loop=default_loop
+        sheet_data, texture_res_path=res_path, default_loop=default_loop, warnings=warnings
     )
     out_tres.write_text(tres_text, encoding="utf-8", newline="\n")
 
@@ -86,6 +90,7 @@ def export_godot_spriteframes(
         created_files=[file_entry("engine_resource", str(out_tres), "tres")],
         exports=[export_entry("spritesheet", sheet["output"], "png",
                               metadata_path=sheet["data_output"])],
+        warnings=warnings,
         suggested_next_actions=[
             f"Copy the .tres and sheet into your Godot project; ensure the sheet imports "
             f"at '{res_path}' (override with texture_res_path if it lives elsewhere).",
