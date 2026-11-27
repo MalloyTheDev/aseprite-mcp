@@ -71,6 +71,13 @@ def test_missing_name_fails():
     assert not r["passed"] and any("name" in e for e in r["errors"])
 
 
+@pytest.mark.parametrize("tool", [asset_spec_tools.validate_asset_spec, asset_spec_tools.plan_asset_spec])
+def test_invalid_asset_spec_manifest_verdict(tool):
+    result = tool({"schema": SCHEMA})
+    assert result["ok"] is True
+    assert result["validation"]["passed"] is False
+
+
 def test_bad_kind_fails():
     r = validate_spec({**CHAR, "kind": "spaceship"})
     assert not r["passed"] and any("kind" in e for e in r["errors"])
