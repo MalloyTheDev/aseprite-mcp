@@ -1319,7 +1319,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) to make a first change, and
 
 ## Contributing
 
-There are three ways in, and the first needs no code.
+There are three ways in, and the first needs no code. This is a volunteer project with no
+budget: there are no bounties or paid tasks, and
+[CONTRIBUTING.md](CONTRIBUTING.md#this-is-a-volunteer-project) says so in full.
 
 - **You use Aseprite.** Try the server on a sprite from your own work. If a tool gives the
   wrong result or setup gets stuck, file a

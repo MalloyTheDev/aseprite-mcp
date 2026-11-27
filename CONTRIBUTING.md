@@ -8,6 +8,14 @@ Pick the route that matches what you have. Each one ends with something you can 
 | New to the code and want a first change | [Make a first Python change](#route-2-make-a-first-python-change) | Python, Git and uv. No Aseprite. |
 | Ready to work on the engine, the tooling or client integrations | [Go deeper](#route-3-go-deeper) | Aseprite for most of it. |
 
+## This is a volunteer project
+
+Aseprite MCP has no budget. Nobody is paid to work on it, the maintainer included, so there
+are no bounties, cash rewards or paid tasks, and opening or merging a pull request does not
+create any claim to payment. The starter issues are written for people who want to learn
+the codebase. Your work stays credited to you in the commit history, and it is
+licensed under the project's [license](LICENSE).
+
 ## Route 1: test a workflow and report it
 
 1. Set the server up with the [README](README.md#install) and your client's
