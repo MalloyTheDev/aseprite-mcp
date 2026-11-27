@@ -4659,7 +4659,8 @@ Return the ordered build steps for an asset spec **without launching Aseprite**.
 The pure dry-run: each step is ``{tool, args, purpose}`` naming the existing tool that
 `build_asset_from_spec` would call. Returns a ``workflow_manifest.v1`` (kind
 ``asset_spec``) with the steps under `plan` and `dry_run=true`. If the spec is invalid,
-returns the validation report instead.
+returns the validation report instead. In that report, `validation.passed` is the
+verdict; `ok` just means the check ran.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
@@ -4708,8 +4709,9 @@ Checks the schema, kind, canvas, per-kind fields, palette, layers, animations
 would produce fits one build. `name` may already carry a `.aseprite`/`.ase`
 extension: it is normalised, not doubled, so `hero` and `hero.aseprite` name the same
 file. Returns a ``workflow_manifest.v1`` (kind ``asset_spec``) with a `validation` block
-`{passed, checks, errors, warnings}`. This does **not** check a finished sprite against
-the spec - that's a separate future tool.
+`{passed, checks, errors, warnings}`. `validation.passed` is the verdict;
+`ok` just means the check ran. To check a finished sprite against the spec, use
+`validate_asset_against_spec`.
 
 | Parameter | Type | Required | Default |
 | --- | --- | --- | --- |
