@@ -58,12 +58,11 @@ client wants.
 | `uv --directory /path/to/aseprite-mcp run aseprite-mcp` | You have a source checkout. This is the form the README and the example config use. |
 | `uv --directory /path/to/aseprite-mcp run python -m aseprite_mcp` | Same, but it does not hold the console script open. See the note below. |
 | `uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp aseprite-mcp` | You would rather not clone. uv fetches and caches the repo itself, at the head of `main`. |
-| `uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp@v0.10.0 aseprite-mcp` | The same, pinned to the latest release. |
+| `uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp@v0.11.0 aseprite-mcp` | The same, pinned to the latest release. |
 
-**Release versus main.** The unpinned forms track `main`, which is ahead of the latest
-release (v0.10.0): it has 152 tools against the 165 on `main`.
-Ask for `health_check` and read `tools_registered` to see which you are running; its
-`version` field still reads 0.9.0 on both. The list of the 13 is in the
+**Release versus main.** The unpinned forms track `main`, which can be ahead of the latest
+release (v0.11.0). Ask for `health_check` and read `version` and `tools_registered` to see
+which you are running: v0.11.0 reports 0.11.0 and 165 tools. More in the
 [README](../README.md#release-versus-main).
 
 **The console-script lock (Windows).** `uv run aseprite-mcp` executes

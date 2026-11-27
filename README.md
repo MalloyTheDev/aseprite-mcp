@@ -651,26 +651,24 @@ can fail with "os error 32"; see [the Windows note in CONTRIBUTING.md](CONTRIBUT
 
 ### Release versus main
 
-The clone above is `main`, which is ahead of the latest release. v0.10.0 has 152 of the
-tools described here and `main` has 165. The 13 that exist only on `main` are
-`apply_color_curve`, `cycle_palette`, `draw_pixel_map`, `export_motion_trail`,
-`import_spritesheet`, `list_palette_usage`, `normalize_edge_runs`, `scaffold_cycle`,
-`seam_occlusion`, `shade_facets`, `squash_stretch_pass`, `surface_emission` and
-`validate_asset_against_spec`. If you want the release, pin it:
+The clone above is `main`, which can be ahead of the latest release, v0.11.0. If you want
+the release, pin it:
 
 ```bash
-git clone --branch v0.10.0 https://github.com/MalloyTheDev/aseprite-mcp.git
-cd aseprite-mcp && uv sync --frozen   # at this tag --locked refuses: its lock predates the version bump
+git clone --branch v0.11.0 https://github.com/MalloyTheDev/aseprite-mcp.git
+cd aseprite-mcp && uv sync --locked
 # or, with no clone (uv fetches and caches that tag):
-uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp@v0.10.0 aseprite-mcp
+uvx --from git+https://github.com/MalloyTheDev/aseprite-mcp@v0.11.0 aseprite-mcp
 ```
 
 Always give `--from`. The bare name `aseprite-mcp` on PyPI is a different, unrelated project,
 so `uvx aseprite-mcp` would run someone else's code, not this server.
 
-To tell which one a running server is, ask for `health_check` and read `tools_registered`
-(152 on v0.10.0, 165 on `main` today). Its `version` field does not tell them apart: it
-still reports 0.9.0 for both.
+To tell which release a running server is, ask for `health_check` and read `version` and
+`tools_registered`: v0.11.0 reports 0.11.0 and 165 tools. v0.10.0 registers 152
+and reports its version as 0.9.0, which was a bug in that release. A checkout of `main` keeps
+reporting the latest release's version until the next one is cut, so quote the commit as
+well when you report a problem from `main`.
 
 ## Configuration
 
