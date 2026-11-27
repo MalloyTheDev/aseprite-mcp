@@ -92,6 +92,13 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **The server reported the wrong version, or none.** `__version__` still said 0.9.0 in
+  the 0.10.0 release, so `health_check` and the release gate header named a version the
+  package was not, and the server version in the MCP handshake was an empty string. All
+  three now give the version in `pyproject.toml`, and a test fails when `__version__` and
+  `pyproject.toml` differ. **`health_check` returns a different `version` value** (the key
+  and its type are unchanged); the old value was wrong.
+
 - **A colour drawn on a grayscale sprite was not the grey Aseprite converts it to.** Both
   grayscale paths in the prelude averaged the channels, so the same art came out
   differently depending on the route: drawn onto a grayscale sprite, or drawn in RGB and

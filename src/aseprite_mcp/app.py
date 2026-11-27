@@ -22,6 +22,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import ToolAnnotations
 
+from . import __version__
 from .core.errors import AsepriteMCPError, UnknownArgumentError
 
 INSTRUCTIONS = """\
@@ -427,4 +428,4 @@ class StrictMCPServer(MCPServer):
             raise ToolError(f"{type(cause).__name__}: {cause}") from cause
 
 
-mcp = StrictMCPServer("aseprite", instructions=INSTRUCTIONS)
+mcp = StrictMCPServer("aseprite", instructions=INSTRUCTIONS, version=__version__)

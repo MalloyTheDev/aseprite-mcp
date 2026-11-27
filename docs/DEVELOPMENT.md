@@ -332,8 +332,9 @@ External links are not fetched; `--external` lists them.
    a link definition at the bottom of the file for the new version.
 4. Update the version in [`pyproject.toml`](../pyproject.toml). Explain the version
    bump in the changelog with the observable changes that justify it. `__version__` in
-   [`src/aseprite_mcp/__init__.py`](../src/aseprite_mcp/__init__.py) is what `health_check`
-   reports, and it is a separate edit.
+   [`src/aseprite_mcp/__init__.py`](../src/aseprite_mcp/__init__.py) is what `health_check`,
+   the release gate header and the MCP handshake report. It is a separate edit, and a test
+   fails until it matches. Run `uv lock` afterwards so the lock records the new version.
 5. Merge the pull request and create an annotated tag on the merge commit. Describe
    the release and include the gate results in the tag message.
 6. Create the GitHub release from the tag. Attach the wheel and source distribution
