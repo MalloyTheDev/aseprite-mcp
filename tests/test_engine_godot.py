@@ -116,7 +116,6 @@ def test_empty_frames_rejected():
         godot.build_spriteframes({"frames": []}, texture_res_path="res://x.png")
 
 
-
 def _animations(tres):
     text = tres.split("animations = ", 1)[1]
     text = re.sub(r'SubResource\("AtlasTexture_(\d+)"\)', r'\1', text)

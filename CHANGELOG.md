@@ -6,43 +6,35 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Docs
+### Changed
 
-- **Contributor docs by audience, a hands-on walkthrough, and a documentation checker.**
-  The README opens with a three-way route (install, try a real workflow, contribute).
-  `CONTRIBUTING.md` is three short routes: test a workflow and report it without code, make a
-  first Python change that is checked locally without Aseprite, and go deeper. The detail
-  moved to `docs/DEVELOPMENT.md`, which now lists what each kind of tool call launches and
-  how the result sentinel is framed. `docs/WALKTHROUGH.md` is new: it calls `ramp_between`
-  (no Aseprite) and `flip_sprite` (a real editor run) by hand and names the command that
-  proves each. `scripts/check_docs.py` is new: it checks relative links, anchors,
-  reference-style link definitions and a few claims that went stale, with no network, and
-  `tests/test_check_docs.py` covers it.
-- **Claims corrected.** Not every operation opens, edits and saves a sprite: some never start
-  Aseprite, some only read, the exports write other files. The sentinels the runner frames
-  with carry a per-run nonce (`@@ASEMCP:<nonce>@@`), and the un-nonced names are legacy.
-  Lua errors come back with the script location removed, not verbatim. The HTTP transports
-  have no host or port setting and listen on `127.0.0.1` port 8000. The install is `main`,
-  which is ahead of the latest release; the README says which tools are only on `main`.
-  `uvx aseprite-mcp` without `--from` runs an unrelated PyPI project of the same name, not
-  this server. Contributor commands use `--locked`. The Aseprite search order replaces a
-  note about one machine. The client guide's Cline CLI path, Windsurf (now Devin) path and
-  Continue file format follow each client's current documentation, and redirected links are
-  updated. Aseprite is described as developed and tested on 1.3.18.6, not as "1.3+".
-- **The test tiers and the release gate say what ran.** `pytest --run-aseprite` with no
-  Aseprite found is now an error rather than a run that skips every editor test and exits 0.
-  A test file that declares no tier fails at setup with the list to add it to, instead of
-  being skipped in silence, and a `pure` test that launches the editor fails locally as it
-  does on CI. `scripts/release_gate.py` checks for the editor before it starts, prints the
-  Aseprite version and each tier's passed and skipped counts, runs from the lock, and fails
-  the editor step if tests were skipped for want of an editor; `--showcase` adds
-  `scripts/verify_showcase.py`, which regenerates the showcase and compares it with the
-  committed images. CI prints its summary line and runs `scripts/check_docs.py`, and so
-  does the gate, so a gate that passes covers every check CI makes.
-  `gen_tool_docs.py --check` names the tool whose entry is out of date.
-- **The bug report form** asks for the release tag or commit rather than the version
-  `health_check` reports, which still says 0.9.0, and has a field for what the reporter
-  asked for and what came back.
+- **Godot SpriteFrames exports preserve tag playback** (#291). Reverse and ping-pong
+  directions now determine frame order, without duplicated ping-pong endpoints. Returning
+  frames retain their durations and share atlas textures. Finite repeat counts disable
+  looping; counts above one warn that the animation plays only once. On re-export,
+  non-forward tags and finite repeats therefore produce different frame lists or loop
+  flags. Untagged sprites and tags without finite repeats still respect `default_loop`.
+
+## [0.11.0] - 2026-11-26
+
+Thirteen tools since 0.10.0, 165 in all, and the server now says more about what it
+measured and what it refused. The new tools are `apply_color_curve`, `cycle_palette`,
+`draw_pixel_map`, `export_motion_trail`, `import_spritesheet`, `list_palette_usage`,
+`normalize_edge_runs`, `scaffold_cycle`, `seam_occlusion`, `shade_facets`,
+`squash_stretch_pass`, `surface_emission` and `validate_asset_against_spec`. `assess_sprite`
+grew fields that say which findings are defects and how a drawing was made, and
+`render_preview` can return the value and silhouette views beside the colour one.
+
+Three changes alter what an existing caller sees, which is why this is a minor release and
+not a patch. A refusal now reaches an MCP client with its message, where it used to arrive
+as a bare "Error executing tool". `export_game_asset_bundle` assesses the art first and
+refuses a sprite with a measured defect. `health_check` reports the real version: its
+`version` field read 0.9.0 through the whole of 0.10.0, and the server version in the MCP
+handshake was empty; both now follow `pyproject.toml`, and a test holds them to it.
+
+The rest is fixes found by using the tools: indexed sprites with a Background layer,
+grayscale colour conversion, export sizes with no bound on them, and reports that named the
+wrong frame or stayed silent about what a pass skipped.
 
 ### Added
 
@@ -90,33 +82,6 @@ All notable changes to this project are documented here. The format is based on
   showcase generator. `tests/test_stdio_refusals.py` checks the refusal from the far side
   of the wire, through the real stdio client, and runs without Aseprite.
 
-### Fixed
-
-- **The server reported the wrong version, or none.** `__version__` still said 0.9.0 in
-  the 0.10.0 release, so `health_check` and the release gate header named a version the
-  package was not, and the server version in the MCP handshake was an empty string. All
-  three now give the version in `pyproject.toml`, and a test fails when `__version__` and
-  `pyproject.toml` differ. **`health_check` returns a different `version` value** (the key
-  and its type are unchanged); the old value was wrong.
-
-- **A colour drawn on a grayscale sprite was not the grey Aseprite converts it to.** Both
-  grayscale paths in the prelude averaged the channels, so the same art came out
-  differently depending on the route: drawn onto a grayscale sprite, or drawn in RGB and
-  converted with `set_color_mode("gray")`. An average also cannot tell apart colours whose
-  channels sum alike, which is the part that loses work rather than merely shifting it:
-  pure red, green and blue each sum to 255, so all three landed on 85 and became one tone,
-  as did yellow and cyan on 170. A shading ramp of distinct hues could therefore arrive
-  with fewer steps than it was given. Both paths now use Rec.709 luma as integers over
-  10000, which reproduces Aseprite's conversion exactly on all 40 colours it was checked
-  against: the integer form is what makes white 255 rather than 254, and the truncation is
-  where yellow's 236 comes from. `desaturate` used Rec.601 (0.299/0.587/0.114), a third
-  formula, and now shares the same one, so desaturating all the way and converting the
-  sprite land on the same tone; a pure green desaturates to 182 where it used to give 150.
-  Grayscale had no tests at all, which is how this went unnoticed; it has twelve now, and
-  the two that pin the fix fail on the previous code.
-
-### Added
-
 - **`squash_stretch_pass`: the contact edge stays where it is** (#90). Scaling a shape
   about its centre shortens it from both ends, so the thing lifts off the surface at the
   moment it should be pressed into it. Measured on a hand-built squash before this
@@ -158,8 +123,6 @@ All notable changes to this project are documented here. The format is based on
   truncating, holding the ends) and five tests hold the tool to the command's own output
   on a real sprite.
 
-### Added
-
 - **`render_preview(views=...)` shows the checks a pixel artist makes by eye.** An agent
   judging its own work can only make the checks it is shown, and it was shown colour
   alone. `views` lays the frame out side by side, labelled, from the same single
@@ -173,7 +136,195 @@ All notable changes to this project are documented here. The format is based on
   rather than shrunk below the pixels. The server's instructions now ask for the views
   after every pass.
 
+- **`export_motion_trail`: every frame of a motion composited into one image, the oldest
+  faintest** (#77). The way to judge whether a whole motion reads: arc shape, spacing and
+  squash are visible at once in a still that can be studied, where a GIF moves on before a
+  defect can be seen and `export_onion_skin` shows only a few frames either side of one.
+  Frame i of n is drawn at opacity 255 * i / n, so the last is opaque and on top; frames
+  come from a tag, an explicit list in the order given, or the whole sprite. An opaque
+  Background would bury every frame under the next, the last at full opacity covering the
+  lot, so when there is one it is laid once underneath and the frames contribute their
+  other layers. The scaled image is held to the canvas caps before anything is scaled.
+  (163 tools.)
+
+- **`import_spritesheet`: a sheet image becomes a sprite with one frame per cell** (#93).
+  The inbound seam for art made elsewhere, a PixelPrep strip or a downloaded sheet, and the
+  reverse of `export_spritesheet`. Aseprite's own Import Sprite Sheet does the slicing;
+  `layout` is `horizontal` (one row), `vertical` (one column) or `grid` (rows, read left to
+  right and top to bottom). A cell size that does not divide the sheet is refused, never
+  cropped or padded, and the refusal happens in Python from the image header before
+  Aseprite is launched, naming the sizes that would divide; an `.aseprite` sheet, which has
+  no header Pillow reads, gets the same refusal once it is open. A cell that holds nothing
+  still becomes a frame, and `empty_frames` lists them, so a grid's spare cells at the end
+  are visible as such. A sheet with frames of its own (a GIF) is refused rather than sliced
+  from its first frame. At most 4,096 frames: measured, 16,384 frames of 2x2 import in
+  0.6s, so the cap is not about time but about a cell-size mistake on a large sheet asking
+  for millions of frames.
+
+  **An opaque indexed sheet keeps its Background, and with it the colour at the transparent
+  palette index.** Measured while building this: the importer renders the cells onto a new,
+  transparent layer, where that index means "no pixel", so on a PNG with no transparency
+  whatever was drawn in palette entry 0 vanished (a whole frame of the test sheet). The
+  layer is made a Background again with the fill set to that same index, which rewrites
+  those pixels with the value they already hold. Restoring the Background with Aseprite's
+  default fill instead painted them with an entry the palette did not have. (162 tools.)
+
+- **`validate_asset_against_spec`: whether the sprite that got built matches the spec it
+  was built from.** `validate_asset_spec` asks whether a document is well formed and
+  `plan_asset_spec` what it would do; neither asked whether the artifact and the
+  declaration agree, and that gap is where this project's worst bugs have lived. A figure
+  shipped with no keyline because `add_outline` was pointed at a layer that had just been
+  created and was empty, and every count in the result reported success.
+
+  Structure only, like `build_asset_from_spec`: canvas, layer names including those nested
+  in groups, frame count, tag names, slice names and palette capacity. The spec layer
+  declares no pixels, so this verifies none; `assess_sprite` is where the drawing is
+  judged. `verifiable` is returned separately from `ok`, so a spec that declares nothing
+  checkable comes back ok and unverifiable rather than simply ok: "nothing was wrong" and
+  "nothing was checked" must not read the same. The comparison itself is the pure
+  `core.asset_spec.compare_to_built`, testable without launching Aseprite. 161 tools.
+
+- **`assess_sprite` reports how a drawing was made**, as `metrics.craft` from the new
+  `core.craft`: the size distribution of single-colour regions, which says whether colour
+  was placed or painted; the run lengths down the silhouette's edges, which say whether it
+  was drawn or ruled; how luminance distributes; and whether the darkest colour is the one
+  bounding the drawing. None of the existing measures could say that three of the four
+  reference pieces this project was being compared against are not pixel art: 85 to 96
+  percent of their colour clusters are single pixels, and they carry 3,000 to 145,000
+  colours.
+
+  **It produces no readings, on purpose.** Three thresholds were written for these
+  measures and the ranking gate over `tests/corpus` discarded all three the same day:
+  singleton share AUC 0.619 with 132 discordant pairs, share in clusters of eight AUC
+  0.674 with 116, edge variety AUC 0.168 with 277. Good art here runs 0 to 68 percent
+  singleton regions and bad art 36 to 47, so the ranges overlap and the good side is the
+  wider one; edge variety inverts outright, because a sprite sheet's panels have perfectly
+  straight edges and are perfectly good art. The numbers describe a drawing and do not
+  judge one, and a test pins that verdict so the idea is not tried again blind.
+
+- **`black_floor` in `assess_sprite`'s ramp lints: how close a ramp's darkest step comes
+  to pure black.** A ramp built with a wide `light_range` around a dark base can clip its
+  first step to `#000000`, darker than any usable keyline, at which point the keyline
+  stops being measurable; `ramp_chroma` cannot see it, because a step at pure black has no
+  hue and so is not a grey step. It catches the three ramps that actually failed this way,
+  which a test rebuilds.
+
+  Reported, not judged. Asked to judge alone it fired on two of the eleven known-good
+  showcase ramps, WOOD at `#060402` and RIBBON at `#000000`, and both are right: that art
+  uses black as its own darkest value and has no outline to lose. A step at pure black is
+  only a fault relative to a keyline, which a ramp does not know; where the keyline is
+  known, `craft.ramp_floor_clears` makes the comparison.
+
+- **`scaffold_cycle`: one named cycle, at the frame count the craft actually uses**
+  (#91 item 2). `walk|run|idle|attack|hurt|death` at 8, 6, 4, 5, 2 and 6 frames, one tag
+  per phase (`walk_contactL`, `walk_downL`, ...) rather than numbered poses, and
+  durations shaped by `apply_timing_curve` instead of left uniform: walk comes out
+  `[250, 100, 100, 100, 250, 100, 100, 100]`, attack `[240, 24, 200, 80, 80]`.
+
+  Loop versus one-shot is the part that is easy to get wrong and was verified by reading
+  the saved sprite back rather than by trusting the call: attack, hurt and death carry
+  `repeats = 1` on **every** tag including the per-phase ones, because a per-phase tag
+  left at 0 says "hold this pose forever". `validate_loop` is the independent check, and
+  it behaves accordingly: it reports the wrap on `walk` and says nothing about `death`,
+  because `tag_loops` is derived from `repeats == 0`.
+
+  Added **alongside** `make_4_frame_idle_animation` and `make_8_direction_walk_template`
+  rather than replacing them as #91 proposed. Removing a registered tool is a breaking
+  change for every caller and belongs in a release decision of its own; what to do about
+  the overlap is recorded on the issue.
+
+- **`cycle_palette` and `list_palette_usage`: palette cycling, and the measurement that
+  says what is worth cycling** (#128). `list_palette_usage` reports which palette indices
+  the art actually draws with, as runs of consecutive entries, so the run worth cycling is
+  visible before anything is animated. `cycle_palette` rotates such a run across new
+  frames.
+
+  **Aseprite's Lua API exposes no per-frame palette**, and that was established by probing
+  the editor (1.3.18.6) rather than assumed. `#spr.palettes` stays 1 on a fresh indexed
+  sprite; `Palette(4).frame` is nil and assigning to it raises on `__setters`; the
+  `palettes` collection is read-only to assignment, `table.insert` and `length`;
+  `Sprite:newPalette` and `Sprite:deletePalette` do not exist; `Palette{frame = 2}`
+  returns a plain Lua table that `setPalette` rejects as `PaletteObj expected, got
+  table`; and both `spr:setPalette` and `app.command.LoadPalette` replace palette 1
+  whatever frame is current, with the reopened file holding one palette.
+
+  So the rotation is applied to the pixels' own indices, and the result says which
+  mechanism ran (`method: "pixel_remap"`) rather than implying the other. On an indexed
+  sprite the two are the same picture, the move is exact because it never resolves a
+  colour through `nearest_index`, and the palette comes back byte for byte.
+
+### Changed
+
+- **The server's instructions teach the method that produces better art.** They ended
+  with "`create_sprite`, then draw, then preview", and every client reads them before its
+  first call. They now say what this project's own output showed: pick the route by
+  subject (detailed subjects are where hand-placed output has been weakest, so convert a
+  source image when one exists; icons, props and small sprites draw well by hand), plan
+  the ramps first, block in with shapes, finish as placed pixels through
+  `get_pixels(format="map")` and `draw_pixel_map`, shade one material at a time, look at
+  `render_preview` after every pass, and treat a clean `assess_sprite` as the absence of
+  measured faults rather than a verdict. A test holds every tool and argument the
+  instructions name to the registered set, so a rename cannot leave them teaching a call
+  that fails.
+
+- **`export_game_asset_bundle` judges the art before it writes anything.** Every frame
+  is assessed the way `assess_sprite` judges one, all of them in a single launch with
+  identical frames scored once (`inspect.assess_frames`), and the result is the
+  manifest's new `assessment` section. A *defect* refuses the bundle, naming the frames
+  and the fix: an absent keyline on a figure of several masses, or, with the new `ramp`
+  argument, a drawn pixel off it. `allow_defects=True` bundles anyway and records them
+  as `warnings`. The ramp is refused before anything is launched, like every tool's, and
+  on an indexed sprite whose palette cannot hold it exactly the harness's reading of what
+  it became goes in `assessment.palette` and in a refusal for pixels off it, since the
+  palette may be why they are off it. Every other reading is an observation, listed and never blocking,
+  because observations do not separate good art from poor: calibrated on 22 pieces from
+  this repository (showcase and probe sprites, the death knight and warden judged poor,
+  two potions drawn for a comparison, three template placeholders), the item sheet, the
+  best art here, drew three observations and the death knight five, while the
+  featureless walk-cycle blob drew none. The defect tier fired once, on a head whose
+  keyline is 5% of the drawing, and not on the death knight or the warden, so this gate
+  stops the measured faults and makes no claim to judge whether art is good. Past
+  `MAX_ASSESS_PIXELS` in total an even sample including the first and last frame is
+  judged; a frame past it alone is not judged, and the manifest says so. Calibration
+  timing: under 1.3 s for 1 to 12 frames, under 5 s for 24 frames of 96x64.
+
+- **The documentation describes what merged with #231 to #235.** The README gains a
+  "Bring art in from elsewhere" workflow (`import_image`, `import_spritesheet`, palette
+  limiting, `export_motion_trail`), and its `render_preview` row, smear section (written
+  while #226 was open), security bounds and notes on indexed Backgrounds and fills are
+  brought up to date. `SECURITY.md` records the image check on every tool that opens an
+  outside image and the new bounds on rendered output. `docs/HEADLESS.md` gains a section
+  of measured answers that are not what they look like (`Sprite:newFrame` returning the
+  original, an indexed Background drawn over its transparent index's colour,
+  `ImportSpriteSheet` rendering onto a transparent layer) and the colour-bar measurement
+  that justifies the prelude setting it, beside the section warning against writing
+  preferences. `docs/CLIENTS.md` counts twenty-one read-only tools, and the server's
+  instructions say how outside art comes in.
+
 ### Fixed
+
+- **The server reported the wrong version, or none.** `__version__` still said 0.9.0 in
+  the 0.10.0 release, so `health_check` and the release gate header named a version the
+  package was not, and the server version in the MCP handshake was an empty string. All
+  three now give the version in `pyproject.toml`, and a test fails when `__version__` and
+  `pyproject.toml` differ. **`health_check` returns a different `version` value** (the key
+  and its type are unchanged); the old value was wrong.
+
+- **A colour drawn on a grayscale sprite was not the grey Aseprite converts it to.** Both
+  grayscale paths in the prelude averaged the channels, so the same art came out
+  differently depending on the route: drawn onto a grayscale sprite, or drawn in RGB and
+  converted with `set_color_mode("gray")`. An average also cannot tell apart colours whose
+  channels sum alike, which is the part that loses work rather than merely shifting it:
+  pure red, green and blue each sum to 255, so all three landed on 85 and became one tone,
+  as did yellow and cyan on 170. A shading ramp of distinct hues could therefore arrive
+  with fewer steps than it was given. Both paths now use Rec.709 luma as integers over
+  10000, which reproduces Aseprite's conversion exactly on all 40 colours it was checked
+  against: the integer form is what makes white 255 rather than 254, and the truncation is
+  where yellow's 236 comes from. `desaturate` used Rec.601 (0.299/0.587/0.114), a third
+  formula, and now shares the same one, so desaturating all the way and converting the
+  sprite land on the same tone; a pure green desaturates to 182 where it used to give 150.
+  Grayscale had no tests at all, which is how this went unnoticed; it has twelve now, and
+  the two that pin the fix fail on the previous code.
 
 - **Tools that read the layer they draw on treated an indexed Background's transparent
   index as empty.** The writes were fixed earlier; the reads were not, so the same scene
@@ -228,76 +379,6 @@ All notable changes to this project are documented here. The format is based on
   `READ_ONLY_TOOLS`, the same miss the set's own comment records for three earlier tools,
   and a test now names it as it names them.
 
-### Changed
-
-- **Godot SpriteFrames exports preserve tag playback** (#291). Reverse and ping-pong
-  directions now determine frame order, without duplicated ping-pong endpoints. Returning
-  frames retain their durations and share atlas textures. Finite repeat counts disable
-  looping; counts above one warn that the animation plays only once. On re-export,
-  non-forward tags and finite repeats therefore produce different frame lists or loop
-  flags. Untagged sprites and tags without finite repeats still respect `default_loop`.
-
-- **The server's instructions teach the method that produces better art.** They ended
-  with "`create_sprite`, then draw, then preview", and every client reads them before its
-  first call. They now say what this project's own output showed: pick the route by
-  subject (detailed subjects are where hand-placed output has been weakest, so convert a
-  source image when one exists; icons, props and small sprites draw well by hand), plan
-  the ramps first, block in with shapes, finish as placed pixels through
-  `get_pixels(format="map")` and `draw_pixel_map`, shade one material at a time, look at
-  `render_preview` after every pass, and treat a clean `assess_sprite` as the absence of
-  measured faults rather than a verdict. A test holds every tool and argument the
-  instructions name to the registered set, so a rename cannot leave them teaching a call
-  that fails.
-
-- **`export_game_asset_bundle` judges the art before it writes anything.** Every frame
-  is assessed the way `assess_sprite` judges one, all of them in a single launch with
-  identical frames scored once (`inspect.assess_frames`), and the result is the
-  manifest's new `assessment` section. A *defect* refuses the bundle, naming the frames
-  and the fix: an absent keyline on a figure of several masses, or, with the new `ramp`
-  argument, a drawn pixel off it. `allow_defects=True` bundles anyway and records them
-  as `warnings`. The ramp is refused before anything is launched, like every tool's, and
-  on an indexed sprite whose palette cannot hold it exactly the harness's reading of what
-  it became goes in `assessment.palette` and in a refusal for pixels off it, since the
-  palette may be why they are off it. Every other reading is an observation, listed and never blocking,
-  because observations do not separate good art from poor: calibrated on 22 pieces from
-  this repository (showcase and probe sprites, the death knight and warden judged poor,
-  two potions drawn for a comparison, three template placeholders), the item sheet, the
-  best art here, drew three observations and the death knight five, while the
-  featureless walk-cycle blob drew none. The defect tier fired once, on a head whose
-  keyline is 5% of the drawing, and not on the death knight or the warden, so this gate
-  stops the measured faults and makes no claim to judge whether art is good. Past
-  `MAX_ASSESS_PIXELS` in total an even sample including the first and last frame is
-  judged; a frame past it alone is not judged, and the manifest says so. Calibration
-  timing: under 1.3 s for 1 to 12 frames, under 5 s for 24 frames of 96x64.
-
-- **The documentation describes what merged with #231 to #235.** The README gains a
-  "Bring art in from elsewhere" workflow (`import_image`, `import_spritesheet`, palette
-  limiting, `export_motion_trail`), and its `render_preview` row, smear section (written
-  while #226 was open), security bounds and notes on indexed Backgrounds and fills are
-  brought up to date. `SECURITY.md` records the image check on every tool that opens an
-  outside image and the new bounds on rendered output. `docs/HEADLESS.md` gains a section
-  of measured answers that are not what they look like (`Sprite:newFrame` returning the
-  original, an indexed Background drawn over its transparent index's colour,
-  `ImportSpriteSheet` rendering onto a transparent layer) and the colour-bar measurement
-  that justifies the prelude setting it, beside the section warning against writing
-  preferences. `docs/CLIENTS.md` counts twenty-one read-only tools, and the server's
-  instructions say how outside art comes in.
-
-### Added
-
-- **`export_motion_trail`: every frame of a motion composited into one image, the oldest
-  faintest** (#77). The way to judge whether a whole motion reads: arc shape, spacing and
-  squash are visible at once in a still that can be studied, where a GIF moves on before a
-  defect can be seen and `export_onion_skin` shows only a few frames either side of one.
-  Frame i of n is drawn at opacity 255 * i / n, so the last is opaque and on top; frames
-  come from a tag, an explicit list in the order given, or the whole sprite. An opaque
-  Background would bury every frame under the next, the last at full opacity covering the
-  lot, so when there is one it is laid once underneath and the frames contribute their
-  other layers. The scaled image is held to the canvas caps before anything is scaled.
-  (163 tools.)
-
-### Fixed
-
 - **No export bounded `scale`, and `render_preview` ignored the sprite's size.** Every
   export handed `scale` straight to Aseprite, so a 16x16 sprite at scale 50000 asked for
   an 800,000-pixel-square image. They now refuse a scaled image past the canvas caps
@@ -316,8 +397,6 @@ All notable changes to this project are documented here. The format is based on
   `export_spritesheet_packed` refused a negative value only. Both now take 0 to 64
   (`MAX_SHEET_PADDING`): an engine needs 1 to 4 px to stop frames bleeding, and extrude
   covers a frame's own edge.
-
-### Fixed
 
 - **On an indexed sprite's Background, the transparent index's own colour could not be
   drawn.** A colour resolves to the nearest palette entry, and the transparent index is
@@ -344,8 +423,6 @@ All notable changes to this project are documented here. The format is based on
   back, so the editor's own colours are untouched. On an indexed sprite the fill is the
   transparent index, which a Background shows as that entry's colour, so no index changes
   and converting the layer back restores the transparency.
-
-### Fixed
 
 - **An indexed sprite's Background was read as transparent wherever it held the
   transparent palette index**, which Aseprite draws as a colour there. On an ordinary layer
@@ -376,32 +453,6 @@ All notable changes to this project are documented here. The format is based on
   the transparent index's still resolves to the nearest other entry, so
   `fill_layer("#000000")` painted a black-at-index-0 Background red and reported `ok`.
 
-### Added
-
-- **`import_spritesheet`: a sheet image becomes a sprite with one frame per cell** (#93).
-  The inbound seam for art made elsewhere, a PixelPrep strip or a downloaded sheet, and the
-  reverse of `export_spritesheet`. Aseprite's own Import Sprite Sheet does the slicing;
-  `layout` is `horizontal` (one row), `vertical` (one column) or `grid` (rows, read left to
-  right and top to bottom). A cell size that does not divide the sheet is refused, never
-  cropped or padded, and the refusal happens in Python from the image header before
-  Aseprite is launched, naming the sizes that would divide; an `.aseprite` sheet, which has
-  no header Pillow reads, gets the same refusal once it is open. A cell that holds nothing
-  still becomes a frame, and `empty_frames` lists them, so a grid's spare cells at the end
-  are visible as such. A sheet with frames of its own (a GIF) is refused rather than sliced
-  from its first frame. At most 4,096 frames: measured, 16,384 frames of 2x2 import in
-  0.6s, so the cap is not about time but about a cell-size mistake on a large sheet asking
-  for millions of frames.
-
-  **An opaque indexed sheet keeps its Background, and with it the colour at the transparent
-  palette index.** Measured while building this: the importer renders the cells onto a new,
-  transparent layer, where that index means "no pixel", so on a PNG with no transparency
-  whatever was drawn in palette entry 0 vanished (a whole frame of the test sheet). The
-  layer is made a Background again with the fill set to that same index, which rewrites
-  those pixels with the value they already hold. Restoring the Background with Aseprite's
-  default fill instead painted them with an entry the palette did not have. (162 tools.)
-
-### Fixed
-
 - **Four tools opened an outside image without the size guard.** `check_image_dimensions`
   refuses an image whose header declares more than the canvas caps, because a
   solid-colour PNG a few kilobytes on disk can declare 16384x16384 and Aseprite allocates
@@ -410,8 +461,6 @@ All notable changes to this project are documented here. The format is based on
   All four now refuse before anything is launched or created, every image of a
   reference sequence included, and a test over all five entry points pins that the
   refusal comes before the launch.
-
-### Fixed
 
 - **`add_frame(copy_from=N)` and `duplicate_frame(N)` named the original as the new
   frame, and `add_frame` gave it the duration meant for the copy** (#222). Both returned
@@ -459,96 +508,6 @@ All notable changes to this project are documented here. The format is based on
   layer. It now refuses, naming the layer and frame and saying what to point it at, as
   `link_cels` already refuses a frame with no cel. Nothing with art changes: the six
   showcase generators that call it reproduce all nine of their images byte for byte.
-
-### Added
-
-- **`validate_asset_against_spec`: whether the sprite that got built matches the spec it
-  was built from.** `validate_asset_spec` asks whether a document is well formed and
-  `plan_asset_spec` what it would do; neither asked whether the artifact and the
-  declaration agree, and that gap is where this project's worst bugs have lived. A figure
-  shipped with no keyline because `add_outline` was pointed at a layer that had just been
-  created and was empty, and every count in the result reported success.
-
-  Structure only, like `build_asset_from_spec`: canvas, layer names including those nested
-  in groups, frame count, tag names, slice names and palette capacity. The spec layer
-  declares no pixels, so this verifies none; `assess_sprite` is where the drawing is
-  judged. `verifiable` is returned separately from `ok`, so a spec that declares nothing
-  checkable comes back ok and unverifiable rather than simply ok: "nothing was wrong" and
-  "nothing was checked" must not read the same. The comparison itself is the pure
-  `core.asset_spec.compare_to_built`, testable without launching Aseprite. 161 tools.
-
-- **`assess_sprite` reports how a drawing was made**, as `metrics.craft` from the new
-  `core.craft`: the size distribution of single-colour regions, which says whether colour
-  was placed or painted; the run lengths down the silhouette's edges, which say whether it
-  was drawn or ruled; how luminance distributes; and whether the darkest colour is the one
-  bounding the drawing. None of the existing measures could say that three of the four
-  reference pieces this project was being compared against are not pixel art: 85 to 96
-  percent of their colour clusters are single pixels, and they carry 3,000 to 145,000
-  colours.
-
-  **It produces no readings, on purpose.** Three thresholds were written for these
-  measures and the ranking gate over `tests/corpus` discarded all three the same day:
-  singleton share AUC 0.619 with 132 discordant pairs, share in clusters of eight AUC
-  0.674 with 116, edge variety AUC 0.168 with 277. Good art here runs 0 to 68 percent
-  singleton regions and bad art 36 to 47, so the ranges overlap and the good side is the
-  wider one; edge variety inverts outright, because a sprite sheet's panels have perfectly
-  straight edges and are perfectly good art. The numbers describe a drawing and do not
-  judge one, and a test pins that verdict so the idea is not tried again blind.
-
-- **`black_floor` in `assess_sprite`'s ramp lints: how close a ramp's darkest step comes
-  to pure black.** A ramp built with a wide `light_range` around a dark base can clip its
-  first step to `#000000`, darker than any usable keyline, at which point the keyline
-  stops being measurable; `ramp_chroma` cannot see it, because a step at pure black has no
-  hue and so is not a grey step. It catches the three ramps that actually failed this way,
-  which a test rebuilds.
-
-  Reported, not judged. Asked to judge alone it fired on two of the eleven known-good
-  showcase ramps, WOOD at `#060402` and RIBBON at `#000000`, and both are right: that art
-  uses black as its own darkest value and has no outline to lose. A step at pure black is
-  only a fault relative to a keyline, which a ramp does not know; where the keyline is
-  known, `craft.ramp_floor_clears` makes the comparison.
-
-### Added
-
-- **`scaffold_cycle`: one named cycle, at the frame count the craft actually uses**
-  (#91 item 2). `walk|run|idle|attack|hurt|death` at 8, 6, 4, 5, 2 and 6 frames, one tag
-  per phase (`walk_contactL`, `walk_downL`, ...) rather than numbered poses, and
-  durations shaped by `apply_timing_curve` instead of left uniform: walk comes out
-  `[250, 100, 100, 100, 250, 100, 100, 100]`, attack `[240, 24, 200, 80, 80]`.
-
-  Loop versus one-shot is the part that is easy to get wrong and was verified by reading
-  the saved sprite back rather than by trusting the call: attack, hurt and death carry
-  `repeats = 1` on **every** tag including the per-phase ones, because a per-phase tag
-  left at 0 says "hold this pose forever". `validate_loop` is the independent check, and
-  it behaves accordingly: it reports the wrap on `walk` and says nothing about `death`,
-  because `tag_loops` is derived from `repeats == 0`.
-
-  Added **alongside** `make_4_frame_idle_animation` and `make_8_direction_walk_template`
-  rather than replacing them as #91 proposed. Removing a registered tool is a breaking
-  change for every caller and belongs in a release decision of its own; what to do about
-  the overlap is recorded on the issue.
-
-- **`cycle_palette` and `list_palette_usage`: palette cycling, and the measurement that
-  says what is worth cycling** (#128). `list_palette_usage` reports which palette indices
-  the art actually draws with, as runs of consecutive entries, so the run worth cycling is
-  visible before anything is animated. `cycle_palette` rotates such a run across new
-  frames.
-
-  **Aseprite's Lua API exposes no per-frame palette**, and that was established by probing
-  the editor (1.3.18.6) rather than assumed. `#spr.palettes` stays 1 on a fresh indexed
-  sprite; `Palette(4).frame` is nil and assigning to it raises on `__setters`; the
-  `palettes` collection is read-only to assignment, `table.insert` and `length`;
-  `Sprite:newPalette` and `Sprite:deletePalette` do not exist; `Palette{frame = 2}`
-  returns a plain Lua table that `setPalette` rejects as `PaletteObj expected, got
-  table`; and both `spr:setPalette` and `app.command.LoadPalette` replace palette 1
-  whatever frame is current, with the reopened file holding one palette.
-
-  So the rotation is applied to the pixels' own indices, and the result says which
-  mechanism ran (`method: "pixel_remap"`) rather than implying the other. On an indexed
-  sprite the two are the same picture, the move is exact because it never resolves a
-  colour through `nearest_index`, and the palette comes back byte for byte.
-
-### Fixed
 
 - **`smear_frame` was the one ramp-taking tool that never said what its ramp becomes on
   an indexed palette** (#173, the other half of #145). #145's mechanism is the Lua
@@ -627,9 +586,6 @@ All notable changes to this project are documented here. The format is based on
   while `create_sprite`, `set_palette`, `add_frame`, `set_cel_position`,
   `set_all_frame_durations`, `add_tag` and the two tilemap calls report nothing at all.
 
-
-### Fixed
-
 - **A value nested past the parser's limit was refused differently on each platform, and
   not at all when it arrived already parsed** (#215). `MAX_PROPERTY_DEPTH` is enforced by
   `_check_tree`, which runs after `json.loads`, and `json` walks the nesting in C: how
@@ -674,6 +630,44 @@ All notable changes to this project are documented here. The format is based on
   editing a tool. They arrived with new ones, so a new tool that takes a `ramp` or a
   region fails the suite until it is given the cap or exempted with the reason it needs
   none.
+
+### Docs
+
+- **Contributor docs by audience, a hands-on walkthrough, and a documentation checker.**
+  The README opens with a three-way route (install, try a real workflow, contribute).
+  `CONTRIBUTING.md` is three short routes: test a workflow and report it without code, make a
+  first Python change that is checked locally without Aseprite, and go deeper. The detail
+  moved to `docs/DEVELOPMENT.md`, which now lists what each kind of tool call launches and
+  how the result sentinel is framed. `docs/WALKTHROUGH.md` is new: it calls `ramp_between`
+  (no Aseprite) and `flip_sprite` (a real editor run) by hand and names the command that
+  proves each. `scripts/check_docs.py` is new: it checks relative links, anchors,
+  reference-style link definitions and a few claims that went stale, with no network, and
+  `tests/test_check_docs.py` covers it.
+- **Claims corrected.** Not every operation opens, edits and saves a sprite: some never start
+  Aseprite, some only read, the exports write other files. The sentinels the runner frames
+  with carry a per-run nonce (`@@ASEMCP:<nonce>@@`), and the un-nonced names are legacy.
+  Lua errors come back with the script location removed, not verbatim. The HTTP transports
+  have no host or port setting and listen on `127.0.0.1` port 8000. The install is `main`,
+  which is ahead of the latest release; the README says which tools are only on `main`.
+  `uvx aseprite-mcp` without `--from` runs an unrelated PyPI project of the same name, not
+  this server. Contributor commands use `--locked`. The Aseprite search order replaces a
+  note about one machine. The client guide's Cline CLI path, Windsurf (now Devin) path and
+  Continue file format follow each client's current documentation, and redirected links are
+  updated. Aseprite is described as developed and tested on 1.3.18.6, not as "1.3+".
+- **The test tiers and the release gate say what ran.** `pytest --run-aseprite` with no
+  Aseprite found is now an error rather than a run that skips every editor test and exits 0.
+  A test file that declares no tier fails at setup with the list to add it to, instead of
+  being skipped in silence, and a `pure` test that launches the editor fails locally as it
+  does on CI. `scripts/release_gate.py` checks for the editor before it starts, prints the
+  Aseprite version and each tier's passed and skipped counts, runs from the lock, and fails
+  the editor step if tests were skipped for want of an editor; `--showcase` adds
+  `scripts/verify_showcase.py`, which regenerates the showcase and compares it with the
+  committed images. CI prints its summary line and runs `scripts/check_docs.py`, and so
+  does the gate, so a gate that passes covers every check CI makes.
+  `gen_tool_docs.py --check` names the tool whose entry is out of date.
+- **The bug report form** asks for the release tag or commit rather than the version
+  `health_check` reports, which still says 0.9.0, and has a field for what the reporter
+  asked for and what came back.
 
 ## [0.10.0] - 2026-10-02
 
@@ -2180,7 +2174,8 @@ and the Aseprite CLI.
 - **GUI companion mode**: `open_in_editor` opens a sprite in the live Aseprite window
   (non-blocking) so headless edits can be watched via Aseprite's reload-on-change.
 
-[Unreleased]: https://github.com/MalloyTheDev/aseprite-mcp/compare/v0.10.0...main
+[Unreleased]: https://github.com/MalloyTheDev/aseprite-mcp/compare/v0.11.0...main
+[0.11.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.11.0
 [0.10.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.10.0
 [0.9.0]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.9.0
 [0.8.1]: https://github.com/MalloyTheDev/aseprite-mcp/releases/tag/v0.8.1
