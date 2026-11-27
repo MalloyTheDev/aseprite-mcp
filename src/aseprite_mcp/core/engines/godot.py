@@ -5,9 +5,10 @@ Turns Aseprite ``--format json-array`` sprite-sheet metadata into a Godot 4
 animation when the sprite is untagged), each frame an ``AtlasTexture`` region into the
 exported sheet, with per-frame timing derived from Aseprite frame durations.
 
-v1 scope: SpriteFrames only, no pivot/origin/hitbox/9-slice. Aseprite tag *direction*
-(reverse/pingpong) is not represented (Godot animations only carry a ``loop`` flag); every
-animation uses the caller's ``default_loop``.
+Tag direction is encoded in frame order, with ping-pong endpoints visited only once.
+Finite repeats play once; counts above one produce a warning because SpriteFrames cannot
+store repeat counts. Tags without finite repeats use the caller's ``default_loop``.
+Scope: SpriteFrames only, no pivot/origin/hitbox/9-slice.
 
 Pure-Python (no Aseprite, no IO). The resource text targets Godot 4 (``format=3``).
 """
@@ -46,7 +47,9 @@ def _mode_ms(durations: list[int]) -> int:
     return max(1, int(base))
 
 
-def _animation_specs(frame_count: int, tags: list[dict], default_loop: bool) -> list[dict]:
+def _animation_specs(
+    frame_count: int, tags: list[dict], default_loop: bool, warnings: list[str],
+) -> list[dict]:
     """Resolve (name, frame-index list, loop) for each Godot animation.
 
     Untagged sprites get one `default` animation over every frame. Tag from/to are
@@ -60,7 +63,19 @@ def _animation_specs(frame_count: int, tags: list[dict], default_loop: bool) -> 
         lo = max(0, int(tag.get("from", 0)))
         hi = min(frame_count - 1, int(tag.get("to", frame_count - 1)))
         indices = list(range(lo, hi + 1)) if lo <= hi else []
-        specs.append({"name": str(tag.get("name", "")), "indices": indices, "loop": default_loop})
+        direction = tag.get("direction", "forward")
+        if direction in {"reverse", "pingpong_reverse"}:
+            indices.reverse()
+        if direction in {"pingpong", "pingpong_reverse"}:
+            indices.extend(indices[-2:0:-1])
+        name = str(tag.get("name", ""))
+        repeat = int(tag.get("repeat", 0))
+        if repeat > 1:
+            warnings.append(
+                f"Tag '{name}' requests repeat count {repeat}; Godot SpriteFrames cannot "
+                "represent repeat counts, so it will play once."
+            )
+        specs.append({"name": name, "indices": indices, "loop": False if repeat > 0 else default_loop})
     return specs
 
 
@@ -69,16 +84,19 @@ def build_spriteframes(
     *,
     texture_res_path: str,
     default_loop: bool = True,
+    warnings: list[str] | None = None,
 ) -> str:
     """Build a Godot 4 ``SpriteFrames`` .tres from Aseprite json-array sheet metadata.
 
     Args:
         sheet_data: Parsed Aseprite ``--format json-array`` data. Requires ``frames`` as a
             *list* of ``{"frame": {"x","y","w","h"}, "duration": <ms>}``; reads optional
-            tags from ``meta.frameTags`` (``[{"name","from","to"}]``).
+            tags from ``meta.frameTags`` (name, from, to, direction and repeat).
         texture_res_path: The ``res://`` path of the exported sheet PNG inside the Godot
             project (referenced as the AtlasTexture atlas).
-        default_loop: ``loop`` flag applied to every generated animation.
+        default_loop: ``loop`` flag for untagged sprites and tags without finite repeats.
+        warnings: If supplied, append a warning for each tag with a repeat count above
+            one. Positive counts (strings or integers) play once; zero means forever.
 
     Returns the .tres file text.
     """
@@ -91,7 +109,7 @@ def build_spriteframes(
         raise ValueError("sheet_data has no frames.")
 
     tags = (sheet_data.get("meta") or {}).get("frameTags") or []
-    specs = _animation_specs(len(frames), tags, default_loop)
+    specs = _animation_specs(len(frames), tags, default_loop, warnings if warnings is not None else [])
 
     # One AtlasTexture per frame actually referenced by an animation (sorted, deduped).
     referenced = sorted({i for spec in specs for i in spec["indices"]})
