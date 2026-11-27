@@ -230,6 +230,13 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
+- **Godot SpriteFrames exports preserve tag playback** (#291). Reverse and ping-pong
+  directions now determine frame order, without duplicated ping-pong endpoints. Returning
+  frames retain their durations and share atlas textures. Finite repeat counts disable
+  looping; counts above one warn that the animation plays only once. On re-export,
+  non-forward tags and finite repeats therefore produce different frame lists or loop
+  flags. Untagged sprites and tags without finite repeats still respect `default_loop`.
+
 - **The server's instructions teach the method that produces better art.** They ended
   with "`create_sprite`, then draw, then preview", and every client reads them before its
   first call. They now say what this project's own output showed: pick the route by
